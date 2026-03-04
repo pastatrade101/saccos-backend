@@ -1,37 +1,212 @@
 .authShell {
   min-height: 100vh;
-  display: grid;
-  place-items: center;
-  padding: 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
   background:
     radial-gradient(circle at top left, rgba(31, 168, 230, 0.18), transparent 24%),
-    var(--gradient-fintech);
+    linear-gradient(180deg, rgba(10, 5, 115, 0.08), rgba(31, 168, 230, 0.04)),
+    var(--surface-canvas);
 }
 
-.authCard {
-  width: min(470px, 100%);
-  padding: 1.8rem;
-  border-radius: 0.85rem;
-  background: color-mix(in srgb, var(--surface-panel) 94%, white);
-  border: 1px solid color-mix(in srgb, var(--surface-panel) 80%, white);
-  box-shadow: 0 22px 48px rgba(10, 5, 115, 0.2);
-  backdrop-filter: blur(12px);
+.authFrame {
+  width: min(1180px, 100%);
+  min-height: min(760px, calc(100vh - 4rem));
+  display: grid;
+  grid-template-columns: minmax(360px, 1.08fr) minmax(420px, 0.92fr);
+  background: var(--surface-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 1.5rem;
+  overflow: hidden;
+  box-shadow: 0 30px 80px rgba(10, 5, 115, 0.16);
+}
+
+.authVisual {
+  position: relative;
+  isolation: isolate;
+  min-height: 100%;
+  background: var(--primary-900);
+}
+
+.authVisualImage {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.authVisualOverlay {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(10, 5, 115, 0.16), rgba(10, 5, 115, 0.74)),
+    linear-gradient(135deg, rgba(10, 5, 115, 0.84), rgba(31, 168, 230, 0.58));
+}
+
+.authVisualContent {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 3rem;
+  color: white;
+}
+
+.authVisualEyebrow {
+  display: inline-flex;
+  width: fit-content;
+  padding: 0.45rem 0.75rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.authVisualTitle {
+  margin: 1.1rem 0 0;
+  font-size: clamp(1.9rem, 3.4vw, 3rem);
+  line-height: 1.02;
+  letter-spacing: -0.06em;
+}
+
+.authVisualCopy {
+  margin: 0.35rem 0 0;
+  color: rgba(255, 255, 255, 0.84);
+  font-size: 1rem;
+  line-height: 1.7;
+}
+
+.authVisualMetrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 2rem;
+}
+
+.authVisualMetric {
+  padding: 1rem 1.05rem;
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(10px);
+}
+
+.authVisualMetric strong {
+  display: block;
+  font-size: 0.95rem;
+}
+
+.authVisualMetric span {
+  display: block;
+  margin-top: 0.35rem;
+  color: rgba(255, 255, 255, 0.76);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.authPanel {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 3rem;
+  background: color-mix(in srgb, var(--surface-card) 96%, white);
+}
+
+.authPanelTop {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.75rem;
+}
+
+.authPanelTop > div {
+  flex: 1;
+}
+
+.authPanelEyebrow {
+  display: block;
+  color: var(--accent-700);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .authTitle {
   margin: 0;
-  font-size: 2.15rem;
+  font-size: clamp(2rem, 3vw, 3rem);
   letter-spacing: -0.04em;
+  line-height: 1;
 }
 
 .authCopy {
-  margin: 0.5rem 0 1.25rem;
+  margin: 0.65rem 0 0;
   color: var(--text-muted);
+  line-height: 1.7;
+}
+
+.authThemeToggle {
+  flex-shrink: 0;
+  width: 2.75rem;
+  height: 2.75rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  color: var(--text-primary);
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+}
+
+.authThemeToggle:hover {
+  background: color-mix(in srgb, var(--surface-soft) 78%, var(--accent-100));
+  border-color: color-mix(in srgb, var(--border-subtle) 55%, var(--accent-500));
+}
+
+.authThemeToggle:active {
+  transform: translateY(1px);
 }
 
 .form {
   display: grid;
   gap: 1rem;
+}
+
+.authPanelFooter {
+  display: grid;
+  gap: 0.9rem;
+  margin-top: 1.5rem;
+}
+
+.authFooterItem {
+  padding: 1rem 1rem 1.05rem;
+  border-radius: 1rem;
+  background: var(--surface-soft);
+  border: 1px solid var(--border-subtle);
+}
+
+.authFooterItem strong {
+  display: block;
+  font-size: 0.9rem;
+  color: var(--text-primary);
+}
+
+.authFooterItem span {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 0.86rem;
+  color: var(--text-secondary);
+  line-height: 1.55;
 }
 
 .sectionHeader {
@@ -118,6 +293,29 @@
 }
 
 @media (max-width: 900px) {
+  .authShell {
+    padding: 1rem;
+  }
+
+  .authFrame {
+    min-height: auto;
+    grid-template-columns: 1fr;
+  }
+
+  .authVisual {
+    min-height: 300px;
+  }
+
+  .authVisualContent,
+  .authPanel {
+    padding: 1.5rem;
+  }
+
+  .authPanelTop {
+    flex-direction: column;
+  }
+
+  .authVisualMetrics,
   .metricGrid,
   .reportGrid {
     grid-template-columns: 1fr;

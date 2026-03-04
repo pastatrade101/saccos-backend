@@ -10,7 +10,12 @@ import {
     Stack,
     Typography
 } from "@mui/material";
+import AccountBalanceWalletRoundedIcon from "@mui/icons-material/AccountBalanceWalletRounded";
+import PaymentsRoundedIcon from "@mui/icons-material/PaymentsRounded";
+import PieChartRoundedIcon from "@mui/icons-material/PieChartRounded";
+import ReceiptLongRoundedIcon from "@mui/icons-material/ReceiptLongRounded";
 import { alpha, useTheme } from "@mui/material/styles";
+import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -126,6 +131,110 @@ function MetricCard({ label, value, helper }: { label: string; value: string; he
                         {helper}
                     </Typography>
                 ) : null}
+            </CardContent>
+        </Card>
+    );
+}
+
+function BranchManagerTopCard({
+    label,
+    value,
+    helper,
+    status,
+    tone,
+    icon,
+    featured = false,
+    footer
+}: {
+    label: string;
+    value: string;
+    helper: string;
+    status: string;
+    tone: "positive" | "negative" | "neutral";
+    icon: ReactNode;
+    featured?: boolean;
+    footer?: ReactNode;
+}) {
+    const theme = useTheme();
+    const toneMap = {
+        positive: {
+            main: theme.palette.success.main,
+            soft: alpha(theme.palette.success.main, 0.12)
+        },
+        negative: {
+            main: theme.palette.error.main,
+            soft: alpha(theme.palette.error.main, 0.12)
+        },
+        neutral: {
+            main: theme.palette.primary.main,
+            soft: alpha(theme.palette.primary.main, 0.08)
+        }
+    }[tone];
+
+    return (
+        <Card
+            variant="outlined"
+            sx={{
+                height: "100%",
+                borderColor: alpha(toneMap.main, featured ? 0.28 : 0.18),
+                background: featured
+                    ? `linear-gradient(135deg, ${alpha(toneMap.main, 0.08)}, ${theme.palette.background.paper})`
+                    : theme.palette.background.paper,
+                boxShadow: featured ? `0 16px 34px ${alpha(toneMap.main, 0.08)}` : "none"
+            }}
+        >
+            <CardContent sx={{ height: "100%", p: featured ? 3 : 2.5 }}>
+                <Stack spacing={featured ? 2.25 : 1.75} sx={{ height: "100%" }}>
+                    <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={2}>
+                        <Stack spacing={0.75}>
+                            <Typography variant="overline" color="text.secondary">
+                                {label}
+                            </Typography>
+                            <Typography variant={featured ? "h4" : "h5"} sx={{ lineHeight: 1 }}>
+                                {value}
+                            </Typography>
+                        </Stack>
+                        <Box
+                            sx={{
+                                width: featured ? 46 : 40,
+                                height: featured ? 46 : 40,
+                                borderRadius: 2,
+                                bgcolor: toneMap.soft,
+                                color: toneMap.main,
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                flexShrink: 0
+                            }}
+                        >
+                            {icon}
+                        </Box>
+                    </Stack>
+
+                    <Typography variant="body2" color="text.secondary" sx={{ minHeight: featured ? 44 : 40 }}>
+                        {helper}
+                    </Typography>
+
+                    <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1.5}>
+                        <Chip
+                            label={status}
+                            size="small"
+                            variant="outlined"
+                            sx={{
+                                fontWeight: 700,
+                                color: toneMap.main,
+                                borderColor: alpha(toneMap.main, 0.2),
+                                bgcolor: toneMap.soft
+                            }}
+                        />
+                    </Stack>
+
+                    {footer ? (
+                        <Box sx={{ pt: 0.5 }}>
+                            {footer}
+                        </Box>
+                    ) : null}
+                </Stack>
             </CardContent>
         </Card>
     );
@@ -840,45 +949,66 @@ export function DashboardPage() {
                 </Grid>
             ) : role === "branch_manager" ? (
                 <Grid container spacing={2}>
-                    <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
-                        <KpiCard
+                    <Grid size={{ xs: 12, xl: 5 }}>
+                        <BranchManagerTopCard
                             label="Branch Savings Position"
-                            value={metrics.branchSavings}
-                            deltaLabel={buildDeltaLabel(branchNetMovement, 0, "net movement")}
-                            statusLabel={branchNetMovement >= 0 ? "Savings inflow positive" : "Outflow pressure"}
-                            sparkline={branchCashTrend.map(([, value]) => value)}
+                            value={formatCurrency(metrics.branchSavings)}
+                            helper="Current branch-controlled savings position based on posted member savings movements and cash-side activity."
+                            status={branchNetMovement >= 0 ? "Net movement positive" : "Outflow pressure"}
+                            icon={<AccountBalanceWalletRoundedIcon fontSize="small" />}
                             tone={branchNetMovement >= 0 ? "positive" : "negative"}
+                            featured
+                            footer={
+                                <Grid container spacing={1.25}>
+                                    <Grid size={{ xs: 6 }}>
+                                        <Box sx={{ p: 1.25, borderRadius: 2, bgcolor: alpha(theme.palette.success.main, 0.08) }}>
+                                            <Typography variant="caption" color="text.secondary">Active members</Typography>
+                                            <Typography variant="subtitle1" fontWeight={700}>{metrics.branchActiveMembers}</Typography>
+                                        </Box>
+                                    </Grid>
+                                    <Grid size={{ xs: 6 }}>
+                                        <Box sx={{ p: 1.25, borderRadius: 2, bgcolor: alpha(theme.palette.warning.main, 0.1) }}>
+                                            <Typography variant="caption" color="text.secondary">Overdue loans</Typography>
+                                            <Typography variant="subtitle1" fontWeight={700}>{metrics.branchOverdueLoans}</Typography>
+                                        </Box>
+                                    </Grid>
+                                </Grid>
+                            }
                         />
                     </Grid>
-                    <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
-                        <KpiCard
-                            label="Deposit Intake"
-                            value={metrics.branchDepositIntake}
-                            deltaLabel={buildDeltaLabel(metrics.branchDepositIntake, branchDepositAverage, "vs recent avg")}
-                            statusLabel={metrics.branchDepositIntake >= branchDepositAverage ? "Member funding strong" : "Below branch pace"}
-                            sparkline={branchDepositSeries}
-                            tone={getDeltaTone(metrics.branchDepositIntake, branchDepositAverage)}
-                        />
-                    </Grid>
-                    <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
-                        <KpiCard
-                            label="Share Contributions"
-                            value={metrics.branchContributionTotal}
-                            deltaLabel={buildDeltaLabel(metrics.branchContributionTotal, branchContributionAverage, "vs recent avg")}
-                            statusLabel={metrics.branchContributionTotal >= branchContributionAverage ? "Capital growth healthy" : "Contribution pace softer"}
-                            sparkline={branchContributionSeries}
-                            tone={getDeltaTone(metrics.branchContributionTotal, branchContributionAverage)}
-                        />
-                    </Grid>
-                    <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
-                        <KpiCard
-                            label="Loan Portfolio"
-                            value={metrics.branchOutstanding}
-                            deltaLabel={`${metrics.branchOverdueLoans} overdue loans`}
-                            statusLabel={metrics.branchOverdueLoans > 0 ? "Collection action needed" : "Portfolio quality stable"}
-                            sparkline={metrics.branchLoans.slice(0, 7).reverse().map((loan) => loan.outstanding_principal)}
-                            tone={metrics.branchOverdueLoans > 0 ? "negative" : "positive"}
-                        />
+                    <Grid size={{ xs: 12, xl: 7 }}>
+                        <Grid container spacing={2}>
+                            <Grid size={{ xs: 12, md: 4 }}>
+                                <BranchManagerTopCard
+                                    label="Deposit Intake"
+                                    value={formatCurrency(metrics.branchDepositIntake)}
+                                    helper={buildDeltaLabel(metrics.branchDepositIntake, branchDepositAverage, "vs recent branch average")}
+                                    status={metrics.branchDepositIntake >= branchDepositAverage ? "Funding pace healthy" : "Below recent pace"}
+                                    icon={<PaymentsRoundedIcon fontSize="small" />}
+                                    tone={getDeltaTone(metrics.branchDepositIntake, branchDepositAverage)}
+                                />
+                            </Grid>
+                            <Grid size={{ xs: 12, md: 4 }}>
+                                <BranchManagerTopCard
+                                    label="Share Contributions"
+                                    value={formatCurrency(metrics.branchContributionTotal)}
+                                    helper={buildDeltaLabel(metrics.branchContributionTotal, branchContributionAverage, "vs recent branch average")}
+                                    status={metrics.branchContributionTotal >= branchContributionAverage ? "Capital build-up healthy" : "Contribution pace softer"}
+                                    icon={<PieChartRoundedIcon fontSize="small" />}
+                                    tone={getDeltaTone(metrics.branchContributionTotal, branchContributionAverage)}
+                                />
+                            </Grid>
+                            <Grid size={{ xs: 12, md: 4 }}>
+                                <BranchManagerTopCard
+                                    label="Loan Portfolio"
+                                    value={formatCurrency(metrics.branchOutstanding)}
+                                    helper={`${metrics.branchLoans.length} active branch loans under supervision.`}
+                                    status={metrics.branchOverdueLoans > 0 ? "Collection action needed" : "Portfolio quality stable"}
+                                    icon={<ReceiptLongRoundedIcon fontSize="small" />}
+                                    tone={metrics.branchOverdueLoans > 0 ? "negative" : "positive"}
+                                />
+                            </Grid>
+                        </Grid>
                     </Grid>
                 </Grid>
             ) : (

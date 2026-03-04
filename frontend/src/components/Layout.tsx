@@ -436,61 +436,28 @@ export function AppLayout() {
                 );
             })}
 
-            <Box sx={{ mt: "auto" }}>
-                <Paper
-                    variant="outlined"
+            <Box
+                sx={{
+                    mt: "auto",
+                    pt: 1.5,
+                    borderTop: `1px solid ${isDarkMode ? alpha(theme.palette.common.white, 0.08) : alpha(brandColors.primary[900], 0.08)}`
+                }}
+            >
+                <Typography
+                    variant="caption"
                     sx={{
-                        p: 1.5,
-                        borderRadius: 2,
-                        bgcolor: sidebarPanelBg,
-                        borderColor: isDarkMode ? alpha(theme.palette.common.white, 0.08) : theme.palette.divider,
-                        color: sidebarText
+                        display: "block",
+                        textAlign: "center",
+                        color: sidebarMuted,
+                        fontSize: 11,
+                        letterSpacing: 0.06,
+                        textTransform: "uppercase"
                     }}
                 >
-                    <Stack spacing={1}>
-                        <Stack direction="row" justifyContent="space-between">
-                            <Typography variant="caption" sx={{ color: sidebarMuted }}>Signed in</Typography>
-                            <Typography variant="caption" sx={{ color: sidebarText }}>{user?.email || "Unknown user"}</Typography>
-                        </Stack>
-                        <Stack direction="row" justifyContent="space-between">
-                            <Typography variant="caption" sx={{ color: sidebarMuted }}>Role</Typography>
-                            <Typography variant="caption" sx={{ color: sidebarText }}>{displayRole}</Typography>
-                        </Stack>
-                        {platformRole ? (
-                            <Stack direction="row" justifyContent="space-between">
-                                <Typography variant="caption" sx={{ color: sidebarMuted }}>SaaS Role</Typography>
-                                <Typography variant="caption" sx={{ color: sidebarText }}>{displayPlatformRole}</Typography>
-                            </Stack>
-                        ) : null}
-                        <Stack direction="row" justifyContent="space-between">
-                            <Typography variant="caption" sx={{ color: sidebarMuted }}>Plan</Typography>
-                            <Typography variant="caption" sx={{ color: sidebarText }}>{subscription?.plan ? subscription.plan.toUpperCase() : "N/A"}</Typography>
-                        </Stack>
-                    </Stack>
-                </Paper>
-
-                {import.meta.env.DEV && (
-                    <Paper
-                        variant="outlined"
-                        sx={{
-                            p: 1.5,
-                            borderRadius: 2,
-                            mt: 1.5,
-                            bgcolor: isDarkMode ? alpha("#ffffff", 0.04) : alpha(brandColors.primary[100], 0.4),
-                            borderColor: isDarkMode ? alpha("#ffffff", 0.1) : theme.palette.divider,
-                            color: sidebarText
-                        }}
-                    >
-                        <Typography variant="overline" sx={{ color: sidebarMuted }}>
-                            Dev Tools
-                        </Typography>
-                        <Typography variant="caption" display="block">user_id: {user?.id || "n/a"}</Typography>
-                        <Typography variant="caption" display="block">tenant_id: {profile?.tenant_id || selectedTenantId || "n/a"}</Typography>
-                        <Typography variant="caption" display="block">branch_id: {selectedBranchId || "n/a"}</Typography>
-                        <Typography variant="caption" display="block">last_error: {lastApiError ? `${lastApiError.code} - ${lastApiError.message}` : "none"}</Typography>
-                    </Paper>
-                )}
+                    Copyright 2026 All rights reserved
+                </Typography>
             </Box>
+
         </Box>
     );
 
