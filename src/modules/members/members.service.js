@@ -163,13 +163,14 @@ async function getDefaultMemberProducts(tenantId) {
     };
 }
 
-async function appendMembershipStatusHistory({ tenantId, memberId, statusCode, changedBy, notes = null }) {
+async function appendMembershipStatusHistory({ tenantId, memberId, applicationId = null, statusCode, changedBy, notes = null }) {
     const { error } = await adminSupabase.from("membership_status_history").insert({
         tenant_id: tenantId,
         member_id: memberId,
-        status_code: statusCode,
+        application_id: applicationId,
+        status: statusCode,
         changed_by: changedBy,
-        notes
+        reason: notes
     });
 
     if (error) {

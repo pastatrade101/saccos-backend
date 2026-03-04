@@ -32,7 +32,7 @@ router.post("/withdraw", authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER, ROL
 router.post("/share-contribution", authorize([ROLES.SUPER_ADMIN, ROLES.TELLER], { allowInternalOps: false }), requireFeature("contributions_enabled"), validate(shareContributionSchema), idempotency, controller.shareContribution);
 router.post("/dividend-allocation", authorize([ROLES.SUPER_ADMIN], { allowInternalOps: false }), requireFeature("dividends_enabled"), validate(dividendAllocationSchema), controller.dividendAllocation);
 router.post("/transfer", authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER, ROLES.TELLER], { allowInternalOps: false }), validate(transferSchema), idempotency, controller.transfer);
-router.post("/loan/disburse", authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER, ROLES.LOAN_OFFICER], { allowInternalOps: false }), requireFeature("loans_enabled"), validate(loanDisburseSchema), idempotency, controller.loanDisburse);
+router.post("/loan/disburse", authorize([ROLES.LOAN_OFFICER, ROLES.TELLER], { allowInternalOps: false }), requireFeature("loans_enabled"), validate(loanDisburseSchema), idempotency, controller.loanDisburse);
 router.post("/loan/repay", authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER, ROLES.LOAN_OFFICER, ROLES.TELLER], { allowInternalOps: false }), requireFeature("loans_enabled"), validate(loanRepaySchema), idempotency, controller.loanRepay);
 router.post("/interest-accrual", authorize([ROLES.SUPER_ADMIN], { allowInternalOps: false }), validate(accrualSchema), controller.accrueInterest);
 router.post("/close-period", authorize([ROLES.SUPER_ADMIN], { allowInternalOps: false }), validate(closePeriodSchema), controller.closePeriod);

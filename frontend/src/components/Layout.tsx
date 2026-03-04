@@ -90,7 +90,7 @@ const navItems: NavItem[] = [
     { to: "/dividends", label: "Dividends", roles: ["branch_manager"], section: "finance", icon: EventRepeatRoundedIcon },
     { to: "/cash", label: "Cash Desk", roles: ["teller"], section: "finance", icon: PaidRoundedIcon },
     { to: "/cash-control", label: "Cash Control", roles: ["super_admin", "branch_manager", "auditor"], section: "finance", icon: PaidRoundedIcon },
-    { to: "/loans", label: "Loans", roles: ["loan_officer"], section: "finance", icon: SummarizeRoundedIcon },
+    { to: "/loans", label: "Loans", roles: ["branch_manager", "loan_officer", "teller"], section: "finance", icon: SummarizeRoundedIcon },
     { to: "/reports", label: "Reports", roles: ["super_admin", "branch_manager", "loan_officer"], section: "finance", icon: DescriptionRoundedIcon },
     { to: "/auditor/reports", label: "Reports", roles: ["auditor"], section: "finance", icon: DescriptionRoundedIcon }
 ];

@@ -5,6 +5,7 @@ const { assertTenantAccess } = require("../../services/user-context.service");
 
 const TABLE_LABELS = {
     savings_products: "Savings product",
+    loan_products: "Loan product",
     share_products: "Share product",
     fee_rules: "Fee rule",
     penalty_rules: "Penalty rule",
@@ -107,6 +108,7 @@ async function getBootstrap(actor) {
 
     const [
         savingsProducts,
+        loanProducts,
         shareProducts,
         feeRules,
         penaltyRules,
@@ -114,6 +116,7 @@ async function getBootstrap(actor) {
         chartOfAccounts
     ] = await Promise.all([
         listRows(actor, "savings_products", "name"),
+        listRows(actor, "loan_products", "name"),
         listRows(actor, "share_products", "name"),
         listRows(actor, "fee_rules", "name"),
         listRows(actor, "penalty_rules", "name"),
@@ -135,6 +138,7 @@ async function getBootstrap(actor) {
 
     return {
         savings_products: savingsProducts,
+        loan_products: loanProducts,
         share_products: shareProducts,
         fee_rules: feeRules,
         penalty_rules: penaltyRules,
@@ -148,6 +152,9 @@ module.exports = {
     listSavingsProducts: (actor) => listRows(actor, "savings_products", "name"),
     createSavingsProduct: (actor, payload) => createRow(actor, "savings_products", payload),
     updateSavingsProduct: (actor, id, payload) => updateRow(actor, "savings_products", id, payload),
+    listLoanProducts: (actor) => listRows(actor, "loan_products", "name"),
+    createLoanProduct: (actor, payload) => createRow(actor, "loan_products", payload),
+    updateLoanProduct: (actor, id, payload) => updateRow(actor, "loan_products", id, payload),
     listShareProducts: (actor) => listRows(actor, "share_products", "name"),
     createShareProduct: (actor, payload) => createRow(actor, "share_products", payload),
     updateShareProduct: (actor, id, payload) => updateRow(actor, "share_products", id, payload),

@@ -1,4 +1,5 @@
 import AddRoundedIcon from "@mui/icons-material/AddRounded";
+import CreditScoreRoundedIcon from "@mui/icons-material/CreditScoreRounded";
 import RuleRoundedIcon from "@mui/icons-material/RuleRounded";
 import SavingsRoundedIcon from "@mui/icons-material/SavingsRounded";
 import ShareRoundedIcon from "@mui/icons-material/PieChartRounded";
@@ -29,6 +30,7 @@ import { useToast } from "../components/Toast";
 import { api, getApiErrorMessage } from "../lib/api";
 import {
     endpoints,
+    type LoanProductsResponse,
     type ProductBootstrapResponse,
     type FeeRulesResponse,
     type PenaltyRulesResponse,
@@ -39,6 +41,7 @@ import {
 import type {
     ChartOfAccountOption,
     FeeRule,
+    LoanProduct,
     PenaltyRule,
     PostingRule,
     ProductBootstrapPayload,
@@ -47,8 +50,8 @@ import type {
 } from "../types/api";
 import { formatCurrency } from "../utils/format";
 
-type CatalogKind = "savings" | "shares" | "fees" | "penalties" | "posting-rules";
-type CatalogRecord = SavingsProduct | ShareProduct | FeeRule | PenaltyRule | PostingRule;
+type CatalogKind = "loans" | "savings" | "shares" | "fees" | "penalties" | "posting-rules";
+type CatalogRecord = LoanProduct | SavingsProduct | ShareProduct | FeeRule | PenaltyRule | PostingRule;
 
 interface CatalogDialogState {
     kind: CatalogKind;
@@ -57,6 +60,7 @@ interface CatalogDialogState {
 
 const emptyPayload: ProductBootstrapPayload = {
     savings_products: [],
+    loan_products: [],
     share_products: [],
     fee_rules: [],
     penalty_rules: [],
@@ -160,6 +164,13 @@ export function ProductCatalogPage() {
             const id = dialog.record && "id" in dialog.record ? dialog.record.id : null;
 
             switch (dialog.kind) {
+                case "loans":
+                    if (isEdit && id) {
+                        await api.patch<LoanProductsResponse>(`${endpoints.products.loans()}/${id}`, values);
+                    } else {
+                        await api.post<LoanProductsResponse>(endpoints.products.loans(), values);
+                    }
+                    break;
                 case "savings":
                     if (isEdit && id) {
                         await api.patch<SavingsProductsResponse>(`${endpoints.products.savings()}/${id}`, values);
@@ -222,6 +233,7 @@ export function ProductCatalogPage() {
 
         const kind = dialog.kind;
         const titleMap: Record<CatalogKind, string> = {
+            loans: "Loan Product",
             savings: "Savings Product",
             shares: "Share Product",
             fees: "Fee Rule",
@@ -244,6 +256,27 @@ export function ProductCatalogPage() {
                 <DialogTitle>{dialog.record ? `Edit ${titleMap[kind]}` : `New ${titleMap[kind]}`}</DialogTitle>
                 <DialogContent dividers>
                     <Grid container spacing={2} sx={{ mt: 0.25 }}>
+                        {kind === "loans" ? (
+                            <>
+                                <Grid size={{ xs: 12, md: 4 }}><TextField fullWidth label="Code" {...form.register("code")} /></Grid>
+                                <Grid size={{ xs: 12, md: 8 }}><TextField fullWidth label="Name" {...form.register("name")} /></Grid>
+                                <Grid size={{ xs: 12 }}><TextField fullWidth label="Description" {...form.register("description")} /></Grid>
+                                <Grid size={{ xs: 12, md: 3 }}><TextField select fullWidth label="Interest method" defaultValue={form.getValues("interest_method") || "reducing_balance"} {...form.register("interest_method")}><MenuItem value="reducing_balance">Reducing balance</MenuItem><MenuItem value="flat">Flat</MenuItem></TextField></Grid>
+                                <Grid size={{ xs: 12, md: 3 }}><TextField fullWidth type="number" label="Annual interest %" {...form.register("annual_interest_rate", { valueAsNumber: true })} /></Grid>
+                                <Grid size={{ xs: 12, md: 3 }}><TextField fullWidth type="number" label="Min amount" {...form.register("min_amount", { valueAsNumber: true })} /></Grid>
+                                <Grid size={{ xs: 12, md: 3 }}><TextField fullWidth type="number" label="Max amount" {...form.register("max_amount", { valueAsNumber: true })} /></Grid>
+                                <Grid size={{ xs: 12, md: 3 }}><TextField fullWidth type="number" label="Min term" {...form.register("min_term_count", { valueAsNumber: true })} /></Grid>
+                                <Grid size={{ xs: 12, md: 3 }}><TextField fullWidth type="number" label="Max term" {...form.register("max_term_count", { valueAsNumber: true })} /></Grid>
+                                <Grid size={{ xs: 12, md: 3 }}><TextField fullWidth type="number" label="Insurance %" {...form.register("insurance_rate", { valueAsNumber: true })} /></Grid>
+                                <Grid size={{ xs: 12, md: 3 }}><TextField fullWidth type="number" label="Required guarantors" {...form.register("required_guarantors_count", { valueAsNumber: true })} /></Grid>
+                                <Grid size={{ xs: 12, md: 3 }}>{accountSelect("receivable_account_id", "Receivable account")}</Grid>
+                                <Grid size={{ xs: 12, md: 3 }}>{accountSelect("interest_income_account_id", "Interest income account")}</Grid>
+                                <Grid size={{ xs: 12, md: 3 }}>{accountSelect("fee_income_account_id", "Fee income account")}</Grid>
+                                <Grid size={{ xs: 12, md: 3 }}>{accountSelect("penalty_income_account_id", "Penalty income account")}</Grid>
+                                <Grid size={{ xs: 12, md: 6 }}><TextField select fullWidth label="Default product" defaultValue={String(Boolean(form.getValues("is_default")))} {...form.register("is_default")}><MenuItem value="true">Default</MenuItem><MenuItem value="false">No</MenuItem></TextField></Grid>
+                                <Grid size={{ xs: 12, md: 6 }}><TextField select fullWidth label="Status" defaultValue={form.getValues("status") || "active"} {...form.register("status")}><MenuItem value="active">Active</MenuItem><MenuItem value="inactive">Inactive</MenuItem></TextField></Grid>
+                            </>
+                        ) : null}
                         {kind === "savings" ? (
                             <>
                                 <Grid size={{ xs: 12, md: 4 }}><TextField fullWidth label="Code" {...form.register("code")} /></Grid>
@@ -338,6 +371,26 @@ export function ProductCatalogPage() {
             </Alert>
 
             <Grid container spacing={3}>
+                <Grid size={{ xs: 12, xl: 6 }}>
+                    <SectionCard
+                        title="Loan products"
+                        helper="Pricing, tenor controls, and ledger mappings that govern application, appraisal, and disbursement."
+                        icon={<CreditScoreRoundedIcon color="primary" />}
+                        action={<Button startIcon={<AddRoundedIcon />} variant="contained" onClick={() => openDialog("loans")}>Add loan product</Button>}
+                    >
+                        <DataTable
+                            rows={payload.loan_products}
+                            columns={[
+                                { key: "name", header: "Product", render: (row) => <Button onClick={() => openDialog("loans", row)}>{row.name}</Button> },
+                                { key: "code", header: "Code", render: (row) => row.code },
+                                { key: "pricing", header: "Pricing", render: (row) => `${row.annual_interest_rate}% · ${row.interest_method.replace(/_/g, " ")}` },
+                                { key: "range", header: "Range", render: (row) => `${formatCurrency(row.min_amount)} · ${row.max_amount ? formatCurrency(row.max_amount) : "Open cap"}` },
+                                { key: "term", header: "Term", render: (row) => `${row.min_term_count} - ${row.max_term_count ?? "Open"}` }
+                            ]}
+                            emptyMessage={loading ? "Loading loan products..." : "No loan products configured."}
+                        />
+                    </SectionCard>
+                </Grid>
                 <Grid size={{ xs: 12, xl: 6 }}>
                     <SectionCard
                         title="Savings products"

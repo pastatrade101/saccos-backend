@@ -648,17 +648,21 @@ async function postImportedLoan({ actor, tenantId, branchId, member, row }) {
         };
     }
 
-    const result = await financeService.loanDisburse(actor, {
-        tenant_id: tenantId,
-        member_id: member.id,
-        branch_id: branchId,
-        principal_amount: loanAmount,
-        annual_interest_rate: interestRate,
-        term_count: Math.round(termMonths),
-        repayment_frequency: "monthly",
-        reference: externalLoanReference || `IMPORT-LOAN-${member.member_no || member.id}`,
-        description: `Imported loan opening balance for ${member.full_name}`
-    });
+    const result = await financeService.loanDisburse(
+        actor,
+        {
+            tenant_id: tenantId,
+            member_id: member.id,
+            branch_id: branchId,
+            principal_amount: loanAmount,
+            annual_interest_rate: interestRate,
+            term_count: Math.round(termMonths),
+            repayment_frequency: "monthly",
+            reference: externalLoanReference || `IMPORT-LOAN-${member.member_no || member.id}`,
+            description: `Imported loan opening balance for ${member.full_name}`
+        },
+        { skipWorkflow: true }
+    );
 
     await logAudit({
         tenantId,

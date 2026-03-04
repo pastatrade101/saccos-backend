@@ -30,6 +30,29 @@ const shareProductSchema = z.object({
     fee_income_account_id: uuid.optional().nullable()
 });
 
+const loanProductSchema = z.object({
+    code: z.string().trim().min(2).max(40),
+    name: z.string().trim().min(3).max(120),
+    description: optionalString,
+    interest_method: z.enum(["reducing_balance", "flat"]).default("reducing_balance"),
+    annual_interest_rate: z.coerce.number().min(0).max(100).default(18),
+    min_amount: z.coerce.number().min(0).default(0),
+    max_amount: z.coerce.number().min(0).optional().nullable(),
+    min_term_count: z.coerce.number().int().positive().default(1),
+    max_term_count: z.coerce.number().int().positive().optional().nullable(),
+    insurance_rate: z.coerce.number().min(0).default(0),
+    required_guarantors_count: z.coerce.number().int().min(0).default(0),
+    eligibility_rules_json: z.record(z.string(), z.any()).optional().default({}),
+    processing_fee_rule_id: uuid.optional().nullable(),
+    penalty_rule_id: uuid.optional().nullable(),
+    receivable_account_id: uuid,
+    interest_income_account_id: uuid,
+    fee_income_account_id: uuid.optional().nullable(),
+    penalty_income_account_id: uuid.optional().nullable(),
+    is_default: z.boolean().default(false),
+    status: z.enum(["active", "inactive"]).default("active")
+});
+
 const feeRuleSchema = z.object({
     code: z.string().trim().min(2).max(60),
     name: z.string().trim().min(3).max(120),
@@ -65,6 +88,8 @@ const postingRuleSchema = z.object({
 module.exports = {
     savingsProductSchema,
     updateSavingsProductSchema: savingsProductSchema.partial(),
+    loanProductSchema,
+    updateLoanProductSchema: loanProductSchema.partial(),
     shareProductSchema,
     updateShareProductSchema: shareProductSchema.partial(),
     feeRuleSchema,

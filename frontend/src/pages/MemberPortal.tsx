@@ -1,19 +1,23 @@
 import AccountBalanceWalletRoundedIcon from "@mui/icons-material/AccountBalanceWalletRounded";
+import ApprovalRoundedIcon from "@mui/icons-material/ApprovalRounded";
 import AutoGraphRoundedIcon from "@mui/icons-material/AutoGraphRounded";
 import ChevronLeftRoundedIcon from "@mui/icons-material/ChevronLeftRounded";
 import CreditScoreRoundedIcon from "@mui/icons-material/CreditScoreRounded";
 import DarkModeRoundedIcon from "@mui/icons-material/DarkModeRounded";
 import EastRoundedIcon from "@mui/icons-material/EastRounded";
+import HourglassTopRoundedIcon from "@mui/icons-material/HourglassTopRounded";
 import LightModeRoundedIcon from "@mui/icons-material/LightModeRounded";
 import LogoutRoundedIcon from "@mui/icons-material/LogoutRounded";
 import MenuRoundedIcon from "@mui/icons-material/MenuRounded";
 import MoreHorizRoundedIcon from "@mui/icons-material/MoreHorizRounded";
 import NotificationsRoundedIcon from "@mui/icons-material/NotificationsRounded";
 import NorthEastRoundedIcon from "@mui/icons-material/NorthEastRounded";
+import TaskAltRoundedIcon from "@mui/icons-material/TaskAltRounded";
 import SearchRoundedIcon from "@mui/icons-material/SearchRounded";
 import SavingsRoundedIcon from "@mui/icons-material/SavingsRounded";
 import TimelineRoundedIcon from "@mui/icons-material/TimelineRounded";
 import TrendingUpRoundedIcon from "@mui/icons-material/TrendingUpRounded";
+import HighlightOffRoundedIcon from "@mui/icons-material/HighlightOffRounded";
 import WalletRoundedIcon from "@mui/icons-material/WalletRounded";
 import {
     Alert,
@@ -22,6 +26,10 @@ import {
     Button,
     Card,
     CardContent,
+    Dialog,
+    DialogActions,
+    DialogContent,
+    DialogTitle,
     Chip,
     Drawer,
     Grid,
@@ -31,23 +39,52 @@ import {
     ListItemButton,
     ListItemIcon,
     ListItemText,
+    MenuItem,
     Paper,
     Stack,
+    TextField,
     Typography,
     useMediaQuery
 } from "@mui/material";
 import { alpha, useTheme } from "@mui/material/styles";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ChangeEvent } from "react";
+import { useForm } from "react-hook-form";
+import { z } from "zod";
+import { zodResolver } from "@hookform/resolvers/zod";
 
 import { useAuth } from "../auth/AuthProvider";
 import { ChartPanel } from "../components/ChartPanel";
 import { DataTable, type Column } from "../components/DataTable";
+import { SearchableSelect } from "../components/SearchableSelect";
+import { useToast } from "../components/Toast";
 import { api, getApiErrorMessage } from "../lib/api";
-import { endpoints, type LoansResponse, type MemberAccountsResponse, type MembersResponse, type StatementsResponse } from "../lib/endpoints";
+import {
+    endpoints,
+    type CreateLoanApplicationRequest,
+    type LoanApplicationResponse,
+    type LoanApplicationsResponse,
+    type LoanProductsResponse,
+    type LoansResponse,
+    type MemberAccountsResponse,
+    type MembersResponse,
+    type StatementsResponse
+} from "../lib/endpoints";
 import { brandColors, darkThemeColors } from "../theme/colors";
 import { useUI } from "../ui/UIProvider";
-import type { Loan, Member, MemberAccount, StatementRow } from "../types/api";
+import type { Loan, LoanApplication, LoanProduct, Member, MemberAccount, StatementRow } from "../types/api";
 import { formatCurrency, formatDate } from "../utils/format";
+
+const loanApplicationSchema = z.object({
+    product_id: z.string().uuid("Select a loan product."),
+    purpose: z.string().trim().min(3, "Purpose is required.").max(500),
+    requested_amount: z.coerce.number().positive("Requested amount is required."),
+    requested_term_count: z.coerce.number().int().positive("Requested term is required."),
+    requested_repayment_frequency: z.enum(["daily", "weekly", "monthly"]).default("monthly"),
+    requested_interest_rate: z.union([z.coerce.number().min(0).max(100), z.nan()]).optional().transform((value) => (Number.isNaN(value) ? undefined : value)),
+    external_reference: z.string().max(80).optional().or(z.literal(""))
+});
+
+type LoanApplicationValues = z.infer<typeof loanApplicationSchema>;
 
 function groupBalances(statements: StatementRow[]) {
     return statements
@@ -186,17 +223,33 @@ function MetricCard({ icon: Icon, label, value, helper, tone, delta }: MetricCar
 export function MemberPortalPage() {
     const theme = useTheme();
     const isDesktop = useMediaQuery(theme.breakpoints.up("lg"));
-    const { profile, selectedTenantName, selectedBranchName, signOut, user } = useAuth();
+    const { profile, selectedTenantName, selectedBranchName, signOut, subscription, user } = useAuth();
+    const { pushToast } = useToast();
     const { theme: themeMode, toggleTheme } = useUI();
     const [accounts, setAccounts] = useState<MemberAccount[]>([]);
     const [loans, setLoans] = useState<Loan[]>([]);
+    const [loanProducts, setLoanProducts] = useState<LoanProduct[]>([]);
+    const [loanApplications, setLoanApplications] = useState<LoanApplication[]>([]);
     const [statements, setStatements] = useState<StatementRow[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [warning, setWarning] = useState<string | null>(null);
+    const [showApplyDialog, setShowApplyDialog] = useState(false);
+    const [submittingApplication, setSubmittingApplication] = useState(false);
     const [activeSection, setActiveSection] = useState<PortalSectionId>(portalSections[0].id);
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+    const loanApplicationForm = useForm<LoanApplicationValues>({
+        resolver: zodResolver(loanApplicationSchema),
+        defaultValues: {
+            product_id: "",
+            purpose: "",
+            requested_amount: 0,
+            requested_term_count: 12,
+            requested_repayment_frequency: "monthly",
+            external_reference: ""
+        }
+    });
 
     const getSupabaseErrorMessage = (value: unknown, fallback: string) => {
         if (value && typeof value === "object" && "message" in value && typeof value.message === "string") {
@@ -226,6 +279,8 @@ export function MemberPortalPage() {
                 if (!memberRecord?.id) {
                     setAccounts([]);
                     setLoans([]);
+                    setLoanProducts([]);
+                    setLoanApplications([]);
                     setStatements([]);
                     return;
                 }
@@ -242,12 +297,18 @@ export function MemberPortalPage() {
                             member_id: memberRecord.id
                         }
                     }),
+                    api.get<LoanProductsResponse>(endpoints.products.loans()),
+                    api.get<LoanApplicationsResponse>(endpoints.loanApplications.list(), {
+                        params: {
+                            tenant_id: profile.tenant_id
+                        }
+                    }),
                     api.get<StatementsResponse>(endpoints.finance.statements(), {
                         params: { tenant_id: profile.tenant_id, member_id: memberRecord.id }
                     })
                 ]);
 
-                const [accountsResult, loansResult, statementsResult] = results;
+                const [accountsResult, loansResult, productsResult, applicationsResult, statementsResult] = results;
                 const issues: string[] = [];
 
                 if (accountsResult.status === "fulfilled") {
@@ -262,6 +323,20 @@ export function MemberPortalPage() {
                 } else {
                     setLoans([]);
                     issues.push(getApiErrorMessage(loansResult.reason, "Loans unavailable."));
+                }
+
+                if (productsResult.status === "fulfilled") {
+                    setLoanProducts(productsResult.value.data.data || []);
+                } else {
+                    setLoanProducts([]);
+                    issues.push(getApiErrorMessage(productsResult.reason, "Loan products unavailable."));
+                }
+
+                if (applicationsResult.status === "fulfilled") {
+                    setLoanApplications(applicationsResult.value.data.data || []);
+                } else {
+                    setLoanApplications([]);
+                    issues.push(getApiErrorMessage(applicationsResult.reason, "Loan applications unavailable."));
                 }
 
                 if (statementsResult.status === "fulfilled") {
@@ -321,6 +396,10 @@ export function MemberPortalPage() {
         [loans]
     );
     const activeLoanCount = useMemo(() => loans.filter((loan) => ["active", "in_arrears"].includes(loan.status)).length, [loans]);
+    const pendingLoanApplications = useMemo(
+        () => loanApplications.filter((application) => !["rejected", "cancelled", "disbursed"].includes(application.status)),
+        [loanApplications]
+    );
     const transactionCount = statements.length;
     const balanceTrend = groupBalances(statements);
     const currentView = portalSections.find((section) => section.id === activeSection) || portalSections[0];
@@ -350,6 +429,128 @@ export function MemberPortalPage() {
         { key: "principal", header: "Outstanding", render: (row) => formatCurrency(row.outstanding_principal) },
         { key: "interest", header: "Accrued Interest", render: (row) => formatCurrency(row.accrued_interest) }
     ];
+
+    const loanApplicationColumns: Column<LoanApplication>[] = [
+        {
+            key: "product",
+            header: "Product",
+            render: (row) => row.loan_products?.name || "Loan product"
+        },
+        {
+            key: "amount",
+            header: "Requested",
+            render: (row) => formatCurrency(row.requested_amount)
+        },
+        {
+            key: "status",
+            header: "Status",
+            render: (row) => row.status.replace(/_/g, " ")
+        },
+        {
+            key: "updated",
+            header: "Last Update",
+            render: (row) => formatDate(row.updated_at)
+        }
+    ];
+
+    const getApplicationTone = (status: LoanApplication["status"]) => {
+        if (status === "approved") {
+            return {
+                icon: ApprovalRoundedIcon,
+                color: brandColors.success,
+                bg: alpha(brandColors.success, 0.12),
+                label: "Approved"
+            };
+        }
+
+        if (status === "appraised") {
+            return {
+                icon: TaskAltRoundedIcon,
+                color: brandColors.info,
+                bg: alpha(brandColors.info, 0.12),
+                label: "Appraised"
+            };
+        }
+
+        if (status === "rejected") {
+            return {
+                icon: HighlightOffRoundedIcon,
+                color: brandColors.danger,
+                bg: alpha(brandColors.danger, 0.12),
+                label: "Rejected"
+            };
+        }
+
+        if (status === "disbursed") {
+            return {
+                icon: CreditScoreRoundedIcon,
+                color: brandColors.primary[700],
+                bg: alpha(brandColors.primary[500], 0.12),
+                label: "Disbursed"
+            };
+        }
+
+        return {
+            icon: HourglassTopRoundedIcon,
+            color: brandColors.warning,
+            bg: alpha(brandColors.warning, 0.12),
+            label: status === "submitted" ? "Submitted" : "In progress"
+        };
+    };
+
+    const loanProductOptions = loanProducts.map((product) => ({
+        value: product.id,
+        label: product.name,
+        secondary: `${product.annual_interest_rate}% · ${formatCurrency(product.min_amount)} min`
+    }));
+
+    const canApplyForLoan = Boolean(subscription?.features?.loans_enabled ?? true);
+
+    const submitLoanApplication = loanApplicationForm.handleSubmit(async (values) => {
+        if (!profile) {
+            return;
+        }
+
+        setSubmittingApplication(true);
+        try {
+            const payload: CreateLoanApplicationRequest = {
+                tenant_id: profile.tenant_id,
+                branch_id: profile.branch_id || undefined,
+                product_id: values.product_id,
+                purpose: values.purpose,
+                requested_amount: values.requested_amount,
+                requested_term_count: values.requested_term_count,
+                requested_repayment_frequency: values.requested_repayment_frequency,
+                requested_interest_rate: values.requested_interest_rate ?? null,
+                external_reference: values.external_reference || null
+            };
+
+            const { data } = await api.post<LoanApplicationResponse>(endpoints.loanApplications.list(), payload);
+            await api.post<LoanApplicationResponse>(endpoints.loanApplications.submit(data.data.id), {});
+
+            pushToast({
+                type: "success",
+                title: "Loan application submitted",
+                message: "Your application is now waiting for appraisal."
+            });
+            loanApplicationForm.reset();
+            setShowApplyDialog(false);
+            await (async () => {
+                const { data: applicationsResponse } = await api.get<LoanApplicationsResponse>(endpoints.loanApplications.list(), {
+                    params: { tenant_id: profile.tenant_id }
+                });
+                setLoanApplications(applicationsResponse.data || []);
+            })();
+        } catch (loanApplicationError) {
+            pushToast({
+                type: "error",
+                title: "Unable to submit application",
+                message: getApiErrorMessage(loanApplicationError)
+            });
+        } finally {
+            setSubmittingApplication(false);
+        }
+    });
 
     const handleSectionSelect = (sectionId: PortalSectionId) => {
         setActiveSection(sectionId);
@@ -644,24 +845,177 @@ export function MemberPortalPage() {
 
     const renderLoansView = () => (
         <Stack spacing={3}>
-            <Card variant="outlined" sx={contentCardSx}>
-                <CardContent sx={{ p: { xs: 2.5, md: 3 } }}>
-                    <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" spacing={2}>
-                        <Box>
-                            <Typography variant="overline" color="text.secondary">
-                                Loans
-                            </Typography>
-                            <Typography variant="h4" sx={{ fontWeight: 700, mt: 0.5 }}>
-                                Loan Exposure & Repayment Position
-                            </Typography>
-                            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                                Monitor outstanding principal, accrued interest, and the latest visible due reference for your facilities.
-                            </Typography>
-                        </Box>
-                        <Chip label={activeLoanCount ? `${activeLoanCount} active loan(s)` : "No active loans"} sx={{ borderRadius: 1.5 }} />
-                    </Stack>
+            <Card
+                variant="outlined"
+                sx={{
+                    ...contentCardSx,
+                    background: theme.palette.mode === "dark"
+                        ? `linear-gradient(135deg, ${alpha(brandColors.primary[900], 0.72)}, ${alpha(brandColors.accent[700], 0.2)})`
+                        : `linear-gradient(135deg, ${alpha(brandColors.primary[900], 0.96)}, ${alpha(brandColors.accent[500], 0.86)})`,
+                    color: "#fff",
+                    borderColor: "transparent",
+                    boxShadow: "0 18px 38px rgba(10, 5, 115, 0.18)"
+                }}
+            >
+                <CardContent sx={{ p: { xs: 2.5, md: 3.25 } }}>
+                    <Grid container spacing={2.5} alignItems="stretch">
+                        <Grid size={{ xs: 12, lg: 8 }}>
+                            <Stack spacing={1.5}>
+                                <Typography variant="overline" sx={{ color: alpha("#FFFFFF", 0.76), letterSpacing: 1.4 }}>
+                                    Lending workspace
+                                </Typography>
+                                <Typography variant="h4" sx={{ fontWeight: 800, lineHeight: 1.08, maxWidth: 680 }}>
+                                    Track applications, repayment exposure, and loan readiness from one member view.
+                                </Typography>
+                                <Typography variant="body2" sx={{ color: alpha("#FFFFFF", 0.78), maxWidth: 620 }}>
+                                    Review approved facilities, watch outstanding balances, and submit new borrowing requests into the SACCO approval workflow.
+                                </Typography>
+                                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ pt: 0.5 }}>
+                                    <Chip
+                                        label={activeLoanCount ? `${activeLoanCount} active loan(s)` : "No active loans"}
+                                        sx={{
+                                            borderRadius: 1.5,
+                                            bgcolor: alpha("#FFFFFF", 0.14),
+                                            color: "#fff",
+                                            border: `1px solid ${alpha("#FFFFFF", 0.2)}`
+                                        }}
+                                    />
+                                    <Chip
+                                        label={`${pendingLoanApplications.length} open application(s)`}
+                                        sx={{
+                                            borderRadius: 1.5,
+                                            bgcolor: alpha("#FFFFFF", 0.1),
+                                            color: "#fff",
+                                            border: `1px solid ${alpha("#FFFFFF", 0.16)}`
+                                        }}
+                                    />
+                                </Stack>
+                            </Stack>
+                        </Grid>
+                        <Grid size={{ xs: 12, lg: 4 }}>
+                            <Box
+                                sx={{
+                                    height: "100%",
+                                    p: 2.25,
+                                    borderRadius: 2,
+                                    bgcolor: alpha("#FFFFFF", theme.palette.mode === "dark" ? 0.05 : 0.12),
+                                    border: `1px solid ${alpha("#FFFFFF", 0.16)}`,
+                                    display: "flex",
+                                    flexDirection: "column",
+                                    justifyContent: "space-between",
+                                    gap: 2
+                                }}
+                            >
+                                <Stack spacing={1}>
+                                    <Typography variant="subtitle2" sx={{ color: alpha("#FFFFFF", 0.72) }}>
+                                        Application access
+                                    </Typography>
+                                    <Typography variant="h6" sx={{ fontWeight: 700 }}>
+                                        {canApplyForLoan ? "Apply for a new facility" : "Applications unavailable"}
+                                    </Typography>
+                                    <Typography variant="body2" sx={{ color: alpha("#FFFFFF", 0.72) }}>
+                                        {canApplyForLoan
+                                            ? "Your request will move through appraisal, approval, and controlled disbursement."
+                                            : "Loan applications are disabled on the current subscription plan."}
+                                    </Typography>
+                                </Stack>
+                                {canApplyForLoan ? (
+                                    <Button
+                                        variant="contained"
+                                        onClick={() => setShowApplyDialog(true)}
+                                        sx={{
+                                            alignSelf: "flex-start",
+                                            bgcolor: "#fff",
+                                            color: brandColors.primary[900],
+                                            fontWeight: 700,
+                                            "&:hover": {
+                                                bgcolor: alpha("#FFFFFF", 0.92)
+                                            }
+                                        }}
+                                    >
+                                        Apply for Loan
+                                    </Button>
+                                ) : null}
+                            </Box>
+                        </Grid>
+                    </Grid>
                 </CardContent>
             </Card>
+
+            {canApplyForLoan ? (
+                <Card variant="outlined" sx={contentCardSx}>
+                    <CardContent>
+                        <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" spacing={2} sx={{ mb: 2 }}>
+                            <Box>
+                                <Typography variant="h6">My Loan Applications</Typography>
+                                <Typography variant="body2" color="text.secondary">
+                                    Track applications through appraisal, approval, and disbursement readiness.
+                                </Typography>
+                            </Box>
+                            <Chip label={`${pendingLoanApplications.length} open application(s)`} variant="outlined" />
+                        </Stack>
+                        <Grid container spacing={2} sx={{ mb: 2.5 }}>
+                            {loanApplications.slice(0, 3).map((application) => {
+                                const tone = getApplicationTone(application.status);
+                                const StatusIcon = tone.icon;
+
+                                return (
+                                    <Grid key={application.id} size={{ xs: 12, md: 4 }}>
+                                        <Box
+                                            sx={{
+                                                p: 2,
+                                                borderRadius: 2,
+                                                border: `1px solid ${alpha(theme.palette.divider, 0.9)}`,
+                                                bgcolor: theme.palette.mode === "dark" ? alpha("#FFFFFF", 0.02) : alpha("#FFFFFF", 0.8)
+                                            }}
+                                        >
+                                            <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1.5}>
+                                                <Box
+                                                    sx={{
+                                                        width: 40,
+                                                        height: 40,
+                                                        borderRadius: 2,
+                                                        display: "grid",
+                                                        placeItems: "center",
+                                                        bgcolor: tone.bg,
+                                                        color: tone.color
+                                                    }}
+                                                >
+                                                    <StatusIcon fontSize="small" />
+                                                </Box>
+                                                <Chip
+                                                    size="small"
+                                                    label={tone.label}
+                                                    sx={{
+                                                        borderRadius: 1.25,
+                                                        color: tone.color,
+                                                        bgcolor: tone.bg,
+                                                        border: `1px solid ${alpha(tone.color, 0.2)}`
+                                                    }}
+                                                />
+                                            </Stack>
+                                            <Typography variant="subtitle2" sx={{ mt: 2, fontWeight: 700 }}>
+                                                {application.loan_products?.name || "Loan application"}
+                                            </Typography>
+                                            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                                                {formatCurrency(application.requested_amount)} · {application.requested_term_count} term(s)
+                                            </Typography>
+                                            <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1.25 }}>
+                                                Updated {formatDate(application.updated_at)}
+                                            </Typography>
+                                        </Box>
+                                    </Grid>
+                                );
+                            })}
+                        </Grid>
+                        <DataTable rows={loanApplications} columns={loanApplicationColumns} emptyMessage="No loan applications submitted yet." />
+                    </CardContent>
+                </Card>
+            ) : (
+                <Alert severity="info" variant="outlined">
+                    Loan applications are disabled on your current subscription plan.
+                </Alert>
+            )}
 
             <Grid container spacing={2}>
                 <Grid size={{ xs: 12, sm: 6, lg: 4 }}>
@@ -975,6 +1329,21 @@ export function MemberPortalPage() {
                                     borderRadius: 1.5,
                                     justifyContent: collapsed ? "center" : "flex-start",
                                     px: collapsed ? 1 : 1.5,
+                                    "&:hover": {
+                                        bgcolor: active
+                                            ? brandColors.primary[900]
+                                            : theme.palette.mode === "dark"
+                                                ? alpha(brandColors.accent[500], 0.14)
+                                                : alpha(brandColors.primary[500], 0.1),
+                                        color: active ? "#fff" : "text.primary",
+                                        "& .MuiListItemIcon-root": {
+                                            color: active
+                                                ? "#fff"
+                                                : theme.palette.mode === "dark"
+                                                    ? alpha("#FFFFFF", 0.92)
+                                                    : brandColors.primary[700]
+                                        }
+                                    },
                                     "&.Mui-selected": {
                                         bgcolor: brandColors.primary[900],
                                         color: "#fff",
@@ -996,16 +1365,10 @@ export function MemberPortalPage() {
                                 {!collapsed ? (
                                     <ListItemText
                                         primary={section.label}
-                                        secondary={section.id === activeSection ? section.subtitle : undefined}
                                         primaryTypographyProps={{
                                             fontSize: 14,
                                             fontWeight: active ? 700 : 600,
                                             color: active ? "#FFFFFF" : undefined
-                                        }}
-                                        secondaryTypographyProps={{
-                                            fontSize: 11,
-                                            lineHeight: 1.35,
-                                            color: active ? alpha("#FFFFFF", 0.78) : undefined
                                         }}
                                     />
                                 ) : null}
@@ -1249,6 +1612,104 @@ export function MemberPortalPage() {
                     </Stack>
                 </Box>
             </Box>
+
+            <Dialog open={showApplyDialog} onClose={submittingApplication ? undefined : () => setShowApplyDialog(false)} maxWidth="md" fullWidth>
+                <DialogTitle>Apply for Loan</DialogTitle>
+                <DialogContent dividers>
+                    <Stack spacing={2} sx={{ pt: 0.5 }}>
+                        <Alert severity="info" variant="outlined">
+                            This submits a loan application into appraisal and approval workflow. No money movement happens until a teller or loan officer disburses an approved application.
+                        </Alert>
+                        <Box component="form" id="member-loan-application-form" onSubmit={submitLoanApplication} sx={{ display: "grid", gap: 2 }}>
+                            <Box>
+                                <Typography variant="body2" fontWeight={600} sx={{ mb: 0.75 }}>
+                                    Loan Product
+                                </Typography>
+                                <SearchableSelect
+                                    value={loanApplicationForm.watch("product_id")}
+                                    options={loanProductOptions}
+                                    onChange={(value) => loanApplicationForm.setValue("product_id", value, { shouldValidate: true })}
+                                    placeholder="Search loan product..."
+                                />
+                                {loanApplicationForm.formState.errors.product_id ? (
+                                    <Typography variant="caption" color="error.main">
+                                        {loanApplicationForm.formState.errors.product_id.message}
+                                    </Typography>
+                                ) : null}
+                            </Box>
+                            <TextField
+                                label="Purpose"
+                                fullWidth
+                                multiline
+                                minRows={3}
+                                {...loanApplicationForm.register("purpose")}
+                                error={Boolean(loanApplicationForm.formState.errors.purpose)}
+                                helperText={loanApplicationForm.formState.errors.purpose?.message}
+                            />
+                            <Grid container spacing={2}>
+                                <Grid size={{ xs: 12, md: 4 }}>
+                                    <TextField
+                                        label="Requested Amount"
+                                        type="number"
+                                        fullWidth
+                                        {...loanApplicationForm.register("requested_amount")}
+                                        error={Boolean(loanApplicationForm.formState.errors.requested_amount)}
+                                        helperText={loanApplicationForm.formState.errors.requested_amount?.message}
+                                    />
+                                </Grid>
+                                <Grid size={{ xs: 12, md: 4 }}>
+                                    <TextField
+                                        label="Requested Term"
+                                        type="number"
+                                        fullWidth
+                                        {...loanApplicationForm.register("requested_term_count")}
+                                        error={Boolean(loanApplicationForm.formState.errors.requested_term_count)}
+                                        helperText={loanApplicationForm.formState.errors.requested_term_count?.message}
+                                    />
+                                </Grid>
+                                <Grid size={{ xs: 12, md: 4 }}>
+                                    <TextField
+                                        label="Requested Interest %"
+                                        type="number"
+                                        fullWidth
+                                        {...loanApplicationForm.register("requested_interest_rate")}
+                                        error={Boolean(loanApplicationForm.formState.errors.requested_interest_rate)}
+                                        helperText={loanApplicationForm.formState.errors.requested_interest_rate?.message}
+                                    />
+                                </Grid>
+                                <Grid size={{ xs: 12, md: 6 }}>
+                                    <TextField
+                                        select
+                                        label="Repayment Frequency"
+                                        fullWidth
+                                        value={loanApplicationForm.watch("requested_repayment_frequency")}
+                                        onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                                            loanApplicationForm.setValue(
+                                                "requested_repayment_frequency",
+                                                event.target.value as LoanApplicationValues["requested_repayment_frequency"],
+                                                { shouldValidate: true }
+                                            )
+                                        }
+                                    >
+                                        <MenuItem value="monthly">Monthly</MenuItem>
+                                        <MenuItem value="weekly">Weekly</MenuItem>
+                                        <MenuItem value="daily">Daily</MenuItem>
+                                    </TextField>
+                                </Grid>
+                                <Grid size={{ xs: 12, md: 6 }}>
+                                    <TextField label="Reference" fullWidth {...loanApplicationForm.register("external_reference")} />
+                                </Grid>
+                            </Grid>
+                        </Box>
+                    </Stack>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setShowApplyDialog(false)}>Cancel</Button>
+                    <Button variant="contained" type="submit" form="member-loan-application-form" disabled={submittingApplication || !canApplyForLoan}>
+                        {submittingApplication ? "Submitting..." : "Submit Application"}
+                    </Button>
+                </DialogActions>
+            </Dialog>
 
             <Paper
                 sx={{

@@ -27,6 +27,10 @@ import type {
     AuditLogEntry,
     MemberApplication,
     ProductBootstrapPayload,
+    LoanProduct,
+    LoanApplication,
+    LoanGuarantor,
+    CollateralItem,
     SavingsProduct,
     ShareProduct,
     FeeRule,
@@ -76,6 +80,7 @@ const routeMap = {
     },
     products: {
         bootstrap: "/products/bootstrap",
+        loans: "/products/loans",
         savings: "/products/savings",
         shares: "/products/shares",
         fees: "/products/fees",
@@ -107,6 +112,15 @@ const routeMap = {
         review: (applicationId: string) => `/member-applications/${applicationId}/review`,
         approve: (applicationId: string) => `/member-applications/${applicationId}/approve`,
         reject: (applicationId: string) => `/member-applications/${applicationId}/reject`
+    },
+    loanApplications: {
+        list: "/loan-applications",
+        detail: (applicationId: string) => `/loan-applications/${applicationId}`,
+        submit: (applicationId: string) => `/loan-applications/${applicationId}/submit`,
+        appraise: (applicationId: string) => `/loan-applications/${applicationId}/appraise`,
+        approve: (applicationId: string) => `/loan-applications/${applicationId}/approve`,
+        reject: (applicationId: string) => `/loan-applications/${applicationId}/reject`,
+        disburse: (applicationId: string) => `/loan-applications/${applicationId}/disburse`
     },
     imports: {
         members: "/imports/members",
@@ -196,6 +210,7 @@ export const endpoints = {
     },
     products: {
         bootstrap: () => routeMap.products.bootstrap,
+        loans: () => routeMap.products.loans,
         savings: () => routeMap.products.savings,
         shares: () => routeMap.products.shares,
         fees: () => routeMap.products.fees,
@@ -227,6 +242,15 @@ export const endpoints = {
         review: (applicationId: string) => routeMap.memberApplications.review(applicationId),
         approve: (applicationId: string) => routeMap.memberApplications.approve(applicationId),
         reject: (applicationId: string) => routeMap.memberApplications.reject(applicationId)
+    },
+    loanApplications: {
+        list: () => routeMap.loanApplications.list,
+        detail: (applicationId: string) => routeMap.loanApplications.detail(applicationId),
+        submit: (applicationId: string) => routeMap.loanApplications.submit(applicationId),
+        appraise: (applicationId: string) => routeMap.loanApplications.appraise(applicationId),
+        approve: (applicationId: string) => routeMap.loanApplications.approve(applicationId),
+        reject: (applicationId: string) => routeMap.loanApplications.reject(applicationId),
+        disburse: (applicationId: string) => routeMap.loanApplications.disburse(applicationId)
     },
     imports: {
         members: () => routeMap.imports.members,
@@ -479,6 +503,7 @@ export interface RejectMemberApplicationRequest {
 
 export type MemberApplicationsResponse = ApiEnvelope<MemberApplication[]>;
 export type ProductBootstrapResponse = ApiEnvelope<ProductBootstrapPayload>;
+export type LoanProductsResponse = ApiEnvelope<LoanProduct[]>;
 export type SavingsProductsResponse = ApiEnvelope<SavingsProduct[]>;
 export type ShareProductsResponse = ApiEnvelope<ShareProduct[]>;
 export type FeeRulesResponse = ApiEnvelope<FeeRule[]>;
@@ -492,6 +517,8 @@ export interface CreateMemberLoginRequest {
 }
 
 export type LoansResponse = ApiEnvelope<Loan[]>;
+export type LoanApplicationResponse = ApiEnvelope<LoanApplication>;
+export type LoanApplicationsResponse = ApiEnvelope<LoanApplication[]>;
 export type LoanSchedulesResponse = ApiEnvelope<LoanSchedule[]>;
 export type LoanTransactionsResponse = ApiEnvelope<LoanTransaction[]>;
 export type TellerSessionsResponse = ApiEnvelope<TellerSession[]>;
@@ -504,6 +531,49 @@ export interface OpenTellerSessionRequest {
     branch_id?: string;
     opening_cash: number;
     notes?: string | null;
+}
+
+export interface CreateLoanApplicationRequest {
+    tenant_id?: string;
+    branch_id?: string;
+    member_id?: string;
+    product_id: string;
+    external_reference?: string | null;
+    purpose: string;
+    requested_amount: number;
+    requested_term_count: number;
+    requested_repayment_frequency?: "daily" | "weekly" | "monthly";
+    requested_interest_rate?: number | null;
+    guarantors?: LoanGuarantor[];
+    collateral_items?: CollateralItem[];
+}
+
+export type UpdateLoanApplicationRequest = Partial<CreateLoanApplicationRequest>;
+
+export interface AppraiseLoanApplicationRequest {
+    recommended_amount: number;
+    recommended_term_count: number;
+    recommended_interest_rate: number;
+    recommended_repayment_frequency: "daily" | "weekly" | "monthly";
+    risk_rating: "low" | "medium" | "high";
+    appraisal_notes: string;
+    guarantors?: LoanGuarantor[];
+    collateral_items?: CollateralItem[];
+}
+
+export interface ApproveLoanApplicationRequest {
+    notes?: string | null;
+}
+
+export interface RejectLoanApplicationRequest {
+    reason: string;
+    notes?: string | null;
+}
+
+export interface DisburseApprovedLoanRequest {
+    reference?: string | null;
+    description?: string | null;
+    receipt_ids?: string[];
 }
 
 export interface CloseTellerSessionRequest {

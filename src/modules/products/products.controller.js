@@ -9,6 +9,18 @@ exports.listSavingsProducts = asyncHandler(async (req, res) => {
     res.json({ data: await service.listSavingsProducts(req.auth) });
 });
 
+exports.listLoanProducts = asyncHandler(async (req, res) => {
+    res.json({ data: await service.listLoanProducts(req.auth) });
+});
+
+exports.createLoanProduct = asyncHandler(async (req, res) => {
+    res.status(201).json({ data: await service.createLoanProduct(req.auth, req.validated.body) });
+});
+
+exports.updateLoanProduct = asyncHandler(async (req, res) => {
+    res.json({ data: await service.updateLoanProduct(req.auth, req.params.id, req.validated.body) });
+});
+
 exports.createSavingsProduct = asyncHandler(async (req, res) => {
     res.status(201).json({ data: await service.createSavingsProduct(req.auth, req.validated.body) });
 });

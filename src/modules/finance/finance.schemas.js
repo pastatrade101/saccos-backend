@@ -35,6 +35,7 @@ const transferSchema = z.object({
 
 const loanDisburseSchema = z.object({
     tenant_id: z.string().uuid().optional(),
+    application_id: z.string().uuid().optional(),
     member_id: z.string().uuid(),
     branch_id: z.string().uuid(),
     principal_amount: moneyAmount,

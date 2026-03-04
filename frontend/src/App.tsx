@@ -290,7 +290,7 @@ export default function App() {
                     </Route>
                     <Route
                         element={
-                            <ProtectedRoute allowedRoles={["loan_officer"]} allowInternalOps={false} />
+                            <ProtectedRoute allowedRoles={["branch_manager", "loan_officer", "teller"]} allowInternalOps={false} />
                         }
                     >
                         <Route path="/loans" element={<LoansPage />} />

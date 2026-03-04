@@ -56,6 +56,29 @@ async function getLoan(loanId) {
     return data;
 }
 
+async function getApprovedLoanApplication(tenantId, applicationId) {
+    const { data, error } = await adminSupabase
+        .from("loan_applications")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .eq("id", applicationId)
+        .single();
+
+    if (error || !data) {
+        throw new AppError(404, "LOAN_APPLICATION_NOT_FOUND", "Loan application was not found.");
+    }
+
+    if (data.status !== "approved") {
+        throw new AppError(400, "LOAN_APPLICATION_NOT_APPROVED", "Only approved loan applications can be disbursed.");
+    }
+
+    if (data.loan_id) {
+        throw new AppError(400, "LOAN_ALREADY_DISBURSED", "This application has already been disbursed.");
+    }
+
+    return data;
+}
+
 async function runFinancialFunction(functionName, params) {
     const { data, error } = await adminSupabase.rpc(functionName, params);
 
@@ -331,47 +354,67 @@ async function transfer(actor, payload) {
     return result;
 }
 
-async function loanDisburse(actor, payload) {
+async function loanDisburse(actor, payload, options = {}) {
     const tenantId = payload.tenant_id || actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
-    assertBranchAccess({ auth: actor }, payload.branch_id);
+    let effectivePayload = { ...payload };
+
+    if (!options.skipWorkflow) {
+        if (!payload.application_id) {
+            throw new AppError(403, "LOAN_APPLICATION_REQUIRED", "An approved loan application is required before disbursement.");
+        }
+
+        const application = await getApprovedLoanApplication(tenantId, payload.application_id);
+        effectivePayload = {
+            ...effectivePayload,
+            tenant_id: application.tenant_id,
+            member_id: application.member_id,
+            branch_id: application.branch_id,
+            principal_amount: application.recommended_amount || application.requested_amount,
+            annual_interest_rate: application.recommended_interest_rate || application.requested_interest_rate || 0,
+            term_count: application.recommended_term_count || application.requested_term_count,
+            repayment_frequency: application.recommended_repayment_frequency || application.requested_repayment_frequency
+        };
+    }
+
+    assertBranchAccess({ auth: actor }, effectivePayload.branch_id);
     await assertPostingRuleConfigured(tenantId, "loan_disburse");
     await assertPostingRuleConfigured(tenantId, "loan_fee");
     const session = await ensureOpenTellerSession(actor, {
         tenantId,
-        branchId: payload.branch_id
+        branchId: effectivePayload.branch_id
     });
 
     const result = await runFinancialFunction("loan_disburse", {
         p_tenant_id: tenantId,
-        p_member_id: payload.member_id,
-        p_branch_id: payload.branch_id,
-        p_principal_amount: payload.principal_amount,
-        p_annual_interest_rate: payload.annual_interest_rate,
-        p_term_count: payload.term_count,
-        p_repayment_frequency: payload.repayment_frequency,
-        p_disbursed_by: payload.disbursed_by || actor.user.id,
-        p_reference: payload.reference || null,
-        p_description: payload.description || null
+        p_member_id: effectivePayload.member_id,
+        p_branch_id: effectivePayload.branch_id,
+        p_principal_amount: effectivePayload.principal_amount,
+        p_annual_interest_rate: effectivePayload.annual_interest_rate,
+        p_term_count: effectivePayload.term_count,
+        p_repayment_frequency: effectivePayload.repayment_frequency,
+        p_disbursed_by: effectivePayload.disbursed_by || actor.user.id,
+        p_reference: effectivePayload.reference || null,
+        p_description: effectivePayload.description || null
     });
 
     await finalizeReceiptsForTransaction(actor, {
         tenantId,
-        branchId: payload.branch_id,
-        memberId: payload.member_id,
+        branchId: effectivePayload.branch_id,
+        memberId: effectivePayload.member_id,
         journalId: result.journal_id,
         transactionType: "loan_disburse",
-        amount: payload.principal_amount,
-        receiptIds: payload.receipt_ids
+        amount: effectivePayload.principal_amount,
+        receiptIds: effectivePayload.receipt_ids
     });
     await recordSessionTransaction({
         session,
         tenantId,
-        branchId: payload.branch_id,
+        branchId: effectivePayload.branch_id,
         journalId: result.journal_id,
         transactionType: "loan_disburse",
         direction: "out",
-        amount: payload.principal_amount,
+        amount: effectivePayload.principal_amount,
         userId: actor.user.id
     });
 
@@ -383,10 +426,11 @@ async function loanDisburse(actor, payload) {
         entityId: result.loan_id || null,
         action: "LOAN_DISBURSED",
         afterData: {
-            member_id: payload.member_id,
-            branch_id: payload.branch_id,
-            principal_amount: payload.principal_amount,
-            reference: payload.reference || null,
+            application_id: effectivePayload.application_id || null,
+            member_id: effectivePayload.member_id,
+            branch_id: effectivePayload.branch_id,
+            principal_amount: effectivePayload.principal_amount,
+            reference: effectivePayload.reference || null,
             journal_id: result.journal_id || null,
             loan_id: result.loan_id || null,
             loan_number: result.loan_number || null

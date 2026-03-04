@@ -273,6 +273,110 @@ export interface MemberApplication {
     updated_at: string;
 }
 
+export interface LoanProduct {
+    id: string;
+    tenant_id: string;
+    code: string;
+    name: string;
+    description?: string | null;
+    interest_method: "reducing_balance" | "flat";
+    annual_interest_rate: number;
+    min_amount: number;
+    max_amount?: number | null;
+    min_term_count: number;
+    max_term_count?: number | null;
+    insurance_rate: number;
+    required_guarantors_count: number;
+    eligibility_rules_json?: Record<string, unknown>;
+    processing_fee_rule_id?: string | null;
+    penalty_rule_id?: string | null;
+    receivable_account_id: string;
+    interest_income_account_id: string;
+    fee_income_account_id?: string | null;
+    penalty_income_account_id?: string | null;
+    is_default: boolean;
+    status: "active" | "inactive";
+}
+
+export interface LoanGuarantor {
+    id?: string;
+    application_id?: string;
+    tenant_id?: string;
+    member_id: string;
+    guaranteed_amount: number;
+    consent_status?: "pending" | "accepted" | "rejected";
+    consented_at?: string | null;
+    notes?: string | null;
+}
+
+export interface CollateralItem {
+    id?: string;
+    application_id?: string;
+    tenant_id?: string;
+    collateral_type: string;
+    description: string;
+    valuation_amount: number;
+    lien_reference?: string | null;
+    documents_json?: string[];
+}
+
+export interface LoanApproval {
+    id: string;
+    application_id: string;
+    tenant_id: string;
+    approver_id: string;
+    approval_level: number;
+    decision: "approved" | "rejected";
+    notes?: string | null;
+    created_at: string;
+}
+
+export interface LoanApplication {
+    id: string;
+    tenant_id: string;
+    branch_id: string;
+    member_id: string;
+    product_id: string;
+    external_reference?: string | null;
+    purpose: string;
+    requested_amount: number;
+    requested_term_count: number;
+    requested_repayment_frequency: "daily" | "weekly" | "monthly";
+    requested_interest_rate?: number | null;
+    created_via: "member_portal" | "staff";
+    status: "draft" | "submitted" | "appraised" | "approved" | "rejected" | "disbursed" | "cancelled";
+    requested_by: string;
+    requested_on_behalf_by?: string | null;
+    submitted_at?: string | null;
+    appraised_by?: string | null;
+    appraised_at?: string | null;
+    appraisal_notes?: string | null;
+    risk_rating?: "low" | "medium" | "high" | string | null;
+    recommended_amount?: number | null;
+    recommended_term_count?: number | null;
+    recommended_interest_rate?: number | null;
+    recommended_repayment_frequency?: "daily" | "weekly" | "monthly" | null;
+    required_approval_count: number;
+    approval_count: number;
+    approval_notes?: string | null;
+    approved_by?: string | null;
+    approved_at?: string | null;
+    disbursement_ready_at?: string | null;
+    rejected_by?: string | null;
+    rejected_at?: string | null;
+    rejection_reason?: string | null;
+    disbursed_by?: string | null;
+    disbursed_at?: string | null;
+    loan_id?: string | null;
+    created_at: string;
+    updated_at: string;
+    members?: Pick<Member, "id" | "full_name" | "member_no" | "branch_id" | "user_id" | "phone" | "email">;
+    loan_products?: Pick<LoanProduct, "id" | "code" | "name">;
+    loan_approvals?: LoanApproval[];
+    loan_guarantors?: LoanGuarantor[];
+    collateral_items?: CollateralItem[];
+}
+
 export interface SavingsProduct {
     id: string;
     tenant_id: string;
@@ -352,6 +456,7 @@ export interface ChartOfAccountOption {
 
 export interface ProductBootstrapPayload {
     savings_products: SavingsProduct[];
+    loan_products: LoanProduct[];
     share_products: ShareProduct[];
     fee_rules: FeeRule[];
     penalty_rules: PenaltyRule[];

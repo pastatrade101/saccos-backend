@@ -23,6 +23,23 @@ router.get(
     authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER, ROLES.LOAN_OFFICER, ROLES.TELLER, ROLES.AUDITOR], { allowInternalOps: false }),
     controller.listSavingsProducts
 );
+router.get(
+    "/loans",
+    authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER, ROLES.LOAN_OFFICER, ROLES.TELLER, ROLES.AUDITOR, ROLES.MEMBER], { allowInternalOps: false }),
+    controller.listLoanProducts
+);
+router.post(
+    "/loans",
+    authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER], { allowInternalOps: false }),
+    validate(schemas.loanProductSchema),
+    controller.createLoanProduct
+);
+router.patch(
+    "/loans/:id",
+    authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER], { allowInternalOps: false }),
+    validate(schemas.updateLoanProductSchema),
+    controller.updateLoanProduct
+);
 router.post(
     "/savings",
     authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER], { allowInternalOps: false }),
