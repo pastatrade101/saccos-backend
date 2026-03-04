@@ -106,6 +106,7 @@ export function MemberImportPage() {
     const [importStage, setImportStage] = useState<"idle" | "uploading" | "processing">("idle");
     const [importStartedAt, setImportStartedAt] = useState<number | null>(null);
     const [elapsedSeconds, setElapsedSeconds] = useState(0);
+    const [activeJobId, setActiveJobId] = useState<string | null>(null);
 
     const form = useForm<FormValues>({
         resolver: zodResolver(schema),
@@ -207,6 +208,76 @@ export function MemberImportPage() {
         void loadFailedRows(job.id, failedRowsPage, failedRowsLimit);
     }, [failedRowsLimit, failedRowsPage, job]);
 
+    useEffect(() => {
+        if (!activeJobId) {
+            return;
+        }
+
+        let cancelled = false;
+
+        const poll = async () => {
+            try {
+                const { data } = await api.get<ImportJobResponse>(endpoints.imports.memberJob(activeJobId));
+
+                if (cancelled) {
+                    return;
+                }
+
+                setJob(data.data);
+
+                if (data.data.status === "completed" || data.data.status === "failed") {
+                    setSubmitting(false);
+                    setImportStage("idle");
+                    setImportStartedAt(null);
+                    setActiveJobId(null);
+
+                    if (createPortalAccount && data.data.success_rows > 0) {
+                        try {
+                            const credentialsResponse = await api.get<CredentialsLinkResponse>(endpoints.imports.memberJobCredentials(activeJobId));
+                            const signedUrl = credentialsResponse.data.data.signed_url;
+                            setCredentialsUrl(signedUrl);
+                            triggerSignedDownload(signedUrl);
+                        } catch {
+                            setCredentialsUrl(null);
+                        }
+                    }
+
+                    pushToast({
+                        type: data.data.status === "completed" ? "success" : "error",
+                        title: data.data.status === "completed" ? "Import completed" : "Import finished with failures",
+                        message: `${data.data.success_rows} rows imported successfully. ${data.data.failed_rows} failed.`
+                    });
+                    return;
+                }
+
+                window.setTimeout(() => {
+                    void poll();
+                }, 1500);
+            } catch (error) {
+                if (cancelled) {
+                    return;
+                }
+
+                setSubmitting(false);
+                setImportStage("idle");
+                setImportStartedAt(null);
+                setActiveJobId(null);
+
+                pushToast({
+                    type: "error",
+                    title: "Import status unavailable",
+                    message: getApiErrorMessage(error)
+                });
+            }
+        };
+
+        void poll();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [activeJobId, createPortalAccount, pushToast]);
+
     const onSubmit = form.handleSubmit(async (values) => {
         const file = values.file?.item(0);
 
@@ -223,6 +294,7 @@ export function MemberImportPage() {
         setUploadProgress(0);
         setImportStage("uploading");
         setImportStartedAt(Date.now());
+        let jobQueued = false;
 
         try {
             const body = new FormData();
@@ -251,35 +323,28 @@ export function MemberImportPage() {
                     }
                 }
             });
-
-            const { data: jobData } = await api.get<ImportJobResponse>(endpoints.imports.memberJob(data.data.job_id));
-            setJob(jobData.data);
-            const nextCredentialsUrl = data.data.credentials_download_url || null;
-            setCredentialsUrl(nextCredentialsUrl);
-
-            if (values.create_portal_account && nextCredentialsUrl) {
-                triggerSignedDownload(nextCredentialsUrl);
-            }
-
+            setActiveJobId(data.data.job_id);
+            setImportStage("processing");
+            setUploadProgress(100);
+            jobQueued = true;
             pushToast({
                 type: "success",
-                title: "Import completed",
-                message: values.create_portal_account
-                    ? nextCredentialsUrl
-                        ? `${data.data.success_rows} rows imported successfully. Credentials download started automatically.`
-                        : `${data.data.success_rows} rows imported successfully. No new credentials file was generated, likely because imported members already had portal accounts.`
-                    : `${data.data.success_rows} rows imported successfully.`
+                title: "Import queued",
+                message: "The file upload is complete. Member import is now processing in the background."
             });
         } catch (error) {
+            setActiveJobId(null);
             pushToast({
                 type: "error",
                 title: "Import failed",
                 message: getApiErrorMessage(error)
             });
         } finally {
-            setSubmitting(false);
-            setImportStage("idle");
-            setImportStartedAt(null);
+            if (!jobQueued) {
+                setSubmitting(false);
+                setImportStage("idle");
+                setImportStartedAt(null);
+            }
         }
     });
 

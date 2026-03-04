@@ -36,6 +36,11 @@ exports.allocateCycle = asyncHandler(async (req, res) => {
     res.json({ data });
 });
 
+exports.submitCycle = asyncHandler(async (req, res) => {
+    const data = await dividendsService.submitCycle(req.auth, req.validated.params.id);
+    res.json({ data });
+});
+
 exports.approveCycle = asyncHandler(async (req, res) => {
     const data = await dividendsService.approveCycle(req.auth, req.validated.params.id, req.validated.body);
     res.json({ data });

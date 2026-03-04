@@ -7,6 +7,7 @@ const { ROLES } = require("../../constants/roles");
 const controller = require("./platform.controller");
 const {
     assignSubscriptionSchema,
+    deleteTenantSchema,
     planParamSchema,
     tenantParamSchema,
     updatePlanFeaturesSchema
@@ -20,5 +21,6 @@ router.get("/plans", controller.listPlans);
 router.patch("/plans/:planId/features", validate(planParamSchema, "params"), validate(updatePlanFeaturesSchema), controller.updatePlanFeatures);
 router.get("/tenants", controller.listTenants);
 router.post("/tenants/:tenantId/subscription", validate(tenantParamSchema, "params"), validate(assignSubscriptionSchema), controller.assignSubscription);
+router.delete("/tenants/:tenantId", validate(tenantParamSchema, "params"), validate(deleteTenantSchema), controller.deleteTenant);
 
 module.exports = router;

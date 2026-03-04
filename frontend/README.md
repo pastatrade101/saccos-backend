@@ -15,8 +15,11 @@ This app includes:
 - tenant setup flow
 - tenant super admin bootstrap
 - staff onboarding workspace
+- product and posting-rule configuration
+- member application workflow
 - member onboarding and member service pages
 - teller cash desk
+- branch cash-control and receipt oversight
 - loan officer loan workspace
 - branch manager contributions and dividends visibility
 - reporting exports
@@ -87,16 +90,20 @@ npm run preview
    - loan officer
    - auditor
 2. Onboard members
-3. Use `Member Import` for bulk CSV onboarding when needed
-4. Review contributions and dividends
+3. Use `Applications` for member review and approval flow
+4. Use `Member Import` for bulk CSV onboarding when needed
+5. Review contributions, dividends, and cash control
 
 ### Teller
 
 1. Use `Members` as service lookup
-2. Use `Cash Desk` for:
+2. Open a teller session in `Cash Desk`
+3. Use `Cash Desk` for:
    - deposit
    - withdrawal
    - share contribution
+4. Attach receipts when policy requires them
+5. Close the session with counted cash
 
 ### Loan officer
 
@@ -119,6 +126,8 @@ npm run preview
 - `/setup/tenant`
 - `/setup/super-admin`
 - `/dashboard`
+- `/products`
+- `/applications`
 - `/auditor/exceptions`
 - `/auditor/journals`
 - `/auditor/journals/:id`
@@ -130,6 +139,7 @@ npm run preview
 - `/members`
 - `/members/import`
 - `/cash`
+- `/cash-control`
 - `/contributions`
 - `/dividends`
 - `/loans`

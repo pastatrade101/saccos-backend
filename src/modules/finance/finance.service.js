@@ -2,6 +2,12 @@ const { adminSupabase } = require("../../config/supabase");
 const AppError = require("../../utils/app-error");
 const { assertBranchAccess, assertTenantAccess } = require("../../services/user-context.service");
 const { logAudit } = require("../../services/audit.service");
+const { assertPostingRuleConfigured } = require("../../services/posting-rule.service");
+const {
+    ensureOpenTellerSession,
+    finalizeReceiptsForTransaction,
+    recordSessionTransaction
+} = require("../cash-control/cash-control.service");
 
 async function getAccountWithMember(accountId, expectedProductType = null) {
     const { data, error } = await adminSupabase
@@ -69,10 +75,15 @@ async function runFinancialFunction(functionName, params) {
 async function deposit(actor, payload) {
     const tenantId = payload.tenant_id || actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
+    await assertPostingRuleConfigured(tenantId, "deposit");
 
     const { account, member } = await getAccountWithMember(payload.account_id, "savings");
     assertTenantAccess({ auth: actor }, account.tenant_id);
     assertBranchAccess({ auth: actor }, member.branch_id);
+    const session = await ensureOpenTellerSession(actor, {
+        tenantId,
+        branchId: member.branch_id
+    });
 
     const result = await runFinancialFunction("deposit", {
         p_tenant_id: tenantId,
@@ -81,6 +92,26 @@ async function deposit(actor, payload) {
         p_teller_id: payload.teller_id || actor.user.id,
         p_reference: payload.reference || null,
         p_description: payload.description || null
+    });
+
+    await finalizeReceiptsForTransaction(actor, {
+        tenantId,
+        branchId: member.branch_id,
+        memberId: member.id,
+        journalId: result.journal_id,
+        transactionType: "deposit",
+        amount: payload.amount,
+        receiptIds: payload.receipt_ids
+    });
+    await recordSessionTransaction({
+        session,
+        tenantId,
+        branchId: member.branch_id,
+        journalId: result.journal_id,
+        transactionType: "deposit",
+        direction: "in",
+        amount: payload.amount,
+        userId: actor.user.id
     });
 
     await logAudit({
@@ -105,10 +136,15 @@ async function deposit(actor, payload) {
 async function withdraw(actor, payload) {
     const tenantId = payload.tenant_id || actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
+    await assertPostingRuleConfigured(tenantId, "withdrawal");
 
     const { account, member } = await getAccountWithMember(payload.account_id, "savings");
     assertTenantAccess({ auth: actor }, account.tenant_id);
     assertBranchAccess({ auth: actor }, member.branch_id);
+    const session = await ensureOpenTellerSession(actor, {
+        tenantId,
+        branchId: member.branch_id
+    });
 
     const result = await runFinancialFunction("withdraw", {
         p_tenant_id: tenantId,
@@ -117,6 +153,26 @@ async function withdraw(actor, payload) {
         p_teller_id: payload.teller_id || actor.user.id,
         p_reference: payload.reference || null,
         p_description: payload.description || null
+    });
+
+    await finalizeReceiptsForTransaction(actor, {
+        tenantId,
+        branchId: member.branch_id,
+        memberId: member.id,
+        journalId: result.journal_id,
+        transactionType: "withdraw",
+        amount: payload.amount,
+        receiptIds: payload.receipt_ids
+    });
+    await recordSessionTransaction({
+        session,
+        tenantId,
+        branchId: member.branch_id,
+        journalId: result.journal_id,
+        transactionType: "withdraw",
+        direction: "out",
+        amount: payload.amount,
+        userId: actor.user.id
     });
 
     await logAudit({
@@ -141,10 +197,15 @@ async function withdraw(actor, payload) {
 async function shareContribution(actor, payload) {
     const tenantId = payload.tenant_id || actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
+    await assertPostingRuleConfigured(tenantId, "share_purchase");
 
     const { account, member } = await getAccountWithMember(payload.account_id, "shares");
     assertTenantAccess({ auth: actor }, account.tenant_id);
     assertBranchAccess({ auth: actor }, member.branch_id);
+    const session = await ensureOpenTellerSession(actor, {
+        tenantId,
+        branchId: member.branch_id
+    });
 
     const result = await runFinancialFunction("share_contribution", {
         p_tenant_id: tenantId,
@@ -153,6 +214,26 @@ async function shareContribution(actor, payload) {
         p_teller_id: payload.teller_id || actor.user.id,
         p_reference: payload.reference || null,
         p_description: payload.description || null
+    });
+
+    await finalizeReceiptsForTransaction(actor, {
+        tenantId,
+        branchId: member.branch_id,
+        memberId: member.id,
+        journalId: result.journal_id,
+        transactionType: "share_contribution",
+        amount: payload.amount,
+        receiptIds: payload.receipt_ids
+    });
+    await recordSessionTransaction({
+        session,
+        tenantId,
+        branchId: member.branch_id,
+        journalId: result.journal_id,
+        transactionType: "share_contribution",
+        direction: "in",
+        amount: payload.amount,
+        userId: actor.user.id
     });
 
     await logAudit({
@@ -176,6 +257,7 @@ async function shareContribution(actor, payload) {
 async function dividendAllocation(actor, payload) {
     const tenantId = payload.tenant_id || actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
+    await assertPostingRuleConfigured(tenantId, "dividend_reinvest_shares");
 
     const { account, member } = await getAccountWithMember(payload.account_id, "shares");
     assertTenantAccess({ auth: actor }, account.tenant_id);
@@ -211,6 +293,8 @@ async function dividendAllocation(actor, payload) {
 async function transfer(actor, payload) {
     const tenantId = payload.tenant_id || actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
+    await assertPostingRuleConfigured(tenantId, "withdrawal");
+    await assertPostingRuleConfigured(tenantId, "deposit");
 
     const source = await getAccountWithMember(payload.from_account, "savings");
     const destination = await getAccountWithMember(payload.to_account, "savings");
@@ -251,6 +335,12 @@ async function loanDisburse(actor, payload) {
     const tenantId = payload.tenant_id || actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
     assertBranchAccess({ auth: actor }, payload.branch_id);
+    await assertPostingRuleConfigured(tenantId, "loan_disburse");
+    await assertPostingRuleConfigured(tenantId, "loan_fee");
+    const session = await ensureOpenTellerSession(actor, {
+        tenantId,
+        branchId: payload.branch_id
+    });
 
     const result = await runFinancialFunction("loan_disburse", {
         p_tenant_id: tenantId,
@@ -263,6 +353,26 @@ async function loanDisburse(actor, payload) {
         p_disbursed_by: payload.disbursed_by || actor.user.id,
         p_reference: payload.reference || null,
         p_description: payload.description || null
+    });
+
+    await finalizeReceiptsForTransaction(actor, {
+        tenantId,
+        branchId: payload.branch_id,
+        memberId: payload.member_id,
+        journalId: result.journal_id,
+        transactionType: "loan_disburse",
+        amount: payload.principal_amount,
+        receiptIds: payload.receipt_ids
+    });
+    await recordSessionTransaction({
+        session,
+        tenantId,
+        branchId: payload.branch_id,
+        journalId: result.journal_id,
+        transactionType: "loan_disburse",
+        direction: "out",
+        amount: payload.principal_amount,
+        userId: actor.user.id
     });
 
     await logAudit({
@@ -289,10 +399,16 @@ async function loanDisburse(actor, payload) {
 async function loanRepay(actor, payload) {
     const tenantId = payload.tenant_id || actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
+    await assertPostingRuleConfigured(tenantId, "loan_repay_principal");
+    await assertPostingRuleConfigured(tenantId, "loan_repay_interest");
 
     const loan = await getLoan(payload.loan_id);
     assertTenantAccess({ auth: actor }, loan.tenant_id);
     assertBranchAccess({ auth: actor }, loan.branch_id);
+    const session = await ensureOpenTellerSession(actor, {
+        tenantId,
+        branchId: loan.branch_id
+    });
 
     const result = await runFinancialFunction("loan_repayment", {
         p_tenant_id: tenantId,
@@ -301,6 +417,26 @@ async function loanRepay(actor, payload) {
         p_user_id: payload.user_id || actor.user.id,
         p_reference: payload.reference || null,
         p_description: payload.description || null
+    });
+
+    await finalizeReceiptsForTransaction(actor, {
+        tenantId,
+        branchId: loan.branch_id,
+        memberId: loan.member_id,
+        journalId: result.journal_id,
+        transactionType: "loan_repay",
+        amount: payload.amount,
+        receiptIds: payload.receipt_ids
+    });
+    await recordSessionTransaction({
+        session,
+        tenantId,
+        branchId: loan.branch_id,
+        journalId: result.journal_id,
+        transactionType: "loan_repay",
+        direction: "in",
+        amount: payload.amount,
+        userId: actor.user.id
     });
 
     await logAudit({

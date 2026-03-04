@@ -121,6 +121,67 @@ async function findAuthUserByEmail(email) {
     return (data?.users || []).find((user) => user.email?.toLowerCase() === email.toLowerCase()) || null;
 }
 
+async function getDefaultMemberProducts(tenantId) {
+    const [{ data: savingsProduct, error: savingsError }, { data: shareProduct, error: shareError }] = await Promise.all([
+        adminSupabase
+            .from("savings_products")
+            .select("id, code, name")
+            .eq("tenant_id", tenantId)
+            .eq("status", "active")
+            .order("created_at", { ascending: true })
+            .limit(1)
+            .maybeSingle(),
+        adminSupabase
+            .from("share_products")
+            .select("id, code, name")
+            .eq("tenant_id", tenantId)
+            .eq("status", "active")
+            .order("created_at", { ascending: true })
+            .limit(1)
+            .maybeSingle()
+    ]);
+
+    if (savingsError) {
+        throw new AppError(500, "SAVINGS_PRODUCT_LOOKUP_FAILED", "Unable to resolve savings product.", savingsError);
+    }
+
+    if (shareError) {
+        throw new AppError(500, "SHARE_PRODUCT_LOOKUP_FAILED", "Unable to resolve share product.", shareError);
+    }
+
+    if (!savingsProduct || !shareProduct) {
+        throw new AppError(
+            500,
+            "MEMBER_PRODUCTS_NOT_CONFIGURED",
+            "Default savings and share products must be configured before onboarding members."
+        );
+    }
+
+    return {
+        savingsProduct,
+        shareProduct
+    };
+}
+
+async function appendMembershipStatusHistory({ tenantId, memberId, statusCode, changedBy, notes = null }) {
+    const { error } = await adminSupabase.from("membership_status_history").insert({
+        tenant_id: tenantId,
+        member_id: memberId,
+        status_code: statusCode,
+        changed_by: changedBy,
+        notes
+    });
+
+    if (error) {
+        throw new AppError(
+            500,
+            "MEMBERSHIP_STATUS_HISTORY_WRITE_FAILED",
+            "Unable to record membership status history.",
+            error
+        );
+    }
+}
+
 async function ensureMemberAccounts({ tenantId, branchId, member }) {
     const { data: existingAccounts, error: existingAccountsError } = await adminSupabase
         .from("member_accounts")
@@ -169,6 +230,7 @@ async function ensureMemberAccounts({ tenantId, branchId, member }) {
         );
     }
 
+    const { savingsProduct, shareProduct } = await getDefaultMemberProducts(tenantId);
     const accountRows = [];
 
     if (!existingByProduct.has("savings")) {
@@ -179,6 +241,7 @@ async function ensureMemberAccounts({ tenantId, branchId, member }) {
             account_number: `SV-${crypto.randomInt(100000, 999999)}`,
             account_name: `${member.full_name} Savings`,
             product_type: "savings",
+            savings_product_id: savingsProduct.id,
             status: "active",
             gl_account_id: tenantSettings.default_member_savings_control_account_id
         });
@@ -192,6 +255,7 @@ async function ensureMemberAccounts({ tenantId, branchId, member }) {
             account_number: `SH-${crypto.randomInt(100000, 999999)}`,
             account_name: `${member.full_name} Share Capital`,
             product_type: "shares",
+            share_product_id: shareProduct.id,
             status: "active",
             gl_account_id: shareControlAccount.id
         });
@@ -544,10 +608,25 @@ async function createMember(actor, payload) {
             tenant_id: tenantId,
             branch_id: payload.branch_id,
             full_name: payload.full_name,
+            dob: payload.dob || null,
             phone: payload.phone || null,
             email: payload.email || null,
             member_no: payload.member_no || null,
             national_id: payload.national_id || null,
+            address_line1: payload.address_line1 || null,
+            address_line2: payload.address_line2 || null,
+            city: payload.city || null,
+            state: payload.state || null,
+            country: payload.country || null,
+            postal_code: payload.postal_code || null,
+            nida_no: payload.nida_no || null,
+            tin_no: payload.tin_no || null,
+            next_of_kin_name: payload.next_of_kin_name || null,
+            next_of_kin_phone: payload.next_of_kin_phone || null,
+            next_of_kin_relationship: payload.next_of_kin_relationship || null,
+            employer: payload.employer || null,
+            kyc_status: payload.kyc_status || "pending",
+            kyc_reason: payload.kyc_reason || null,
             notes: payload.notes || null,
             status: payload.status,
             user_id: payload.user_id || null
@@ -563,6 +642,13 @@ async function createMember(actor, payload) {
         tenantId,
         branchId: payload.branch_id,
         member
+    });
+    await appendMembershipStatusHistory({
+        tenantId,
+        memberId: member.id,
+        statusCode: payload.status || "active",
+        changedBy: actor.user.id,
+        notes: "Member onboarded directly."
     });
 
     let createdMember = member;
@@ -645,6 +731,16 @@ async function updateMember(actor, memberId, payload) {
 
     if (error) {
         throw new AppError(500, "MEMBER_UPDATE_FAILED", "Unable to update member.", error);
+    }
+
+    if (payload.status && payload.status !== before.status) {
+        await appendMembershipStatusHistory({
+            tenantId: before.tenant_id,
+            memberId,
+            statusCode: payload.status,
+            changedBy: actor.user.id,
+            notes: "Membership status updated from member maintenance."
+        });
     }
 
     if (updated.user_id) {

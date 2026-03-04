@@ -31,3 +31,8 @@ exports.assignSubscription = asyncHandler(async (req, res) => {
     const data = await platformService.assignSubscription(req.auth, req.validated.params.tenantId, req.validated.body);
     res.status(201).json({ data });
 });
+
+exports.deleteTenant = asyncHandler(async (req, res) => {
+    const data = await platformService.deleteTenant(req.auth, req.validated.params.tenantId, req.validated.body);
+    res.json({ data });
+});

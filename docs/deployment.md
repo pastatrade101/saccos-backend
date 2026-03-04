@@ -7,6 +7,44 @@
 - Set `SSL_ENABLED=true` in production and terminate HTTPS at the edge.
 - Use at least two application instances for horizontal scaling.
 
+## Docker Compose
+
+The backend is ready to deploy with:
+
+- [Dockerfile](/Users/pastoryjoseph/Desktop/saccos-backend/Dockerfile)
+- [docker-compose.yml](/Users/pastoryjoseph/Desktop/saccos-backend/docker-compose.yml)
+
+Recommended server flow:
+
+1. Copy `.env.example` to `.env`
+2. Fill all production environment variables
+3. Build and start:
+
+```bash
+docker compose build
+docker compose up -d
+```
+
+4. Watch startup:
+
+```bash
+docker compose logs -f backend
+```
+
+5. Verify health:
+
+```bash
+curl http://127.0.0.1:5000/health
+```
+
+Operational notes:
+
+- keep `.env` on the server only
+- put the container behind Nginx/Caddy/Traefik for TLS termination
+- the compose service runs with `restart: unless-stopped`
+- the image uses a non-root `node` user
+- the container includes a healthcheck against `/health`
+
 ## Environment
 
 - Populate the variables in `.env.example`.

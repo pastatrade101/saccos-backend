@@ -247,6 +247,19 @@ async function executeReset(tenantId, scope) {
     await deleteIn("audit_logs", "entity_id", scope.journalIds);
     await deleteIn("audit_logs", "entity_id", scope.loanIds);
     await deleteIn("audit_logs", "entity_id", scope.memberIds);
+    const { error: clearApprovedMembersError } = await adminSupabase
+        .from("member_applications")
+        .update({ approved_member_id: null })
+        .eq("tenant_id", tenantId)
+        .in("approved_member_id", scope.memberIds.length ? scope.memberIds : ["00000000-0000-0000-0000-000000000000"]);
+
+    if (clearApprovedMembersError) {
+        throw new Error(`Failed to clear approved member references from member_applications: ${clearApprovedMembersError.message}`);
+    }
+
+    await deleteIn("membership_status_history", "member_id", scope.memberIds);
+    await deleteEq("member_application_attachments", "tenant_id", tenantId);
+    await deleteEq("member_applications", "tenant_id", tenantId);
     await deleteIn("dividend_allocations", "member_id", scope.memberIds);
     await deleteIn("dividend_member_snapshots", "member_id", scope.memberIds);
     await deleteIn("loan_account_transactions", "loan_id", scope.loanIds);

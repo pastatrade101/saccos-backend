@@ -42,6 +42,13 @@ async function signIn(payload) {
         throw new AppError(403, "PROFILE_NOT_FOUND", "User profile is not provisioned.");
     }
 
+    await adminSupabase
+        .from("user_profiles")
+        .update({
+            last_login_at: new Date().toISOString()
+        })
+        .eq("user_id", data.user.id);
+
     return {
         session: data.session,
         user: data.user,

@@ -1,6 +1,7 @@
 import ApartmentRoundedIcon from "@mui/icons-material/ApartmentRounded";
 import ArrowForwardRoundedIcon from "@mui/icons-material/ArrowForwardRounded";
 import CorporateFareRoundedIcon from "@mui/icons-material/CorporateFareRounded";
+import DeleteOutlineRoundedIcon from "@mui/icons-material/DeleteOutlineRounded";
 import PaidRoundedIcon from "@mui/icons-material/PaidRounded";
 import SettingsSuggestRoundedIcon from "@mui/icons-material/SettingsSuggestRounded";
 import {
@@ -15,6 +16,7 @@ import {
     DialogContent,
     DialogTitle,
     Grid,
+    InputAdornment,
     MenuItem,
     Stack,
     TextField,
@@ -32,6 +34,7 @@ import { api, getApiErrorMessage } from "../lib/api";
 import {
     endpoints,
     type AssignTenantSubscriptionRequest,
+    type DeleteTenantRequest,
     type PlatformTenantsResponse
 } from "../lib/endpoints";
 import type { Subscription, Tenant } from "../types/api";
@@ -93,7 +96,10 @@ export function PlatformTenantsPage() {
     const [error, setError] = useState<string | null>(null);
     const [switchingTenantId, setSwitchingTenantId] = useState<string | null>(null);
     const [editingTenant, setEditingTenant] = useState<Tenant | null>(null);
+    const [deletingTenant, setDeletingTenant] = useState<Tenant | null>(null);
     const [submitting, setSubmitting] = useState(false);
+    const [deleteSubmitting, setDeleteSubmitting] = useState(false);
+    const [deleteConfirmation, setDeleteConfirmation] = useState("");
     const [formState, setFormState] = useState<AssignTenantSubscriptionRequest>({
         plan_code: "growth",
         status: "active",
@@ -204,6 +210,45 @@ export function PlatformTenantsPage() {
         }
     };
 
+    const handleDeleteTenant = async () => {
+        if (!deletingTenant) {
+            return;
+        }
+
+        setDeleteSubmitting(true);
+
+        try {
+            await api.delete(endpoints.platform.deleteTenant(deletingTenant.id), {
+                data: {
+                    confirm_name: deleteConfirmation
+                } satisfies DeleteTenantRequest
+            });
+
+            pushToast({
+                type: "success",
+                title: "Tenant deleted",
+                message: `${deletingTenant.name} and its operational data were removed.`
+            });
+
+            if (selectedTenantId === deletingTenant.id) {
+                setSelectedTenantId(null);
+                setSelectedBranchId(null);
+            }
+
+            setDeletingTenant(null);
+            setDeleteConfirmation("");
+            await loadPlatformData();
+        } catch (deleteError) {
+            pushToast({
+                type: "error",
+                title: "Tenant deletion failed",
+                message: getApiErrorMessage(deleteError)
+            });
+        } finally {
+            setDeleteSubmitting(false);
+        }
+    };
+
     const columns: Column<Tenant>[] = [
         {
             key: "tenant",
@@ -293,6 +338,18 @@ export function PlatformTenantsPage() {
                     </Button>
                     <Button size="small" variant="text" onClick={() => openEditor(row)}>
                         Assign Plan
+                    </Button>
+                    <Button
+                        size="small"
+                        color="error"
+                        variant="text"
+                        startIcon={<DeleteOutlineRoundedIcon fontSize="small" />}
+                        onClick={() => {
+                            setDeletingTenant(row);
+                            setDeleteConfirmation("");
+                        }}
+                    >
+                        Delete
                     </Button>
                 </Stack>
             )
@@ -439,6 +496,45 @@ export function PlatformTenantsPage() {
                     <Button onClick={() => setEditingTenant(null)}>Cancel</Button>
                     <Button variant="contained" onClick={handleAssignSubscription} disabled={submitting}>
                         {submitting ? "Saving..." : "Save Subscription"}
+                    </Button>
+                </DialogActions>
+            </Dialog>
+
+            <Dialog open={Boolean(deletingTenant)} onClose={deleteSubmitting ? undefined : () => setDeletingTenant(null)} fullWidth maxWidth="sm">
+                <DialogTitle>Delete Tenant</DialogTitle>
+                <DialogContent>
+                    <Stack spacing={2} sx={{ pt: 1 }}>
+                        <Alert severity="warning">
+                            This permanently deletes the tenant, users, members, journals, loans, imports, dividends, and operational history for this SACCOS.
+                        </Alert>
+                        <Typography variant="body2" color="text.secondary">
+                            Type <strong>{deletingTenant?.name}</strong> to confirm deletion.
+                        </Typography>
+                        <TextField
+                            label="Confirm tenant name"
+                            value={deleteConfirmation}
+                            onChange={(event) => setDeleteConfirmation(event.target.value)}
+                            InputProps={{
+                                startAdornment: (
+                                    <InputAdornment position="start">
+                                        <DeleteOutlineRoundedIcon color="error" fontSize="small" />
+                                    </InputAdornment>
+                                )
+                            }}
+                        />
+                    </Stack>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setDeletingTenant(null)} disabled={deleteSubmitting}>
+                        Cancel
+                    </Button>
+                    <Button
+                        color="error"
+                        variant="contained"
+                        onClick={handleDeleteTenant}
+                        disabled={deleteSubmitting || deleteConfirmation.trim() !== deletingTenant?.name}
+                    >
+                        {deleteSubmitting ? "Deleting..." : "Delete Tenant"}
                     </Button>
                 </DialogActions>
             </Dialog>

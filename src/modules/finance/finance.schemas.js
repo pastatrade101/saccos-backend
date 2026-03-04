@@ -8,7 +8,8 @@ const depositSchema = z.object({
     amount: moneyAmount,
     teller_id: z.string().uuid().optional(),
     reference: z.string().max(80).optional().nullable(),
-    description: z.string().max(255).optional().nullable()
+    description: z.string().max(255).optional().nullable(),
+    receipt_ids: z.array(z.string().uuid()).max(10).optional().default([])
 });
 
 const withdrawSchema = depositSchema;
@@ -42,7 +43,8 @@ const loanDisburseSchema = z.object({
     repayment_frequency: z.enum(["daily", "weekly", "monthly"]).default("monthly"),
     disbursed_by: z.string().uuid().optional(),
     reference: z.string().max(80).optional().nullable(),
-    description: z.string().max(255).optional().nullable()
+    description: z.string().max(255).optional().nullable(),
+    receipt_ids: z.array(z.string().uuid()).max(10).optional().default([])
 });
 
 const loanRepaySchema = z.object({
@@ -51,7 +53,8 @@ const loanRepaySchema = z.object({
     amount: moneyAmount,
     user_id: z.string().uuid().optional(),
     reference: z.string().max(80).optional().nullable(),
-    description: z.string().max(255).optional().nullable()
+    description: z.string().max(255).optional().nullable(),
+    receipt_ids: z.array(z.string().uuid()).max(10).optional().default([])
 });
 
 const statementQuerySchema = z.object({

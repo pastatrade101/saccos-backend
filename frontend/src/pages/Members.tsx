@@ -200,6 +200,8 @@ export function MembersPage() {
         profile && ["branch_manager"].includes(profile.role)
     );
     const isTeller = profile?.role === "teller";
+    const canOpenCashDesk = profile?.role === "teller";
+    const canOpenLoans = profile?.role === "loan_officer";
 
     const form = useForm<MemberFormValues>({
         resolver: zodResolver(schema),
@@ -984,46 +986,51 @@ export function MembersPage() {
                                             </Grid>
                                         ) : null}
 
-                                        <Stack direction={{ xs: "column", sm: "row" }} spacing={1.25}>
-                                            <Button
-                                                variant={isTeller ? "contained" : "outlined"}
-                                                startIcon={<AccountBalanceWalletRoundedIcon />}
-                                                onClick={() => {
-                                                    if (selectedMember.account) {
-                                                        localStorage.setItem("saccos:selectedAccountId", selectedMember.account.id);
-                                                    }
-                                                    localStorage.setItem("saccos:selectedMemberId", selectedMember.id);
-                                                    navigate("/cash");
-                                                }}
-                                                fullWidth
-                                                sx={isTeller ? { py: 1.15 } : undefined}
-                                            >
-                                                {isTeller ? "Serve in Cash Desk" : "Open Cash Desk"}
-                                            </Button>
-                                            {isTeller ? (
-                                                <Button
-                                                    variant="outlined"
-                                                    startIcon={<OpenInNewRoundedIcon />}
-                                                    onClick={() => setSelectedMember(null)}
-                                                    fullWidth
-                                                    sx={{ py: 1.15 }}
-                                                >
-                                                    Clear Selection
-                                                </Button>
-                                            ) : (
-                                                <Button
-                                                    variant="outlined"
-                                                    startIcon={<CreditScoreRoundedIcon />}
-                                                    onClick={() => {
-                                                        localStorage.setItem("saccos:selectedMemberId", selectedMember.id);
-                                                        navigate("/loans");
-                                                    }}
-                                                    fullWidth
-                                                >
-                                                    Open Loans
-                                                </Button>
-                                            )}
-                                        </Stack>
+                                        {canOpenCashDesk || canOpenLoans ? (
+                                            <Stack direction={{ xs: "column", sm: "row" }} spacing={1.25}>
+                                                {canOpenCashDesk ? (
+                                                    <Button
+                                                        variant="contained"
+                                                        startIcon={<AccountBalanceWalletRoundedIcon />}
+                                                        onClick={() => {
+                                                            if (selectedMember.account) {
+                                                                localStorage.setItem("saccos:selectedAccountId", selectedMember.account.id);
+                                                            }
+                                                            localStorage.setItem("saccos:selectedMemberId", selectedMember.id);
+                                                            navigate("/cash");
+                                                        }}
+                                                        fullWidth
+                                                        sx={{ py: 1.15 }}
+                                                    >
+                                                        Serve in Cash Desk
+                                                    </Button>
+                                                ) : null}
+                                                {canOpenLoans ? (
+                                                    <Button
+                                                        variant="outlined"
+                                                        startIcon={<CreditScoreRoundedIcon />}
+                                                        onClick={() => {
+                                                            localStorage.setItem("saccos:selectedMemberId", selectedMember.id);
+                                                            navigate("/loans");
+                                                        }}
+                                                        fullWidth
+                                                    >
+                                                        Open Loans
+                                                    </Button>
+                                                ) : null}
+                                                {isTeller ? (
+                                                    <Button
+                                                        variant="outlined"
+                                                        startIcon={<OpenInNewRoundedIcon />}
+                                                        onClick={() => setSelectedMember(null)}
+                                                        fullWidth
+                                                        sx={{ py: 1.15 }}
+                                                    >
+                                                        Clear Selection
+                                                    </Button>
+                                                ) : null}
+                                            </Stack>
+                                        ) : null}
 
                                         {!isTeller ? <Divider /> : null}
 

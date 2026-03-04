@@ -9,7 +9,11 @@
     "check": "node --check src/server.js",
     "bootstrap:internal-ops": "node scripts/bootstrap-internal-ops.js",
     "seed:demo": "node scripts/seed-demo-data.js",
-    "reset:members": "node scripts/reset-members.js"
+    "reset:tenants": "node scripts/reset-tenants.js",
+    "reset:members": "node scripts/reset-members.js",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:smoke": "jest test/smoke/smoke.test.ts"
   },
   "keywords": [],
   "author": "",
@@ -29,6 +33,14 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "nodemon": "^3.1.14"
+    "@types/jest": "^30.0.0",
+    "@types/node": "^24.5.2",
+    "@types/pg": "^8.15.5",
+    "@types/supertest": "^6.0.3",
+    "jest": "^30.1.3",
+    "nodemon": "^3.1.14",
+    "supertest": "^7.1.4",
+    "ts-jest": "^29.4.1",
+    "typescript": "^5.9.2"
   }
 }

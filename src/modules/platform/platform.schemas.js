@@ -25,9 +25,14 @@ const assignSubscriptionSchema = z.object({
     expires_at: z.string().datetime().optional()
 });
 
+const deleteTenantSchema = z.object({
+    confirm_name: z.string().min(1).max(255)
+});
+
 module.exports = {
     planParamSchema,
     tenantParamSchema,
     updatePlanFeaturesSchema,
-    assignSubscriptionSchema
+    assignSubscriptionSchema,
+    deleteTenantSchema
 };

@@ -72,6 +72,22 @@ async function createTenant(actor, payload) {
         throw new AppError(500, "TENANT_SEED_FAILED", "Unable to seed tenant defaults.", seedError);
     }
 
+    const { error: phase1SeedError } = await adminSupabase.rpc("seed_phase1_defaults", {
+        p_tenant_id: tenant.id
+    });
+
+    if (phase1SeedError) {
+        throw new AppError(500, "TENANT_PHASE1_SEED_FAILED", "Unable to seed tenant product defaults.", phase1SeedError);
+    }
+
+    const { error: phase2SeedError } = await adminSupabase.rpc("seed_phase2_defaults", {
+        p_tenant_id: tenant.id
+    });
+
+    if (phase2SeedError) {
+        throw new AppError(500, "TENANT_PHASE2_SEED_FAILED", "Unable to seed tenant cash-control defaults.", phase2SeedError);
+    }
+
     const { error: branchError } = await adminSupabase
         .from("branches")
         .insert({

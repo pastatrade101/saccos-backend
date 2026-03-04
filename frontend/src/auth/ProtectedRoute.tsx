@@ -45,6 +45,10 @@ export function ProtectedRoute({
         return <Navigate to="/access-denied" replace />;
     }
 
+    if (isInternalOps && allowInternalOps) {
+        return <Outlet />;
+    }
+
     if (allowedRoles && profile && !allowedRoles.includes(profile.role)) {
         return <Navigate to="/access-denied" replace />;
     }

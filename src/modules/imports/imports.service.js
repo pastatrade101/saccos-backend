@@ -539,7 +539,7 @@ async function createImportJob({ tenantId, branchId, createdBy }) {
             tenant_id: tenantId,
             branch_id: branchId,
             created_by: createdBy,
-            status: "processing"
+            status: "pending"
         })
         .select("*")
         .single();
@@ -813,7 +813,7 @@ function ensureCsvHeaders(headers) {
     }
 }
 
-async function processMemberImport({ actor, fileBuffer, options, requestMeta }) {
+async function runMemberImportJob({ jobId, actor, fileBuffer, options, requestMeta }) {
     const tenantId = actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
 
@@ -827,27 +827,11 @@ async function processMemberImport({ actor, fileBuffer, options, requestMeta }) 
         assertBranchAccess({ auth: actor }, defaultBranchId);
     }
 
-    const job = await createImportJob({
-        tenantId,
-        branchId: defaultBranchId,
-        createdBy: actor.user.id
-    });
-
-    await logAudit({
-        tenantId,
-        actorUserId: actor.user.id,
-        table: "import_jobs",
-        entityType: "import_job",
-        entityId: job.id,
-        action: "IMPORT_MEMBERS_STARTED",
-        ip: requestMeta.ip,
-        userAgent: requestMeta.userAgent,
-        afterData: {
-            create_portal_account: options.create_portal_account
-        }
-    });
-
     try {
+        await updateImportJob(jobId, {
+            status: "processing"
+        });
+
         const { headers, rows } = parseCsvBuffer(fileBuffer);
         ensureCsvHeaders(headers);
 
@@ -1002,12 +986,11 @@ async function processMemberImport({ actor, fileBuffer, options, requestMeta }) 
                 ["full_name", "email", "member_no", "temp_password"],
                 credentialsRows
             );
-            credentialsPath = `tenant/${tenantId}/imports/${job.id}/credentials.csv`;
+            credentialsPath = `tenant/${tenantId}/imports/${jobId}/credentials.csv`;
             await uploadCsv(credentialsPath, credentialsCsv);
-            credentialsDownloadUrl = await createSignedUrl(credentialsPath);
         }
 
-        const completedJob = await updateImportJob(job.id, {
+        const completedJob = await updateImportJob(jobId, {
             status: failedRows === rows.length && rows.length > 0 ? "failed" : "completed",
             total_rows: rows.length,
             success_rows: successRows,
@@ -1021,7 +1004,7 @@ async function processMemberImport({ actor, fileBuffer, options, requestMeta }) 
             actorUserId: actor.user.id,
             table: "import_jobs",
             entityType: "import_job",
-            entityId: job.id,
+            entityId: jobId,
             action: "IMPORT_MEMBERS_COMPLETED",
             ip: requestMeta.ip,
             userAgent: requestMeta.userAgent,
@@ -1037,17 +1020,69 @@ async function processMemberImport({ actor, fileBuffer, options, requestMeta }) 
             job_id: completedJob.id,
             total_rows: completedJob.total_rows,
             success_rows: completedJob.success_rows,
-            failed_rows: completedJob.failed_rows,
-            credentials_download_url: credentialsDownloadUrl
+            failed_rows: completedJob.failed_rows
         };
     } catch (error) {
-        await updateImportJob(job.id, {
+        await updateImportJob(jobId, {
             status: "failed",
             completed_at: new Date().toISOString()
         });
 
         throw error;
     }
+}
+
+async function processMemberImport({ actor, fileBuffer, options, requestMeta }) {
+    const tenantId = actor.tenantId;
+    assertTenantAccess({ auth: actor }, tenantId);
+
+    const defaultBranchId = await resolveImportJobBranchId({
+        tenantId,
+        actor,
+        defaultBranchId: options.default_branch_id || null
+    });
+
+    if (defaultBranchId) {
+        assertBranchAccess({ auth: actor }, defaultBranchId);
+    }
+
+    const job = await createImportJob({
+        tenantId,
+        branchId: defaultBranchId,
+        createdBy: actor.user.id
+    });
+
+    await logAudit({
+        tenantId,
+        actorUserId: actor.user.id,
+        table: "import_jobs",
+        entityType: "import_job",
+        entityId: job.id,
+        action: "IMPORT_MEMBERS_STARTED",
+        ip: requestMeta.ip,
+        userAgent: requestMeta.userAgent,
+        afterData: {
+            create_portal_account: options.create_portal_account
+        }
+    });
+
+    setImmediate(() => {
+        void runMemberImportJob({
+            jobId: job.id,
+            actor,
+            fileBuffer,
+            options,
+            requestMeta
+        }).catch(() => {});
+    });
+
+    return {
+        job_id: job.id,
+        total_rows: 0,
+        success_rows: 0,
+        failed_rows: 0,
+        status: "pending"
+    };
 }
 
 async function getImportJob(actor, jobId) {

@@ -79,6 +79,8 @@ const navItems: NavItem[] = [
     { to: "/platform/tenants", label: "Tenants", roles: ["platform_admin"], section: "workspace", icon: StorefrontRoundedIcon },
     { to: "/platform/plans", label: "Plans", roles: ["platform_admin"], section: "workspace", icon: TuneRoundedIcon },
     { to: "/staff-users", label: "Team Access", roles: ["super_admin", "branch_manager"], section: "workspace", icon: PeopleAltRoundedIcon },
+    { to: "/products", label: "Products", roles: ["super_admin", "branch_manager"], section: "workspace", icon: TuneRoundedIcon },
+    { to: "/member-applications", label: "Applications", roles: ["super_admin", "branch_manager", "auditor"], section: "workspace", icon: DescriptionRoundedIcon },
     { to: "/members", label: "Members", roles: ["branch_manager", "loan_officer", "teller"], section: "workspace", icon: GroupRoundedIcon },
     { to: "/members/import", label: "Member Import", roles: ["super_admin", "branch_manager"], section: "workspace", icon: StoreRoundedIcon },
     { to: "/auditor/exceptions", label: "Exceptions", roles: ["auditor"], section: "workspace", icon: WarningAmberRoundedIcon },
@@ -87,6 +89,7 @@ const navItems: NavItem[] = [
     { to: "/contributions", label: "Contributions", roles: ["branch_manager"], section: "finance", icon: PieChartRoundedIcon },
     { to: "/dividends", label: "Dividends", roles: ["branch_manager"], section: "finance", icon: EventRepeatRoundedIcon },
     { to: "/cash", label: "Cash Desk", roles: ["teller"], section: "finance", icon: PaidRoundedIcon },
+    { to: "/cash-control", label: "Cash Control", roles: ["super_admin", "branch_manager", "auditor"], section: "finance", icon: PaidRoundedIcon },
     { to: "/loans", label: "Loans", roles: ["loan_officer"], section: "finance", icon: SummarizeRoundedIcon },
     { to: "/reports", label: "Reports", roles: ["super_admin", "branch_manager", "loan_officer"], section: "finance", icon: DescriptionRoundedIcon },
     { to: "/auditor/reports", label: "Reports", roles: ["auditor"], section: "finance", icon: DescriptionRoundedIcon }
@@ -103,8 +106,11 @@ const searchKeywords: Partial<Record<NavItem["to"], string[]>> = {
     "/platform/tenants": ["platform", "saas", "tenants", "organizations"],
     "/platform/plans": ["pricing", "features", "entitlements", "plans"],
     "/staff-users": ["team", "staff", "users", "roles", "access"],
+    "/products": ["savings products", "share products", "charges", "posting rules", "coa mappings"],
+    "/member-applications": ["applications", "kyc", "member approval", "onboarding review"],
     "/members": ["customers", "registry", "member onboarding"],
     "/members/import": ["csv import", "bulk members", "credentials", "portal onboarding"],
+    "/cash-control": ["receipt policy", "teller balancing", "daily cashbook", "cash summary"],
     "/auditor/exceptions": ["audit", "exceptions", "flags", "compliance"],
     "/auditor/journals": ["audit", "journals", "ledger", "entries"],
     "/auditor/audit-logs": ["audit logs", "trail", "changes"],
@@ -128,6 +134,14 @@ function getPageTitle(pathname: string) {
 function getPageSubtitle(pathname: string) {
     if (pathname.startsWith("/members/import")) {
         return "Bulk onboard members from CSV with secure one-time credentials.";
+    }
+
+    if (pathname.startsWith("/products")) {
+        return "Configure savings, share, charge, penalty, and posting-rule foundations before money moves.";
+    }
+
+    if (pathname.startsWith("/member-applications")) {
+        return "Review prospective members, record KYC outcomes, and approve into the member register.";
     }
 
     if (pathname.startsWith("/dashboard")) {
@@ -164,6 +178,10 @@ function getPageSubtitle(pathname: string) {
 
     if (pathname.startsWith("/cash")) {
         return "Handle cash transactions with confirmation and traceability.";
+    }
+
+    if (pathname.startsWith("/cash-control")) {
+        return "Configure receipt evidence and review teller balancing before day-end close.";
     }
 
     if (pathname.startsWith("/contributions")) {
@@ -229,7 +247,11 @@ export function AppLayout() {
         }
 
         if (isInternalOps) {
-            return ["/dashboard", "/platform/tenants", "/platform/plans"].includes(item.to);
+            return (
+                (item.to === "/dashboard" && item.label === "Dashboard") ||
+                item.to === "/platform/tenants" ||
+                item.to === "/platform/plans"
+            );
         }
 
         if (!profile || !item.roles) {

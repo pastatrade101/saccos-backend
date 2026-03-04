@@ -24,7 +24,18 @@ import type {
     AuditorException,
     AuditorJournal,
     AuditorJournalDetail,
-    AuditLogEntry
+    AuditLogEntry,
+    MemberApplication,
+    ProductBootstrapPayload,
+    SavingsProduct,
+    ShareProduct,
+    FeeRule,
+    PenaltyRule,
+    PostingRule,
+    TellerSession,
+    ReceiptPolicy,
+    TransactionReceipt,
+    DailyCashSummary
 } from "../types/api";
 
 const routeMap = {
@@ -48,6 +59,29 @@ const routeMap = {
         temporaryCredential: (userId: string) => `/users/${userId}/temporary-credential`,
         setupSuperAdmin: "/users/setup-super-admin"
     },
+    cashControl: {
+        sessions: "/cash-control/sessions",
+        currentSession: "/cash-control/sessions/current",
+        openSession: "/cash-control/sessions/open",
+        closeSession: (sessionId: string) => `/cash-control/sessions/${sessionId}/close`,
+        reviewSession: (sessionId: string) => `/cash-control/sessions/${sessionId}/review`,
+        receiptPolicy: "/cash-control/receipt-policy",
+        initReceipt: "/cash-control/receipts/init",
+        confirmReceipt: (receiptId: string) => `/cash-control/receipts/${receiptId}/confirm`,
+        journalReceipts: (journalId: string) => `/cash-control/journals/${journalId}/receipts`,
+        receiptDownload: (receiptId: string) => `/cash-control/receipts/${receiptId}/download`,
+        dailySummary: "/cash-control/summary/daily",
+        dailyCashbookCsv: "/cash-control/reports/daily-cashbook.csv",
+        tellerBalancingCsv: "/cash-control/reports/teller-balancing.csv"
+    },
+    products: {
+        bootstrap: "/products/bootstrap",
+        savings: "/products/savings",
+        shares: "/products/shares",
+        fees: "/products/fees",
+        penalties: "/products/penalties",
+        postingRules: "/products/posting-rules"
+    },
     me: {
         subscription: "/me/subscription"
     },
@@ -55,7 +89,8 @@ const routeMap = {
         plans: "/platform/plans",
         planFeatures: (planId: string) => `/platform/plans/${planId}/features`,
         tenants: "/platform/tenants",
-        assignSubscription: (tenantId: string) => `/platform/tenants/${tenantId}/subscription`
+        assignSubscription: (tenantId: string) => `/platform/tenants/${tenantId}/subscription`,
+        deleteTenant: (tenantId: string) => `/platform/tenants/${tenantId}`
     },
     members: {
         list: "/members",
@@ -64,6 +99,14 @@ const routeMap = {
         update: (memberId: string) => `/members/${memberId}`,
         createLogin: (memberId: string) => `/members/${memberId}/create-login`,
         temporaryCredential: (memberId: string) => `/members/${memberId}/temporary-credential`
+    },
+    memberApplications: {
+        list: "/member-applications",
+        detail: (applicationId: string) => `/member-applications/${applicationId}`,
+        submit: (applicationId: string) => `/member-applications/${applicationId}/submit`,
+        review: (applicationId: string) => `/member-applications/${applicationId}/review`,
+        approve: (applicationId: string) => `/member-applications/${applicationId}/approve`,
+        reject: (applicationId: string) => `/member-applications/${applicationId}/reject`
     },
     imports: {
         members: "/imports/members",
@@ -90,6 +133,7 @@ const routeMap = {
         cycle: (cycleId: string) => `/dividends/cycles/${cycleId}`,
         freeze: (cycleId: string) => `/dividends/cycles/${cycleId}/freeze`,
         allocate: (cycleId: string) => `/dividends/cycles/${cycleId}/allocate`,
+        submit: (cycleId: string) => `/dividends/cycles/${cycleId}/submit`,
         approve: (cycleId: string) => `/dividends/cycles/${cycleId}/approve`,
         reject: (cycleId: string) => `/dividends/cycles/${cycleId}/reject`,
         pay: (cycleId: string) => `/dividends/cycles/${cycleId}/pay`,
@@ -135,6 +179,29 @@ export const endpoints = {
         temporaryCredential: (userId: string) => routeMap.users.temporaryCredential(userId),
         setupSuperAdmin: () => routeMap.users.setupSuperAdmin
     },
+    cashControl: {
+        sessions: () => routeMap.cashControl.sessions,
+        currentSession: () => routeMap.cashControl.currentSession,
+        openSession: () => routeMap.cashControl.openSession,
+        closeSession: (sessionId: string) => routeMap.cashControl.closeSession(sessionId),
+        reviewSession: (sessionId: string) => routeMap.cashControl.reviewSession(sessionId),
+        receiptPolicy: () => routeMap.cashControl.receiptPolicy,
+        initReceipt: () => routeMap.cashControl.initReceipt,
+        confirmReceipt: (receiptId: string) => routeMap.cashControl.confirmReceipt(receiptId),
+        journalReceipts: (journalId: string) => routeMap.cashControl.journalReceipts(journalId),
+        receiptDownload: (receiptId: string) => routeMap.cashControl.receiptDownload(receiptId),
+        dailySummary: () => routeMap.cashControl.dailySummary,
+        dailyCashbookCsv: () => routeMap.cashControl.dailyCashbookCsv,
+        tellerBalancingCsv: () => routeMap.cashControl.tellerBalancingCsv
+    },
+    products: {
+        bootstrap: () => routeMap.products.bootstrap,
+        savings: () => routeMap.products.savings,
+        shares: () => routeMap.products.shares,
+        fees: () => routeMap.products.fees,
+        penalties: () => routeMap.products.penalties,
+        postingRules: () => routeMap.products.postingRules
+    },
     me: {
         subscription: () => routeMap.me.subscription
     },
@@ -142,7 +209,8 @@ export const endpoints = {
         plans: () => routeMap.platform.plans,
         planFeatures: (planId: string) => routeMap.platform.planFeatures(planId),
         tenants: () => routeMap.platform.tenants,
-        assignSubscription: (tenantId: string) => routeMap.platform.assignSubscription(tenantId)
+        assignSubscription: (tenantId: string) => routeMap.platform.assignSubscription(tenantId),
+        deleteTenant: (tenantId: string) => routeMap.platform.deleteTenant(tenantId)
     },
     members: {
         list: () => routeMap.members.list,
@@ -151,6 +219,14 @@ export const endpoints = {
         update: (memberId: string) => routeMap.members.update(memberId),
         createLogin: (memberId: string) => routeMap.members.createLogin(memberId),
         temporaryCredential: (memberId: string) => routeMap.members.temporaryCredential(memberId)
+    },
+    memberApplications: {
+        list: () => routeMap.memberApplications.list,
+        detail: (applicationId: string) => routeMap.memberApplications.detail(applicationId),
+        submit: (applicationId: string) => routeMap.memberApplications.submit(applicationId),
+        review: (applicationId: string) => routeMap.memberApplications.review(applicationId),
+        approve: (applicationId: string) => routeMap.memberApplications.approve(applicationId),
+        reject: (applicationId: string) => routeMap.memberApplications.reject(applicationId)
     },
     imports: {
         members: () => routeMap.imports.members,
@@ -177,6 +253,7 @@ export const endpoints = {
         cycle: (cycleId: string) => routeMap.dividends.cycle(cycleId),
         freeze: (cycleId: string) => routeMap.dividends.freeze(cycleId),
         allocate: (cycleId: string) => routeMap.dividends.allocate(cycleId),
+        submit: (cycleId: string) => routeMap.dividends.submit(cycleId),
         approve: (cycleId: string) => routeMap.dividends.approve(cycleId),
         reject: (cycleId: string) => routeMap.dividends.reject(cycleId),
         pay: (cycleId: string) => routeMap.dividends.pay(cycleId),
@@ -294,14 +371,33 @@ export interface AssignTenantSubscriptionRequest {
     expires_at?: string;
 }
 
+export interface DeleteTenantRequest {
+    confirm_name: string;
+}
+
 export interface CreateMemberRequest {
     tenant_id?: string;
     branch_id: string;
     full_name: string;
+    dob?: string | null;
     phone?: string | null;
     email?: string | null;
     member_no?: string | null;
     national_id?: string | null;
+    address_line1?: string | null;
+    address_line2?: string | null;
+    city?: string | null;
+    state?: string | null;
+    country?: string | null;
+    postal_code?: string | null;
+    nida_no?: string | null;
+    tin_no?: string | null;
+    next_of_kin_name?: string | null;
+    next_of_kin_phone?: string | null;
+    next_of_kin_relationship?: string | null;
+    employer?: string | null;
+    kyc_status?: "pending" | "verified" | "rejected" | "waived";
+    kyc_reason?: string | null;
     notes?: string | null;
     status?: "active" | "suspended" | "exited";
     login?: {
@@ -320,14 +416,74 @@ export type CreateMemberResponse = ApiEnvelope<{
 export interface UpdateMemberRequest {
     branch_id?: string;
     full_name?: string;
+    dob?: string | null;
     phone?: string | null;
     email?: string | null;
     member_no?: string | null;
     national_id?: string | null;
+    address_line1?: string | null;
+    address_line2?: string | null;
+    city?: string | null;
+    state?: string | null;
+    country?: string | null;
+    postal_code?: string | null;
+    nida_no?: string | null;
+    tin_no?: string | null;
+    next_of_kin_name?: string | null;
+    next_of_kin_phone?: string | null;
+    next_of_kin_relationship?: string | null;
+    employer?: string | null;
+    kyc_status?: "pending" | "verified" | "rejected" | "waived";
+    kyc_reason?: string | null;
     notes?: string | null;
     status?: "active" | "suspended" | "exited";
 }
 export type UpdateMemberResponse = ApiEnvelope<Member>;
+
+export interface CreateMemberApplicationRequest {
+    branch_id: string;
+    full_name: string;
+    dob?: string | null;
+    phone?: string | null;
+    email?: string | null;
+    address_line1?: string | null;
+    address_line2?: string | null;
+    city?: string | null;
+    state?: string | null;
+    country?: string | null;
+    postal_code?: string | null;
+    nida_no?: string | null;
+    tin_no?: string | null;
+    next_of_kin_name?: string | null;
+    next_of_kin_phone?: string | null;
+    next_of_kin_relationship?: string | null;
+    employer?: string | null;
+    member_no?: string | null;
+    national_id?: string | null;
+    notes?: string | null;
+    kyc_status?: "pending" | "verified" | "rejected" | "waived";
+    kyc_reason?: string | null;
+    membership_fee_amount?: number;
+    membership_fee_paid?: number;
+}
+
+export interface ReviewMemberApplicationRequest {
+    notes?: string | null;
+    kyc_status?: "pending" | "verified" | "rejected" | "waived";
+    kyc_reason?: string | null;
+}
+
+export interface RejectMemberApplicationRequest {
+    reason: string;
+}
+
+export type MemberApplicationsResponse = ApiEnvelope<MemberApplication[]>;
+export type ProductBootstrapResponse = ApiEnvelope<ProductBootstrapPayload>;
+export type SavingsProductsResponse = ApiEnvelope<SavingsProduct[]>;
+export type ShareProductsResponse = ApiEnvelope<ShareProduct[]>;
+export type FeeRulesResponse = ApiEnvelope<FeeRule[]>;
+export type PenaltyRulesResponse = ApiEnvelope<PenaltyRule[]>;
+export type PostingRulesResponse = ApiEnvelope<PostingRule[]>;
 
 export interface CreateMemberLoginRequest {
     email?: string | null;
@@ -338,6 +494,57 @@ export interface CreateMemberLoginRequest {
 export type LoansResponse = ApiEnvelope<Loan[]>;
 export type LoanSchedulesResponse = ApiEnvelope<LoanSchedule[]>;
 export type LoanTransactionsResponse = ApiEnvelope<LoanTransaction[]>;
+export type TellerSessionsResponse = ApiEnvelope<TellerSession[]>;
+export type TellerSessionResponse = ApiEnvelope<TellerSession | null>;
+export type ReceiptPolicyResponse = ApiEnvelope<ReceiptPolicy>;
+export type TransactionReceiptsResponse = ApiEnvelope<TransactionReceipt[]>;
+export type DailyCashSummaryResponse = ApiEnvelope<DailyCashSummary[]>;
+
+export interface OpenTellerSessionRequest {
+    branch_id?: string;
+    opening_cash: number;
+    notes?: string | null;
+}
+
+export interface CloseTellerSessionRequest {
+    closing_cash: number;
+    notes?: string | null;
+}
+
+export interface ReviewTellerSessionRequest {
+    review_notes?: string | null;
+}
+
+export interface UpdateReceiptPolicyRequest {
+    branch_id?: string | null;
+    receipt_required: boolean;
+    required_threshold: number;
+    max_receipts_per_tx: number;
+    allowed_mime_types: string[];
+    max_file_size_mb: number;
+    enforce_on_types: Array<"deposit" | "withdraw" | "loan_repay" | "loan_disburse" | "share_contribution">;
+}
+
+export interface ReceiptInitRequest {
+    branch_id: string;
+    member_id?: string | null;
+    transaction_type: "deposit" | "withdraw" | "loan_repay" | "loan_disburse" | "share_contribution";
+    file_name: string;
+    mime_type: string;
+    file_size_bytes: number;
+}
+
+export interface ReceiptInitResponseData {
+    receipt: TransactionReceipt;
+    upload: {
+        path: string;
+        token: string;
+        signedUrl: string;
+    };
+}
+
+export type ReceiptInitResponse = ApiEnvelope<ReceiptInitResponseData>;
+export type ReceiptDownloadResponse = ApiEnvelope<{ signed_url: string; receipt: TransactionReceipt }>;
 
 export type CreateMemberLoginResponse = ApiEnvelope<MemberLoginProvisionResult>;
 export type TemporaryCredentialResponse = ApiEnvelope<import("../types/api").TemporaryCredential>;
@@ -366,6 +573,7 @@ export interface CashRequest {
     amount: number;
     reference?: string | null;
     description?: string | null;
+    receipt_ids?: string[];
 }
 
 export type CashResponse = ApiEnvelope<FinanceResult>;

@@ -11,7 +11,7 @@ const { createBranchSchema } = require("./branches.schemas");
 
 const router = express.Router();
 
-router.use(auth, requireSubscription());
+router.use(auth);
 
 router.get(
     "/",
@@ -26,6 +26,7 @@ router.get(
 );
 router.post(
     "/",
+    requireSubscription(),
     authorize([ROLES.SUPER_ADMIN]),
     enforceLimit("max_branches", null, { tableName: "branches" }),
     validate(createBranchSchema),

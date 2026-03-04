@@ -21,7 +21,7 @@ export function SignInPage() {
     const navigate = useNavigate();
     const location = useLocation();
     const { pushToast } = useToast();
-    const { signIn, session, signOut } = useAuth();
+    const { signIn, session } = useAuth();
     const { theme, toggleTheme } = useUI();
     const [submitting, setSubmitting] = useState(false);
 
@@ -45,7 +45,7 @@ export function SignInPage() {
             pushToast({
                 type: "success",
                 title: "Signed in",
-                message: "Your Supabase session is active."
+                message: "You are now signed in."
             });
             navigate("/", { replace: true });
         } catch (error) {
@@ -63,7 +63,6 @@ export function SignInPage() {
         <div className={pageStyles.authShell}>
             <div className={pageStyles.authCard}>
                 <div className="toolbar" style={{ marginBottom: "1rem" }}>
-                    <p className="pill">Secure access via Supabase Auth</p>
                     <button className="secondary-button" type="button" onClick={toggleTheme}>
                         {theme === "dark" ? "Light mode" : "Dark mode"}
                     </button>
@@ -84,12 +83,6 @@ export function SignInPage() {
                         {submitting ? "Signing in..." : "Sign In"}
                     </button>
                 </form>
-
-                <div style={{ marginTop: "1rem" }}>
-                    <button className="secondary-button" type="button" onClick={() => void signOut()}>
-                        Clear any stale session
-                    </button>
-                </div>
             </div>
         </div>
     );

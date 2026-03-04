@@ -21,7 +21,7 @@ exports.importMembers = asyncHandler(async (req, res) => {
         }
     });
 
-    res.status(201).json({ data: result });
+    res.status(202).json({ data: result });
 });
 
 exports.getImportJob = asyncHandler(async (req, res) => {

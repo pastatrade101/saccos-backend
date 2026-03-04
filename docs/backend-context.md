@@ -87,7 +87,10 @@ Purpose:
 Important behavior:
 
 - creating a tenant automatically provisions a default head-office branch
-- tenant creation calls `seed_tenant_defaults`
+- tenant creation calls:
+  - `seed_tenant_defaults`
+  - `seed_phase1_defaults`
+  - `seed_phase2_defaults`
 
 ### Branches
 
@@ -98,6 +101,36 @@ Purpose:
 
 - branch reads and creation
 - plan limit enforcement for `max_branches`
+
+### Products
+
+- [src/modules/products/products.routes.js](/Users/pastoryjoseph/Desktop/saccos-backend/src/modules/products/products.routes.js)
+- [src/modules/products/products.service.js](/Users/pastoryjoseph/Desktop/saccos-backend/src/modules/products/products.service.js)
+
+Purpose:
+
+- savings product configuration
+- share product configuration
+- fee rules
+- penalty rules
+- posting rules
+
+Important behavior:
+
+- operations that post money must have valid posting rules
+- tenant defaults are seeded during tenant creation
+
+### Member Applications
+
+- [src/modules/member-applications/member-applications.routes.js](/Users/pastoryjoseph/Desktop/saccos-backend/src/modules/member-applications/member-applications.routes.js)
+- [src/modules/member-applications/member-applications.service.js](/Users/pastoryjoseph/Desktop/saccos-backend/src/modules/member-applications/member-applications.service.js)
+
+Purpose:
+
+- application capture
+- KYC review
+- approval into member records
+- rejection with reason
 
 ### Users
 
@@ -157,6 +190,26 @@ Important behavior:
 
 - frontend reads should go through backend endpoints, not direct Supabase client table queries
 - this was done deliberately to keep branch and role scoping consistent
+
+### Cash Control
+
+- [src/modules/cash-control/cash-control.routes.js](/Users/pastoryjoseph/Desktop/saccos-backend/src/modules/cash-control/cash-control.routes.js)
+- [src/modules/cash-control/cash-control.service.js](/Users/pastoryjoseph/Desktop/saccos-backend/src/modules/cash-control/cash-control.service.js)
+
+Purpose:
+
+- teller session open/close/review
+- receipt policy management
+- signed receipt upload flow
+- journal-linked receipt retrieval
+- daily cash summary
+- cashbook and teller balancing exports
+
+Important behavior:
+
+- tellers are expected to have an open session before cash transactions post
+- receipt policies can enforce proof by transaction type and threshold
+- receipts are stored in a private storage bucket and downloaded via signed URLs
 
 ### Dividends
 
@@ -221,6 +274,14 @@ Additive SQL:
 - [007_loan_accounts.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/007_loan_accounts.sql)
 - [008_loan_repayment_tracking_fix.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/008_loan_repayment_tracking_fix.sql)
 - [009_auditor_upgrade.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/009_auditor_upgrade.sql)
+- [010_member_import.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/010_member_import.sql)
+- [011_import_storage_policies.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/011_import_storage_policies.sql)
+- [013_phase1_foundation.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/013_phase1_foundation.sql)
+- [014_phase1_rls.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/014_phase1_rls.sql)
+- [015_phase1_procedures.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/015_phase1_procedures.sql)
+- [016_phase2_cash_control.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/016_phase2_cash_control.sql)
+- [017_phase2_cash_control_rls.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/017_phase2_cash_control_rls.sql)
+- [018_phase2_receipts_storage.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/018_phase2_receipts_storage.sql)
 
 ### Accounting Structure
 
@@ -228,6 +289,9 @@ GL setup:
 
 - `chart_of_accounts` exists
 - tenant defaults are seeded by `seed_tenant_defaults(p_tenant_id uuid)` in [003_procedures.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/003_procedures.sql)
+- product defaults, posting rules, and cash-control defaults are seeded by:
+  - `seed_phase1_defaults(p_tenant_id uuid)`
+  - `seed_phase2_defaults(p_tenant_id uuid)`
 - seeded controls include:
   - cash
   - member savings control
@@ -317,7 +381,11 @@ These are intentional and should not be casually undone:
 
 1. SaaS owner creates tenant
 2. backend creates default subscription and default branch
-3. backend seeds default GL
+3. backend seeds:
+   - default GL
+   - default products
+   - default posting rules
+   - cash-control defaults
 4. SaaS owner creates a real tenant `super_admin` account
 5. tenant `super_admin` creates first `branch_manager`
 6. `branch_manager` creates operating staff and members

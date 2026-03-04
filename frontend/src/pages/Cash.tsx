@@ -16,6 +16,7 @@ import {
     DialogContent,
     DialogTitle,
     Grid,
+    InputLabel,
     Pagination,
     Stack,
     TextField,
@@ -37,12 +38,19 @@ import {
     endpoints,
     type CashRequest,
     type CashResponse,
+    type CloseTellerSessionRequest,
+    type DailyCashSummaryResponse,
     type MemberAccountsResponse,
     type MembersResponse,
+    type OpenTellerSessionRequest,
+    type ReceiptInitResponse,
+    type ReceiptPolicyResponse,
     type ShareContributionResponse,
-    type StatementsResponse
+    type StatementsResponse,
+    type TellerSessionResponse
 } from "../lib/endpoints";
-import type { Member, MemberAccount, StatementRow } from "../types/api";
+import { supabase } from "../lib/supabase";
+import type { DailyCashSummary, Member, MemberAccount, ReceiptPolicy, StatementRow, TellerSession } from "../types/api";
 import { formatCurrency, formatDate } from "../utils/format";
 
 const actionSchema = z.object({
@@ -54,7 +62,7 @@ const actionSchema = z.object({
 
 type CashValues = z.infer<typeof actionSchema>;
 type ActionType = "deposit" | "withdraw" | "share_contribution";
-type PendingAction = { type: ActionType; values: CashValues } | null;
+type PendingAction = { type: ActionType; values: CashValues; receiptFile: File | null } | null;
 
 function MetricCard({
     title,
@@ -112,14 +120,22 @@ function MetricCard({
 export function CashPage() {
     const theme = useTheme();
     const { pushToast } = useToast();
-    const { selectedTenantId, selectedTenantName, subscriptionInactive } = useAuth();
+    const { selectedTenantId, selectedTenantName, selectedBranchId, subscriptionInactive } = useAuth();
     const [members, setMembers] = useState<Member[]>([]);
     const [accounts, setAccounts] = useState<MemberAccount[]>([]);
     const [transactions, setTransactions] = useState<StatementRow[]>([]);
+    const [currentSession, setCurrentSession] = useState<TellerSession | null>(null);
+    const [receiptPolicy, setReceiptPolicy] = useState<ReceiptPolicy | null>(null);
+    const [dailySummary, setDailySummary] = useState<DailyCashSummary[]>([]);
     const [loading, setLoading] = useState(true);
     const [processing, setProcessing] = useState(false);
     const [pendingAction, setPendingAction] = useState<PendingAction>(null);
     const [actionDialog, setActionDialog] = useState<ActionType | null>(null);
+    const [receiptFile, setReceiptFile] = useState<File | null>(null);
+    const [openingSession, setOpeningSession] = useState(false);
+    const [closingSession, setClosingSession] = useState(false);
+    const [openSessionDialog, setOpenSessionDialog] = useState(false);
+    const [closeSessionDialog, setCloseSessionDialog] = useState(false);
     const [page, setPage] = useState(1);
     const pageSize = 10;
 
@@ -155,6 +171,21 @@ export function CashPage() {
         }
     });
 
+    const openSessionForm = useForm<OpenTellerSessionRequest>({
+        defaultValues: {
+            branch_id: selectedBranchId || "",
+            opening_cash: 0,
+            notes: ""
+        }
+    });
+
+    const closeSessionForm = useForm<CloseTellerSessionRequest>({
+        defaultValues: {
+            closing_cash: 0,
+            notes: ""
+        }
+    });
+
     const loadCashData = async () => {
         if (!selectedTenantId) {
             setLoading(false);
@@ -164,19 +195,38 @@ export function CashPage() {
         setLoading(true);
 
         try {
-            const [{ data: membersResponse }, statementsResponse, { data: accountsResponse }] = await Promise.all([
+            const [
+                { data: membersResponse },
+                statementsResponse,
+                { data: accountsResponse },
+                { data: currentSessionResponse },
+                { data: receiptPolicyResponse },
+                { data: dailySummaryResponse }
+            ] = await Promise.all([
                 api.get<MembersResponse>(endpoints.members.list()),
                 api.get<StatementsResponse>(endpoints.finance.statements(), {
                     params: { tenant_id: selectedTenantId }
                 }),
                 api.get<MemberAccountsResponse>(endpoints.members.accounts(), {
                     params: { tenant_id: selectedTenantId }
+                }),
+                api.get<TellerSessionResponse>(endpoints.cashControl.currentSession(), {
+                    params: selectedBranchId ? { branch_id: selectedBranchId } : {}
+                }),
+                api.get<ReceiptPolicyResponse>(endpoints.cashControl.receiptPolicy(), {
+                    params: selectedBranchId ? { branch_id: selectedBranchId } : {}
+                }),
+                api.get<DailyCashSummaryResponse>(endpoints.cashControl.dailySummary(), {
+                    params: selectedBranchId ? { branch_id: selectedBranchId } : {}
                 })
             ]);
 
             setMembers(membersResponse.data);
             setTransactions((statementsResponse.data.data || []).slice(0, 40));
             setAccounts(accountsResponse.data || []);
+            setCurrentSession(currentSessionResponse.data || null);
+            setReceiptPolicy(receiptPolicyResponse.data || null);
+            setDailySummary(dailySummaryResponse.data || []);
         } catch (error) {
             pushToast({
                 type: "error",
@@ -230,6 +280,15 @@ export function CashPage() {
         [transactions]
     );
     const visibleMembersWithActivity = useMemo(() => new Set(transactions.map((item) => item.member_id)).size, [transactions]);
+    const todaySummary = dailySummary[0] || null;
+    const receiptThresholdText = receiptPolicy ? formatCurrency(receiptPolicy.required_threshold) : "TSh 0";
+    const tellerSessionRequired = Boolean(receiptPolicy) && !currentSession;
+    const receiptNeededForPendingAction = Boolean(
+        pendingAction
+        && receiptPolicy?.receipt_required
+        && receiptPolicy.enforce_on_types.includes(pendingAction.type)
+        && pendingAction.values.amount >= receiptPolicy.required_threshold
+    );
 
     const transactionColumns: Column<StatementRow>[] = [
         { key: "date", header: "Date", render: (row) => formatDate(row.transaction_date) },
@@ -247,8 +306,89 @@ export function CashPage() {
     );
 
     const handleSubmit = (type: ActionType, values: CashValues) => {
-        setPendingAction({ type, values });
+        setPendingAction({ type, values, receiptFile });
     };
+
+    const uploadReceiptForAction = async (action: PendingAction, branchId: string, memberId?: string | null) => {
+        if (!action?.receiptFile) {
+            return [];
+        }
+
+        const file = action.receiptFile;
+        const { data: initResponse } = await api.post<ReceiptInitResponse>(endpoints.cashControl.initReceipt(), {
+            branch_id: branchId,
+            member_id: memberId || null,
+            transaction_type: action.type,
+            file_name: file.name,
+            mime_type: file.type || "application/octet-stream",
+            file_size_bytes: file.size
+        });
+
+        const { receipt, upload } = initResponse.data;
+        const { error: uploadError } = await supabase.storage
+            .from(receipt.storage_bucket)
+            .uploadToSignedUrl(upload.path, upload.token, file);
+
+        if (uploadError) {
+            throw uploadError;
+        }
+
+        await api.post(endpoints.cashControl.confirmReceipt(receipt.id), {});
+        return [receipt.id];
+    };
+
+    const openSession = openSessionForm.handleSubmit(async (values) => {
+        setOpeningSession(true);
+        try {
+            await api.post<TellerSessionResponse>(endpoints.cashControl.openSession(), values);
+            pushToast({
+                type: "success",
+                title: "Teller session opened",
+                message: "You can now post cash transactions for this desk."
+            });
+            setOpenSessionDialog(false);
+            openSessionForm.reset({
+                branch_id: selectedBranchId || "",
+                opening_cash: 0,
+                notes: ""
+            });
+            await loadCashData();
+        } catch (error) {
+            pushToast({
+                type: "error",
+                title: "Unable to open teller session",
+                message: getApiErrorMessage(error)
+            });
+        } finally {
+            setOpeningSession(false);
+        }
+    });
+
+    const closeSession = closeSessionForm.handleSubmit(async (values) => {
+        if (!currentSession) {
+            return;
+        }
+
+        setClosingSession(true);
+        try {
+            await api.post<TellerSessionResponse>(endpoints.cashControl.closeSession(currentSession.id), values);
+            pushToast({
+                type: "success",
+                title: "Teller session closed",
+                message: "The session is now pending review."
+            });
+            setCloseSessionDialog(false);
+            await loadCashData();
+        } catch (error) {
+            pushToast({
+                type: "error",
+                title: "Unable to close teller session",
+                message: getApiErrorMessage(error)
+            });
+        } finally {
+            setClosingSession(false);
+        }
+    });
 
     const confirmAction = async () => {
         if (!pendingAction) {
@@ -258,12 +398,19 @@ export function CashPage() {
         setProcessing(true);
 
         try {
+            const account = accounts.find((entry) => entry.id === pendingAction.values.account_id);
+            const member = members.find((entry) => entry.id === account?.member_id);
+            const receiptIds = account
+                ? await uploadReceiptForAction(pendingAction, account.branch_id, member?.id || null)
+                : [];
+
             const payload: CashRequest = {
                 tenant_id: selectedTenantId || undefined,
                 account_id: pendingAction.values.account_id,
                 amount: pendingAction.values.amount,
                 reference: pendingAction.values.reference || null,
-                description: pendingAction.values.description || null
+                description: pendingAction.values.description || null,
+                receipt_ids: receiptIds
             };
 
             const endpoint =
@@ -289,6 +436,7 @@ export function CashPage() {
 
             setPendingAction(null);
             setActionDialog(null);
+            setReceiptFile(null);
             depositForm.reset({ account_id: payload.account_id, amount: 0, reference: "", description: "" });
             withdrawForm.reset({ account_id: payload.account_id, amount: 0, reference: "", description: "" });
             shareForm.reset({ account_id: "", amount: 0, reference: "", description: "" });
@@ -386,6 +534,96 @@ export function CashPage() {
                 </Grid>
             </Grid>
 
+            <Grid container spacing={2}>
+                <Grid size={{ xs: 12, xl: 7 }}>
+                    <Card variant="outlined">
+                        <CardContent>
+                            <Stack spacing={2}>
+                                <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" spacing={2}>
+                                    <Box>
+                                        <Typography variant="h6">Teller Session</Typography>
+                                        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                                            Open a session before counter posting. Closing cash is compared to the expected cash position from posted transactions.
+                                        </Typography>
+                                    </Box>
+                                    <Stack direction="row" spacing={1} alignItems="center">
+                                        {currentSession ? <Chip color="success" label={`Open · ${formatCurrency(currentSession.opening_cash)}`} /> : <Chip label="No open session" />}
+                                        {!currentSession ? (
+                                            <Button variant="contained" onClick={() => setOpenSessionDialog(true)} disabled={subscriptionInactive}>
+                                                Open session
+                                            </Button>
+                                        ) : (
+                                            <Button variant="outlined" color="warning" onClick={() => setCloseSessionDialog(true)}>
+                                                Close session
+                                            </Button>
+                                        )}
+                                    </Stack>
+                                </Stack>
+                                {currentSession ? (
+                                    <Grid container spacing={1.5}>
+                                        <Grid size={{ xs: 12, sm: 4 }}>
+                                            <Box sx={{ p: 1.5, border: `1px solid ${theme.palette.divider}`, borderRadius: 2 }}>
+                                                <Typography variant="caption" color="text.secondary">Opened</Typography>
+                                                <Typography variant="body2" sx={{ mt: 0.5, fontWeight: 600 }}>{formatDate(currentSession.opened_at)}</Typography>
+                                            </Box>
+                                        </Grid>
+                                        <Grid size={{ xs: 12, sm: 4 }}>
+                                            <Box sx={{ p: 1.5, border: `1px solid ${theme.palette.divider}`, borderRadius: 2 }}>
+                                                <Typography variant="caption" color="text.secondary">Opening cash</Typography>
+                                                <Typography variant="body2" sx={{ mt: 0.5, fontWeight: 600 }}>{formatCurrency(currentSession.opening_cash)}</Typography>
+                                            </Box>
+                                        </Grid>
+                                        <Grid size={{ xs: 12, sm: 4 }}>
+                                            <Box sx={{ p: 1.5, border: `1px solid ${theme.palette.divider}`, borderRadius: 2 }}>
+                                                <Typography variant="caption" color="text.secondary">Expected cash</Typography>
+                                                <Typography variant="body2" sx={{ mt: 0.5, fontWeight: 600 }}>{formatCurrency(todaySummary?.expected_cash_total ?? currentSession.expected_cash)}</Typography>
+                                            </Box>
+                                        </Grid>
+                                    </Grid>
+                                ) : (
+                                    <Alert severity="warning" variant="outlined">
+                                        A teller session is required before you can post cash transactions when cash-control enforcement is active.
+                                    </Alert>
+                                )}
+                            </Stack>
+                        </CardContent>
+                    </Card>
+                </Grid>
+                <Grid size={{ xs: 12, xl: 5 }}>
+                    <Card variant="outlined">
+                        <CardContent>
+                            <Stack spacing={2}>
+                                <Typography variant="h6">Receipt Control</Typography>
+                                <Typography variant="body2" color="text.secondary">
+                                    Current policy: {receiptPolicy?.receipt_required ? `receipt required from ${receiptThresholdText}` : "receipts optional"}.
+                                </Typography>
+                                <Grid container spacing={1.5}>
+                                    <Grid size={{ xs: 12, sm: 6 }}>
+                                        <Box sx={{ p: 1.5, border: `1px solid ${theme.palette.divider}`, borderRadius: 2 }}>
+                                            <Typography variant="caption" color="text.secondary">Max receipts</Typography>
+                                            <Typography variant="body2" sx={{ mt: 0.5, fontWeight: 600 }}>{receiptPolicy?.max_receipts_per_tx ?? 0}</Typography>
+                                        </Box>
+                                    </Grid>
+                                    <Grid size={{ xs: 12, sm: 6 }}>
+                                        <Box sx={{ p: 1.5, border: `1px solid ${theme.palette.divider}`, borderRadius: 2 }}>
+                                            <Typography variant="caption" color="text.secondary">Max file size</Typography>
+                                            <Typography variant="body2" sx={{ mt: 0.5, fontWeight: 600 }}>{receiptPolicy?.max_file_size_mb ?? 0} MB</Typography>
+                                        </Box>
+                                    </Grid>
+                                </Grid>
+                                {receiptPolicy?.enforce_on_types?.length ? (
+                                    <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                                        {receiptPolicy.enforce_on_types.map((type) => (
+                                            <Chip key={type} size="small" label={type.replace(/_/g, " ")} />
+                                        ))}
+                                    </Stack>
+                                ) : null}
+                            </Stack>
+                        </CardContent>
+                    </Card>
+                </Grid>
+            </Grid>
+
             {subscriptionInactive ? (
                 <Alert severity="warning" variant="outlined">
                     Subscription inactive. Cash operations are visible for review only until the tenant subscription is renewed.
@@ -425,8 +663,11 @@ export function CashPage() {
                                                     <Button
                                                         variant="contained"
                                                         startIcon={<CallReceivedRoundedIcon />}
-                                                        onClick={() => setActionDialog("deposit")}
-                                                        disabled={subscriptionInactive}
+                                                        onClick={() => {
+                                                            setReceiptFile(null);
+                                                            setActionDialog("deposit");
+                                                        }}
+                                                        disabled={subscriptionInactive || tellerSessionRequired}
                                                         fullWidth
                                                     >
                                                         Start Deposit
@@ -449,8 +690,11 @@ export function CashPage() {
                                                         variant="contained"
                                                         color="error"
                                                         startIcon={<CallMadeRoundedIcon />}
-                                                        onClick={() => setActionDialog("withdraw")}
-                                                        disabled={subscriptionInactive}
+                                                        onClick={() => {
+                                                            setReceiptFile(null);
+                                                            setActionDialog("withdraw");
+                                                        }}
+                                                        disabled={subscriptionInactive || tellerSessionRequired}
                                                         fullWidth
                                                     >
                                                         Start Withdrawal
@@ -472,8 +716,11 @@ export function CashPage() {
                                                     <Button
                                                         variant="outlined"
                                                         startIcon={<SavingsRoundedIcon />}
-                                                        onClick={() => setActionDialog("share_contribution")}
-                                                        disabled={subscriptionInactive}
+                                                        onClick={() => {
+                                                            setReceiptFile(null);
+                                                            setActionDialog("share_contribution");
+                                                        }}
+                                                        disabled={subscriptionInactive || tellerSessionRequired}
                                                         fullWidth
                                                     >
                                                         Start Contribution
@@ -584,7 +831,10 @@ export function CashPage() {
 
             <Dialog
                 open={Boolean(actionDialog)}
-                onClose={processing ? undefined : () => setActionDialog(null)}
+                onClose={processing ? undefined : () => {
+                    setActionDialog(null);
+                    setReceiptFile(null);
+                }}
                 maxWidth="sm"
                 fullWidth
             >
@@ -598,6 +848,11 @@ export function CashPage() {
                                     ? "Choose the member savings account and confirm the withdrawal details before posting."
                                     : "Choose the member share account and capture the contribution details before posting."}
                         </Typography>
+                        {receiptPolicy?.receipt_required ? (
+                            <Alert severity="info" variant="outlined">
+                                Receipts are required from {receiptThresholdText} for configured transaction types. If your amount crosses the threshold, attach the evidence before review.
+                            </Alert>
+                        ) : null}
 
                         <Box
                             component="form"
@@ -714,15 +969,96 @@ export function CashPage() {
                                 error={Boolean(currentForm.formState.errors.description)}
                                 helperText={currentForm.formState.errors.description?.message}
                             />
+
+                            <Box>
+                                <InputLabel shrink htmlFor="cash-receipt-upload">
+                                    Receipt proof
+                                </InputLabel>
+                                <TextField
+                                    id="cash-receipt-upload"
+                                    type="file"
+                                    fullWidth
+                                    inputProps={{
+                                        accept: receiptPolicy?.allowed_mime_types?.join(",") || "image/jpeg,image/png,application/pdf"
+                                    }}
+                                    onChange={(event) => {
+                                        const file = (event.target as HTMLInputElement).files?.[0] || null;
+                                        setReceiptFile(file);
+                                    }}
+                                    helperText={
+                                        receiptFile
+                                            ? `${receiptFile.name} selected`
+                                            : `Allowed: ${(receiptPolicy?.allowed_mime_types || []).join(", ") || "image/jpeg, image/png, application/pdf"}`
+                                    }
+                                />
+                            </Box>
                         </Box>
                     </Stack>
                 </DialogContent>
                 <DialogActions sx={{ px: 3, py: 2 }}>
-                    <Button onClick={() => setActionDialog(null)} disabled={processing} color="inherit">
+                    <Button onClick={() => {
+                        setActionDialog(null);
+                        setReceiptFile(null);
+                    }} disabled={processing} color="inherit">
                         Cancel
                     </Button>
                     <Button form="cash-action-form" type="submit" variant="contained" disabled={processing || subscriptionInactive}>
                         Review
+                    </Button>
+                </DialogActions>
+            </Dialog>
+
+            <Dialog open={openSessionDialog} onClose={openingSession ? undefined : () => setOpenSessionDialog(false)} maxWidth="sm" fullWidth>
+                <DialogTitle>Open teller session</DialogTitle>
+                <DialogContent dividers>
+                    <Stack spacing={2} sx={{ pt: 0.5 }}>
+                        <TextField
+                            label="Opening cash"
+                            type="number"
+                            inputProps={{ step: "0.01" }}
+                            {...openSessionForm.register("opening_cash", { valueAsNumber: true })}
+                        />
+                        <TextField
+                            label="Opening notes"
+                            multiline
+                            minRows={3}
+                            {...openSessionForm.register("notes")}
+                        />
+                    </Stack>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setOpenSessionDialog(false)} disabled={openingSession}>Cancel</Button>
+                    <Button variant="contained" onClick={() => void openSession()} disabled={openingSession}>
+                        {openingSession ? "Opening..." : "Open session"}
+                    </Button>
+                </DialogActions>
+            </Dialog>
+
+            <Dialog open={closeSessionDialog} onClose={closingSession ? undefined : () => setCloseSessionDialog(false)} maxWidth="sm" fullWidth>
+                <DialogTitle>Close teller session</DialogTitle>
+                <DialogContent dividers>
+                    <Stack spacing={2} sx={{ pt: 0.5 }}>
+                        <Alert severity="info" variant="outlined">
+                            Expected cash currently tracks as {formatCurrency(todaySummary?.expected_cash_total ?? currentSession?.expected_cash ?? 0)}.
+                        </Alert>
+                        <TextField
+                            label="Closing cash counted"
+                            type="number"
+                            inputProps={{ step: "0.01" }}
+                            {...closeSessionForm.register("closing_cash", { valueAsNumber: true })}
+                        />
+                        <TextField
+                            label="Closing notes"
+                            multiline
+                            minRows={3}
+                            {...closeSessionForm.register("notes")}
+                        />
+                    </Stack>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setCloseSessionDialog(false)} disabled={closingSession}>Cancel</Button>
+                    <Button variant="contained" color="warning" onClick={() => void closeSession()} disabled={closingSession}>
+                        {closingSession ? "Closing..." : "Close session"}
                     </Button>
                 </DialogActions>
             </Dialog>
@@ -754,6 +1090,15 @@ export function CashPage() {
                             <Typography variant="body2" color="text.secondary">Reference</Typography>
                             <Typography variant="body2" fontWeight={600}>{pendingAction?.values.reference || "N/A"}</Typography>
                         </Box>
+                        <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}>
+                            <Typography variant="body2" color="text.secondary">Receipt</Typography>
+                            <Typography variant="body2" fontWeight={600}>{pendingAction?.receiptFile?.name || "No receipt attached"}</Typography>
+                        </Box>
+                        {receiptNeededForPendingAction && !pendingAction?.receiptFile ? (
+                            <Alert severity="warning" variant="outlined">
+                                This transaction needs a receipt before it can be posted.
+                            </Alert>
+                        ) : null}
                     </Stack>
                 }
                 confirmLabel={
@@ -764,7 +1109,10 @@ export function CashPage() {
                             : "Post Share Contribution"
                 }
                 loading={processing}
-                onCancel={() => setPendingAction(null)}
+                onCancel={() => {
+                    setPendingAction(null);
+                    setReceiptFile(null);
+                }}
                 onConfirm={() => void confirmAction()}
             />
         </Stack>

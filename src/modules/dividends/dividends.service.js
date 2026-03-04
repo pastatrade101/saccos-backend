@@ -802,7 +802,9 @@ async function allocateCycle(actor, cycleId) {
         .from("dividend_cycles")
         .update({
             status: "allocated",
-            totals_json: totalsJson
+            totals_json: totalsJson,
+            submitted_for_approval_at: null,
+            submitted_for_approval_by: null
         })
         .eq("id", cycleId);
 
@@ -821,9 +823,44 @@ async function allocateCycle(actor, cycleId) {
     return getCycle(actor, cycleId);
 }
 
+async function submitCycle(actor, cycleId) {
+    const cycle = await getCycleRecord(cycleId);
+    await assertCycleAccess(actor, cycle);
+
+    if (cycle.status !== "allocated") {
+        throw new AppError(409, "INVALID_DIVIDEND_STATE", "Only allocated cycles can be submitted for approval.");
+    }
+
+    const { error } = await adminSupabase
+        .from("dividend_cycles")
+        .update({
+            submitted_for_approval_at: new Date().toISOString(),
+            submitted_for_approval_by: actor.user.id
+        })
+        .eq("id", cycleId);
+
+    if (error) {
+        throw new AppError(500, "DIVIDEND_SUBMISSION_FAILED", "Unable to submit dividend cycle for approval.", error);
+    }
+
+    await logAudit({
+        tenantId: cycle.tenant_id,
+        userId: actor.user.id,
+        table: "dividend_cycles",
+        action: "submit_dividend_cycle_for_approval",
+        afterData: { cycle_id: cycleId }
+    });
+
+    return getCycle(actor, cycleId);
+}
+
 async function approveCycle(actor, cycleId, payload) {
     const cycle = await getCycleRecord(cycleId);
     await assertCycleAccess(actor, cycle);
+
+    if (!cycle.submitted_for_approval_at) {
+        throw new AppError(409, "DIVIDEND_NOT_SUBMITTED", "The dividend cycle must be submitted for approval before it can be approved.");
+    }
 
     const { data, error } = await adminSupabase.rpc("approve_dividend_cycle", {
         p_cycle_id: cycleId,
@@ -876,7 +913,11 @@ async function rejectCycle(actor, cycleId, payload) {
 
     await adminSupabase
         .from("dividend_cycles")
-        .update({ status: "frozen" })
+        .update({
+            status: "frozen",
+            submitted_for_approval_at: null,
+            submitted_for_approval_by: null
+        })
         .eq("id", cycleId);
 
     return getCycle(actor, cycleId);
@@ -949,6 +990,7 @@ module.exports = {
     updateCycle,
     freezeCycle,
     allocateCycle,
+    submitCycle,
     approveCycle,
     rejectCycle,
     payCycle,

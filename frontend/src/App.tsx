@@ -20,12 +20,15 @@ import { PlatformPlansPage } from "./pages/PlatformPlans";
 import { PlatformTenantsPage } from "./pages/PlatformTenants";
 import { StaffUsersPage } from "./pages/StaffUsers";
 import { MembersPage } from "./pages/Members";
+import { MemberApplicationsPage } from "./pages/MemberApplications";
 import { CashPage } from "./pages/Cash";
+import { CashControlPage } from "./pages/CashControl";
 import { ContributionsPage } from "./pages/Contributions";
 import { DividendsPage } from "./pages/Dividends";
 import { FollowUpsPage } from "./pages/FollowUps";
 import { LoansPage } from "./pages/Loans";
 import { LoanDetailPage } from "./pages/LoanDetail";
+import { ProductCatalogPage } from "./pages/ProductCatalog";
 import { ReportsPage } from "./pages/Reports";
 import { MemberPortalPage } from "./pages/MemberPortal";
 import { MemberImportPage } from "./pages/MemberImport";
@@ -225,6 +228,7 @@ export default function App() {
                         }
                     >
                         <Route path="/staff-users" element={<StaffUsersPage />} />
+                        <Route path="/products" element={<ProductCatalogPage />} />
                     </Route>
                     <Route
                         element={
@@ -235,6 +239,16 @@ export default function App() {
                         }
                     >
                         <Route path="/members" element={<MembersPage />} />
+                    </Route>
+                    <Route
+                        element={
+                            <ProtectedRoute
+                                allowedRoles={["super_admin", "branch_manager", "auditor"]}
+                                allowInternalOps={false}
+                            />
+                        }
+                    >
+                        <Route path="/member-applications" element={<MemberApplicationsPage />} />
                     </Route>
                     <Route
                         element={
@@ -266,6 +280,13 @@ export default function App() {
                         }
                     >
                         <Route path="/cash" element={<CashPage />} />
+                    </Route>
+                    <Route
+                        element={
+                            <ProtectedRoute allowedRoles={["super_admin", "branch_manager", "auditor"]} allowInternalOps={false} />
+                        }
+                    >
+                        <Route path="/cash-control" element={<CashControlPage />} />
                     </Route>
                     <Route
                         element={

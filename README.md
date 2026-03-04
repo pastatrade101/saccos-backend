@@ -86,12 +86,64 @@ For a fresh environment, apply SQL in this order:
 11. [009_auditor_upgrade.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/009_auditor_upgrade.sql)
 12. [010_member_import.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/010_member_import.sql)
 13. [011_import_storage_policies.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/011_import_storage_policies.sql)
+14. [013_phase1_foundation.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/013_phase1_foundation.sql)
+15. [014_phase1_rls.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/014_phase1_rls.sql)
+16. [015_phase1_procedures.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/015_phase1_procedures.sql)
+17. [016_phase2_cash_control.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/016_phase2_cash_control.sql)
+18. [017_phase2_cash_control_rls.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/017_phase2_cash_control_rls.sql)
+19. [018_phase2_receipts_storage.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/018_phase2_receipts_storage.sql)
+20. [019_idempotency_keys.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/019_idempotency_keys.sql)
 
 Important:
 
 - `002_rls.sql` is not idempotent because PostgreSQL policies do not support `if not exists`
 - do not rerun the entire file blindly on a live database that already has those policies
 - additive migrations like `006`, `007`, and `008` are safe to run when needed
+
+## Cash Control And Receipt Proof
+
+Phase 2 now adds:
+
+- teller sessions with open, close, and manager review
+- receipt policy with tenant default and optional branch override
+- signed receipt upload flow
+- immutable receipt records linked to posted journals
+- daily cash summary
+- CSV exports for:
+  - daily cashbook
+  - teller balancing
+
+New backend endpoints:
+
+- `GET /api/cash-control/sessions`
+- `GET /api/cash-control/sessions/current`
+- `POST /api/cash-control/sessions/open`
+- `POST /api/cash-control/sessions/:id/close`
+- `POST /api/cash-control/sessions/:id/review`
+- `GET /api/cash-control/receipt-policy`
+- `PUT /api/cash-control/receipt-policy`
+- `POST /api/cash-control/receipts/init`
+- `POST /api/cash-control/receipts/:id/confirm`
+- `GET /api/cash-control/journals/:journalId/receipts`
+- `GET /api/cash-control/receipts/:id/download`
+- `GET /api/cash-control/summary/daily`
+- `GET /api/cash-control/reports/daily-cashbook.csv`
+- `GET /api/cash-control/reports/teller-balancing.csv`
+
+How to test:
+
+1. Apply `016_phase2_cash_control.sql`
+2. Apply `017_phase2_cash_control_rls.sql`
+3. Apply `018_phase2_receipts_storage.sql`
+4. Restart backend and frontend
+5. Sign in as `teller`
+6. Open `Cash Desk`
+7. Open a teller session
+8. Post a deposit or withdrawal with a receipt attached
+9. Close the session with counted closing cash
+10. Sign in as `branch_manager`
+11. Open `Cash Control`
+12. Review receipt policy, teller sessions, and export reports
 
 ## CSV Member Import + Secure First Login
 
@@ -160,6 +212,21 @@ cp .env.example .env
 npm run dev
 ```
 
+Backend with Docker Compose:
+
+```bash
+cp .env.example .env
+docker compose build
+docker compose up -d
+docker compose logs -f backend
+```
+
+Health check:
+
+```bash
+curl http://localhost:5000/health
+```
+
 Frontend:
 
 ```bash
@@ -168,6 +235,92 @@ npm install
 cp .env.example .env
 npm run dev
 ```
+
+## Automated Tests
+
+The backend now includes Jest + Supertest + `pg` coverage for:
+
+- direct financial procedure tests
+- API RBAC and tenant isolation tests
+- receipt policy and report export tests
+- smoke flow covering:
+  - tenant creation
+  - branch creation
+  - tenant super admin bootstrap
+  - staff provisioning
+  - member onboarding
+  - deposit and withdrawal
+ - loan disbursement and repayment
+ - dividend lifecycle
+ - CSV export endpoint
+
+## Docker Deployment
+
+This repo now includes backend-only container artifacts:
+
+- [Dockerfile](/Users/pastoryjoseph/Desktop/saccos-backend/Dockerfile)
+- [docker-compose.yml](/Users/pastoryjoseph/Desktop/saccos-backend/docker-compose.yml)
+- [.dockerignore](/Users/pastoryjoseph/Desktop/saccos-backend/.dockerignore)
+
+Production notes:
+
+- keep `.env` server-side only
+- terminate TLS at Nginx, Caddy, Traefik, or your cloud load balancer
+- expose only the API port you actually need
+- do not put `SUPABASE_SERVICE_ROLE_KEY` in the frontend or client bundle
+- use `docker compose pull && docker compose build --no-cache && docker compose up -d` for controlled server deploys
+
+Setup:
+
+```bash
+cp .env.test.example .env.test
+```
+
+Required `.env.test` values:
+
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `DATABASE_URL`
+
+Before running tests, apply:
+
+1. [013_phase1_foundation.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/013_phase1_foundation.sql)
+2. [014_phase1_rls.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/014_phase1_rls.sql)
+3. [015_phase1_procedures.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/015_phase1_procedures.sql)
+4. [016_phase2_cash_control.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/016_phase2_cash_control.sql)
+5. [017_phase2_cash_control_rls.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/017_phase2_cash_control_rls.sql)
+6. [018_phase2_receipts_storage.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/018_phase2_receipts_storage.sql)
+7. [019_idempotency_keys.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/019_idempotency_keys.sql)
+
+Install dependencies:
+
+```bash
+npm install
+```
+
+Run all tests:
+
+```bash
+npm test
+```
+
+Watch mode:
+
+```bash
+npm run test:watch
+```
+
+Run only the smoke flow:
+
+```bash
+npm run test:smoke
+```
+
+Safety guard:
+
+- destructive cleanup only runs when `NODE_ENV=test`
+- the suite only deletes tenants and auth users it created during the run
 
 ## Bootstrap and Demo Data
 

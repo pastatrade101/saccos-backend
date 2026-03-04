@@ -1,8 +1,10 @@
 import AddCircleOutlineRoundedIcon from "@mui/icons-material/AddCircleOutlineRounded";
 import CheckCircleOutlineRoundedIcon from "@mui/icons-material/CheckCircleOutlineRounded";
+import DownloadRoundedIcon from "@mui/icons-material/DownloadRounded";
 import MonetizationOnOutlinedIcon from "@mui/icons-material/MonetizationOnOutlined";
 import PaidOutlinedIcon from "@mui/icons-material/PaidOutlined";
 import PolicyOutlinedIcon from "@mui/icons-material/PolicyOutlined";
+import UploadFileRoundedIcon from "@mui/icons-material/UploadFileRounded";
 import {
     Alert,
     Box,
@@ -22,7 +24,7 @@ import {
     Typography
 } from "@mui/material";
 import { alpha, useTheme } from "@mui/material/styles";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useFieldArray, useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -160,6 +162,55 @@ function MetricCard({
     );
 }
 
+function parseCsv(text: string): Array<Record<string, string>> {
+    const lines = text
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+
+    if (lines.length < 2) {
+        return [];
+    }
+
+    const splitCsvLine = (line: string) => {
+        const values: string[] = [];
+        let current = "";
+        let inQuotes = false;
+
+        for (let index = 0; index < line.length; index += 1) {
+            const char = line[index];
+            const nextChar = line[index + 1];
+
+            if (char === "\"") {
+                if (inQuotes && nextChar === "\"") {
+                    current += "\"";
+                    index += 1;
+                } else {
+                    inQuotes = !inQuotes;
+                }
+            } else if (char === "," && !inQuotes) {
+                values.push(current.trim());
+                current = "";
+            } else {
+                current += char;
+            }
+        }
+
+        values.push(current.trim());
+        return values.map((value) => value.replace(/^"(.*)"$/, "$1").trim());
+    };
+
+    const headers = splitCsvLine(lines[0]);
+
+    return lines.slice(1).map((line) => {
+        const values = splitCsvLine(line);
+        return headers.reduce<Record<string, string>>((record, header, index) => {
+            record[header] = values[index] || "";
+            return record;
+        }, {});
+    });
+}
+
 export function DividendsPage() {
     const theme = useTheme();
     const { pushToast } = useToast();
@@ -177,9 +228,10 @@ export function DividendsPage() {
     const [actionNotes, setActionNotes] = useState("");
     const [paymentMethod, setPaymentMethod] = useState<DividendPaymentRequest["payment_method"]>("reinvest_to_shares");
     const [paymentReference, setPaymentReference] = useState("");
+    const importInputRef = useRef<HTMLInputElement | null>(null);
 
-    const canManageCycles = Boolean(profile && ["super_admin", "branch_manager"].includes(profile.role));
-    const canApproveAndPay = Boolean(profile && ["super_admin", "branch_manager"].includes(profile.role));
+    const canManageCycles = Boolean(profile?.role === "branch_manager");
+    const canApproveAndPay = Boolean(profile?.role === "super_admin");
 
     const form = useForm<CreateCycleFormValues>({
         resolver: zodResolver(createCycleSchema),
@@ -257,12 +309,25 @@ export function DividendsPage() {
     const accountOptions = options?.accounts || [];
     const branchOptions = options?.branches || [];
 
+    const branchCodeMap = useMemo(() => new Map(
+        branchOptions.map((branch) => [branch.code.trim().toLowerCase(), branch.id])
+    ), [branchOptions]);
+
+    const accountCodeMap = useMemo(() => new Map(
+        accountOptions.map((account) => [account.account_code.trim().toLowerCase(), account.id])
+    ), [accountOptions]);
+
     const summary = useMemo(() => ({
         total: cycles.length,
         draft: cycles.filter((cycle) => cycle.status === "draft").length,
         approved: cycles.filter((cycle) => cycle.status === "approved").length,
         paid: cycles.filter((cycle) => cycle.status === "paid" || cycle.status === "closed").length
     }), [cycles]);
+
+    const approvalQueue = useMemo(
+        () => cycles.filter((cycle) => cycle.status === "allocated" && cycle.submitted_for_approval_at),
+        [cycles]
+    );
 
     const allocationNameMap = useMemo(() => {
         const map = new Map<string, string>();
@@ -368,7 +433,7 @@ export function DividendsPage() {
         }
     });
 
-    const runCycleAction = async (type: "freeze" | "allocate" | "approve" | "reject" | "pay" | "close") => {
+    const runCycleAction = async (type: "freeze" | "allocate" | "submit" | "approve" | "reject" | "pay" | "close") => {
         if (!selectedCycleId) {
             return;
         }
@@ -380,6 +445,8 @@ export function DividendsPage() {
                 await api.post(endpoints.dividends.freeze(selectedCycleId));
             } else if (type === "allocate") {
                 await api.post(endpoints.dividends.allocate(selectedCycleId));
+            } else if (type === "submit") {
+                await api.post(endpoints.dividends.submit(selectedCycleId));
             } else if (type === "approve") {
                 const payload: DividendApprovalRequest = { notes: actionNotes || null };
                 await api.post(endpoints.dividends.approve(selectedCycleId), payload);
@@ -418,6 +485,120 @@ export function DividendsPage() {
         }
     };
 
+    const openImportPicker = () => {
+        importInputRef.current?.click();
+    };
+
+    const importCsvTemplate = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        event.target.value = "";
+
+        if (!file) {
+            return;
+        }
+
+        if (!accountOptions.length) {
+            pushToast({
+                type: "error",
+                title: "Dividend options not ready",
+                message: "Load the dividend workspace first so account mappings are available."
+            });
+            return;
+        }
+
+        try {
+            const text = await file.text();
+            const rows = parseCsv(text);
+
+            if (!rows.length) {
+                throw new Error("The CSV file does not contain any data rows.");
+            }
+
+            const firstRow = rows[0];
+            const branchCode = firstRow.branch_code?.trim().toLowerCase() || "";
+            const branchId = branchCode ? branchCodeMap.get(branchCode) || "" : "";
+
+            if (branchCode && !branchId) {
+                throw new Error(`Branch code "${firstRow.branch_code}" was not found in this tenant.`);
+            }
+
+            const importedComponents = rows.map((row, index) => {
+                const retainedAccountId = accountCodeMap.get((row.retained_earnings_account_code || "").trim().toLowerCase());
+                const dividendsPayableAccountId = accountCodeMap.get((row.dividends_payable_account_code || "").trim().toLowerCase());
+                const payoutAccountId = row.payout_account_code
+                    ? accountCodeMap.get(row.payout_account_code.trim().toLowerCase()) || ""
+                    : "";
+                const reserveAccountId = row.reserve_account_code
+                    ? accountCodeMap.get(row.reserve_account_code.trim().toLowerCase()) || ""
+                    : "";
+
+                if (!retainedAccountId) {
+                    throw new Error(`Row ${index + 2}: retained earnings account code "${row.retained_earnings_account_code}" was not found.`);
+                }
+
+                if (!dividendsPayableAccountId) {
+                    throw new Error(`Row ${index + 2}: dividends payable account code "${row.dividends_payable_account_code}" was not found.`);
+                }
+
+                if (row.payout_account_code && !payoutAccountId) {
+                    throw new Error(`Row ${index + 2}: payout account code "${row.payout_account_code}" was not found.`);
+                }
+
+                if (row.reserve_account_code && !reserveAccountId) {
+                    throw new Error(`Row ${index + 2}: reserve account code "${row.reserve_account_code}" was not found.`);
+                }
+
+                return {
+                    type: row.component_type as CreateCycleFormValues["components"][number]["type"],
+                    basis_method: row.basis_method as CreateCycleFormValues["components"][number]["basis_method"],
+                    distribution_mode: row.distribution_mode as CreateCycleFormValues["components"][number]["distribution_mode"],
+                    rate_percent: row.rate_percent ? Number(row.rate_percent) : undefined,
+                    pool_amount: row.pool_amount ? Number(row.pool_amount) : undefined,
+                    retained_earnings_account_id: retainedAccountId,
+                    dividends_payable_account_id: dividendsPayableAccountId,
+                    payout_account_id: payoutAccountId,
+                    reserve_account_id: reserveAccountId,
+                    active_only: (String(row.active_only || "true").toLowerCase() === "false" ? "false" : "true") as "true" | "false",
+                    min_membership_months: Number(row.min_membership_months || 0),
+                    minimum_shares: Number(row.minimum_shares || 0),
+                    max_par_days: Number(row.max_par_days || 0),
+                    min_contributions_count: Number(row.min_contributions_count || 0),
+                    require_kyc_completed: (String(row.require_kyc_completed || "false").toLowerCase() === "true" ? "true" : "false") as "true" | "false",
+                    exclude_suspended_exited: (String(row.exclude_suspended_exited || "true").toLowerCase() === "false" ? "false" : "true") as "true" | "false",
+                    rounding_increment: Number(row.rounding_increment || 1),
+                    minimum_payout_threshold: Number(row.minimum_payout_threshold || 0),
+                    max_payout_cap: Number(row.max_payout_cap || 0),
+                    residual_handling: (row.residual_handling || "carry_to_retained_earnings") as CreateCycleFormValues["components"][number]["residual_handling"]
+                };
+            });
+
+            form.reset({
+                branch_id: branchId,
+                period_label: firstRow.period_label || "",
+                start_date: firstRow.start_date || "",
+                end_date: firstRow.end_date || "",
+                declaration_date: firstRow.declaration_date || "",
+                record_date: firstRow.record_date || "",
+                payment_date: firstRow.payment_date || "",
+                required_checker_count: Number(firstRow.required_checker_count || 1),
+                components: importedComponents
+            });
+
+            setShowCreateDialog(true);
+            pushToast({
+                type: "success",
+                title: "Dividend CSV imported",
+                message: `${rows.length} component row(s) loaded into the cycle form.`
+            });
+        } catch (error) {
+            pushToast({
+                type: "error",
+                title: "Unable to import dividend CSV",
+                message: error instanceof Error ? error.message : "The CSV file could not be parsed."
+            });
+        }
+    };
+
     const selectedCycle = selectedCycleDetail?.cycle;
 
     return (
@@ -433,14 +614,35 @@ export function DividendsPage() {
                         <Box>
                             <Typography variant="h5">Dividend Administration</Typography>
                             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75, maxWidth: 840 }}>
-                                Configure policy-driven dividend cycles, freeze auditable balance snapshots, generate allocations, and post declaration and payment journals with maker-checker control.
+                                Branch managers prepare dividend cycles and freeze auditable balance snapshots. Tenant super admins approve, pay, and close the cycle under maker-checker control.
                             </Typography>
                         </Box>
                         <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="center">
+                            <input
+                                ref={importInputRef}
+                                type="file"
+                                accept=".csv,text/csv"
+                                hidden
+                                onChange={(event) => void importCsvTemplate(event)}
+                            />
+                            <Button
+                                component="a"
+                                href="/dividend-cycle-template.csv"
+                                download="dividend-cycle-template.csv"
+                                variant="outlined"
+                                startIcon={<DownloadRoundedIcon />}
+                            >
+                                Download CSV Template
+                            </Button>
                             {canManageCycles ? (
-                                <Button variant="contained" startIcon={<AddCircleOutlineRoundedIcon />} onClick={() => setShowCreateDialog(true)}>
-                                    Create Cycle
-                                </Button>
+                                <>
+                                    <Button variant="outlined" startIcon={<UploadFileRoundedIcon />} onClick={openImportPicker}>
+                                        Import CSV
+                                    </Button>
+                                    <Button variant="contained" startIcon={<AddCircleOutlineRoundedIcon />} onClick={() => setShowCreateDialog(true)}>
+                                        Create Cycle
+                                    </Button>
+                                </>
                             ) : null}
                             <Chip label={selectedTenantName || "Tenant workspace"} variant="outlined" />
                             <Chip label={`Role: ${profile ? formatRole(profile.role) : "Setup"}`} variant="outlined" />
@@ -463,6 +665,53 @@ export function DividendsPage() {
                     <MetricCard label="Paid / Closed" value={`${summary.paid}`} helper="Completed dividend payout cycles." icon={<PaidOutlinedIcon />} />
                 </Grid>
             </Grid>
+
+            {profile?.role === "super_admin" ? (
+                <Card variant="outlined">
+                    <CardContent>
+                        <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" spacing={2}>
+                            <Box>
+                                <Typography variant="h6">Approval Queue</Typography>
+                                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                                    Dividend cycles submitted by branch managers and waiting for tenant super admin review.
+                                </Typography>
+                            </Box>
+                            <Chip label={`${approvalQueue.length} waiting`} color={approvalQueue.length ? "warning" : "default"} />
+                        </Stack>
+                        <Stack spacing={1.25} sx={{ mt: 2 }}>
+                            {approvalQueue.length ? approvalQueue.map((cycle) => (
+                                <Box
+                                    key={cycle.id}
+                                    sx={{
+                                        p: 1.5,
+                                        border: `1px solid ${theme.palette.divider}`,
+                                        borderRadius: 2,
+                                        display: "flex",
+                                        flexDirection: { xs: "column", md: "row" },
+                                        alignItems: { xs: "flex-start", md: "center" },
+                                        justifyContent: "space-between",
+                                        gap: 1.5
+                                    }}
+                                >
+                                    <Box>
+                                        <Typography variant="subtitle2">{cycle.period_label}</Typography>
+                                        <Typography variant="body2" color="text.secondary">
+                                            Submitted {formatDate(cycle.submitted_for_approval_at || cycle.created_at)} • {formatDate(cycle.start_date)} - {formatDate(cycle.end_date)}
+                                        </Typography>
+                                    </Box>
+                                    <Button size="small" variant="outlined" onClick={() => setSelectedCycleId(cycle.id)}>
+                                        Review Queue Item
+                                    </Button>
+                                </Box>
+                            )) : (
+                                <Alert severity="info" variant="outlined">
+                                    No dividend cycles are currently waiting for super admin approval.
+                                </Alert>
+                            )}
+                        </Stack>
+                    </CardContent>
+                </Card>
+            ) : null}
 
             <Grid container spacing={2}>
                 <Grid size={{ xs: 12, xl: 5 }}>
@@ -494,6 +743,9 @@ export function DividendsPage() {
                                         <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
                                             <Chip label={selectedCycle.status.toUpperCase()} color={selectedCycle.status === "approved" ? "success" : selectedCycle.status === "paid" || selectedCycle.status === "closed" ? "primary" : "default"} />
                                             <Chip label={`${selectedCycle.required_checker_count} checker(s)`} variant="outlined" />
+                                            {selectedCycle.status === "allocated" && selectedCycle.submitted_for_approval_at ? (
+                                                <Chip label="Waiting for Super Admin Approval" color="warning" variant="filled" />
+                                            ) : null}
                                         </Stack>
                                     </Stack>
 
@@ -522,6 +774,11 @@ export function DividendsPage() {
                                         {selectedCycle.status === "frozen" && canManageCycles ? (
                                             <Button variant="outlined" onClick={() => void runCycleAction("allocate")} disabled={submitting}>
                                                 Generate Allocations
+                                            </Button>
+                                        ) : null}
+                                        {selectedCycle.status === "allocated" && canManageCycles && !selectedCycle.submitted_for_approval_at ? (
+                                            <Button variant="contained" onClick={() => void runCycleAction("submit")} disabled={submitting}>
+                                                Submit for Approval
                                             </Button>
                                         ) : null}
                                         {selectedCycle.status === "allocated" && canApproveAndPay ? (

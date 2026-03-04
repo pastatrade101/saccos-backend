@@ -11,6 +11,8 @@ export type SubscriptionStatus = "active" | "past_due" | "cancelled" | "missing"
 export type SubscriptionPlan = "starter" | "growth" | "enterprise";
 export type MemberStatus = "active" | "suspended" | "exited";
 export type LoanStatus = "draft" | "active" | "closed" | "in_arrears" | "written_off";
+export type KycStatus = "pending" | "verified" | "rejected" | "waived";
+export type MemberApplicationStatus = "draft" | "submitted" | "under_review" | "approved" | "rejected" | "cancelled";
 
 export interface ApiEnvelope<T> {
     data: T;
@@ -211,7 +213,150 @@ export interface Member {
     national_id: string | null;
     notes?: string | null;
     status: MemberStatus;
+    dob?: string | null;
+    address_line1?: string | null;
+    address_line2?: string | null;
+    city?: string | null;
+    state?: string | null;
+    country?: string | null;
+    postal_code?: string | null;
+    nida_no?: string | null;
+    tin_no?: string | null;
+    next_of_kin_name?: string | null;
+    next_of_kin_phone?: string | null;
+    next_of_kin_relationship?: string | null;
+    employer?: string | null;
+    kyc_status?: KycStatus;
+    kyc_reason?: string | null;
     created_at: string;
+}
+
+export interface MemberApplication {
+    id: string;
+    tenant_id: string;
+    branch_id: string;
+    application_no: string;
+    status: MemberApplicationStatus;
+    kyc_status: KycStatus;
+    kyc_reason?: string | null;
+    full_name: string;
+    dob?: string | null;
+    phone?: string | null;
+    email?: string | null;
+    address_line1?: string | null;
+    address_line2?: string | null;
+    city?: string | null;
+    state?: string | null;
+    country?: string | null;
+    postal_code?: string | null;
+    nida_no?: string | null;
+    tin_no?: string | null;
+    next_of_kin_name?: string | null;
+    next_of_kin_phone?: string | null;
+    next_of_kin_relationship?: string | null;
+    employer?: string | null;
+    member_no?: string | null;
+    national_id?: string | null;
+    notes?: string | null;
+    membership_fee_amount: number;
+    membership_fee_paid: number;
+    approved_member_id?: string | null;
+    created_by: string;
+    reviewed_by?: string | null;
+    reviewed_at?: string | null;
+    approved_by?: string | null;
+    approved_at?: string | null;
+    rejected_by?: string | null;
+    rejected_at?: string | null;
+    rejection_reason?: string | null;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface SavingsProduct {
+    id: string;
+    tenant_id: string;
+    code: string;
+    name: string;
+    is_compulsory: boolean;
+    is_default: boolean;
+    min_opening_balance: number;
+    min_balance: number;
+    withdrawal_notice_days: number;
+    allow_withdrawals: boolean;
+    status: "active" | "inactive";
+    liability_account_id: string;
+    fee_income_account_id?: string | null;
+}
+
+export interface ShareProduct {
+    id: string;
+    tenant_id: string;
+    code: string;
+    name: string;
+    is_compulsory: boolean;
+    is_default: boolean;
+    minimum_shares: number;
+    maximum_shares?: number | null;
+    allow_refund: boolean;
+    status: "active" | "inactive";
+    equity_account_id: string;
+    fee_income_account_id?: string | null;
+}
+
+export interface FeeRule {
+    id: string;
+    tenant_id: string;
+    code: string;
+    name: string;
+    fee_type: "membership_fee" | "withdrawal_fee" | "loan_processing_fee" | "other";
+    calculation_method: "flat" | "percentage" | "percentage_per_period";
+    flat_amount: number;
+    percentage_value: number;
+    is_active: boolean;
+    income_account_id: string;
+}
+
+export interface PenaltyRule {
+    id: string;
+    tenant_id: string;
+    code: string;
+    name: string;
+    penalty_type: "late_repayment" | "arrears" | "other";
+    calculation_method: "flat" | "percentage" | "percentage_per_period";
+    flat_amount: number;
+    percentage_value: number;
+    is_active: boolean;
+    income_account_id: string;
+}
+
+export interface PostingRule {
+    id: string;
+    tenant_id: string;
+    operation_code: string;
+    scope: "general" | "savings" | "shares" | "loans" | "dividends" | "membership";
+    description?: string | null;
+    debit_account_id: string;
+    credit_account_id: string;
+    is_active: boolean;
+    metadata?: Record<string, unknown>;
+}
+
+export interface ChartOfAccountOption {
+    id: string;
+    account_code: string;
+    account_name: string;
+    account_type: "asset" | "liability" | "equity" | "income" | "expense";
+    system_tag?: string | null;
+}
+
+export interface ProductBootstrapPayload {
+    savings_products: SavingsProduct[];
+    share_products: ShareProduct[];
+    fee_rules: FeeRule[];
+    penalty_rules: PenaltyRule[];
+    posting_rules: PostingRule[];
+    chart_of_accounts: ChartOfAccountOption[];
 }
 
 export interface ImportJob {
@@ -337,6 +482,79 @@ export interface FinanceResult {
     principal_component?: number;
 }
 
+export interface TellerSession {
+    id: string;
+    tenant_id: string;
+    branch_id: string;
+    teller_user_id: string;
+    opened_by: string;
+    opening_cash: number;
+    expected_cash: number;
+    closing_cash?: number | null;
+    variance?: number | null;
+    status: "open" | "closed_pending_review" | "reviewed";
+    notes?: string | null;
+    opened_at: string;
+    closed_at?: string | null;
+    reviewed_by?: string | null;
+    reviewed_at?: string | null;
+    review_notes?: string | null;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface ReceiptPolicy {
+    id: string;
+    tenant_id: string;
+    branch_id?: string | null;
+    receipt_required: boolean;
+    required_threshold: number;
+    max_receipts_per_tx: number;
+    allowed_mime_types: string[];
+    max_file_size_mb: number;
+    enforce_on_types: Array<"deposit" | "withdraw" | "loan_repay" | "loan_disburse" | "share_contribution">;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface TransactionReceipt {
+    id: string;
+    tenant_id: string;
+    branch_id: string;
+    journal_id?: string | null;
+    member_id?: string | null;
+    transaction_type: "deposit" | "withdraw" | "loan_repay" | "loan_disburse" | "share_contribution";
+    draft_token: string;
+    storage_bucket: string;
+    storage_path: string;
+    file_name: string;
+    mime_type: string;
+    file_size_bytes: number;
+    checksum_sha256?: string | null;
+    status: "pending_upload" | "uploaded" | "confirmed" | "rejected";
+    uploaded_by: string;
+    confirmed_by?: string | null;
+    confirmed_at?: string | null;
+    expires_at: string;
+    created_at: string;
+}
+
+export interface DailyCashSummary {
+    tenant_id: string;
+    branch_id: string;
+    teller_user_id: string;
+    business_date: string;
+    sessions_count: number;
+    opening_cash_total: number;
+    deposits_total: number;
+    withdrawals_total: number;
+    net_movement: number;
+    expected_cash_total: number;
+    closing_cash_total: number;
+    variance_total: number;
+    has_open_session: boolean;
+}
+
 export interface PaginatedResult<T> {
     data: T[];
     pagination: {
@@ -448,6 +666,8 @@ export interface DividendCycle {
     created_by: string;
     approved_by?: string | null;
     approved_at?: string | null;
+    submitted_for_approval_at?: string | null;
+    submitted_for_approval_by?: string | null;
     created_at: string;
     updated_at?: string;
 }
