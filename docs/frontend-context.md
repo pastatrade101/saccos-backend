@@ -1,397 +1,181 @@
 # Frontend Context
 
-This document explains the current React frontend as it exists now, including routing, role separation, tenant workspace behavior, and the main UI decisions already encoded in the app.
+This document reflects the current React frontend implementation under `frontend/src`.
 
 ## Stack
 
-- React 18
-- TypeScript
-- Vite
-- Material UI
+- React 18 + TypeScript + Vite
+- Material UI (M3-inspired shell)
 - React Router
-- Supabase Auth client
-- Axios
-- React Hook Form
-- Zod
-- Chart.js via `react-chartjs-2`
+- Axios API client
+- Supabase browser auth client
+- React Hook Form + Zod
+- Chart.js (`react-chartjs-2`)
 
-Frontend root:
+## App Entry and Providers
 
-- [frontend/src](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src)
+- `frontend/src/main.tsx`
+- `frontend/src/App.tsx`
+- `frontend/src/auth/AuthProvider.tsx`
+- `frontend/src/ui/AppThemeProvider.tsx`
+- `frontend/src/ui/UIProvider.tsx`
 
-## Runtime Entry Points
+Key behavior:
 
-- [frontend/src/main.tsx](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/main.tsx)
-  - mounts providers
-  - applies MUI theme and UI state
-- [frontend/src/App.tsx](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/App.tsx)
-  - main route map
-- [frontend/src/auth/AuthProvider.tsx](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/auth/AuthProvider.tsx)
-  - session, profile, subscription, selected tenant/branch
-- [frontend/src/components/Layout.tsx](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/components/Layout.tsx)
-  - main admin shell
+- Supabase session persists in browser
+- Access token attached to all API requests
+- `/users/me` and `/me/subscription` hydrate role, tenant context, and entitlements
+- if backend is unavailable, app routes to `/service-unavailable`
+- if `must_change_password=true`, app forces `/change-password` before workspace access
 
-## Auth Model
+## Layout and Navigation
 
-Supabase handles browser authentication. The app then loads backend identity context.
+Primary shell:
 
-Flow:
+- `frontend/src/components/Layout.tsx`
 
-1. User signs in with Supabase email/password
-2. `AuthProvider` stores the session
-3. frontend calls `/users/me`
-4. frontend optionally calls `/me/subscription`
-5. app stores:
-   - tenant profile
-   - platform role
-   - selected tenant
-   - selected branch
-   - branch assignments
-   - subscription entitlements
+Current layout behavior:
 
-Files:
+- white side navigation (sharp edges)
+- top bar in brand primary color (`#0A0573`)
+- left-side nav toggle
+- right-side avatar menu with logout
+- global route search in top bar
+- responsive drawer behavior for mobile/desktop
 
-- [frontend/src/lib/supabase.ts](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/lib/supabase.ts)
-- [frontend/src/lib/api.ts](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/lib/api.ts)
-- [frontend/src/auth/AuthProvider.tsx](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/auth/AuthProvider.tsx)
+Role-aware menu visibility is driven by:
 
-Important behavior:
+- signed-in role
+- internal ops/platform mode
+- plan entitlements from `/me/subscription`
 
-- every backend request uses the Supabase access token in `Authorization: Bearer <token>`
-- stale tenant and branch local storage is cleared on sign-in to avoid cross-user routing mistakes
-- subscription errors raise a global inactive banner state
+## Route Map (Current)
 
-## Routing Model
+Public:
 
-Main file:
-
-- [frontend/src/App.tsx](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/App.tsx)
-
-High-level routes:
-
+- `/`
 - `/signin`
 - `/access-denied`
+- `/service-unavailable`
+
+Password policy:
+
+- `/change-password`
+
+Member portal:
+
+- `/portal`
+
+Setup:
+
 - `/setup/tenant`
 - `/setup/super-admin`
+
+Workspace:
+
 - `/dashboard`
-- `/auditor/exceptions`
-- `/auditor/journals`
-- `/auditor/journals/:id`
-- `/auditor/audit-logs`
-- `/auditor/reports`
 - `/platform/tenants`
 - `/platform/plans`
 - `/staff-users`
+- `/products`
+- `/member-applications`
 - `/members`
+- `/members/import`
 - `/cash`
+- `/cash-control`
 - `/contributions`
 - `/dividends`
 - `/loans`
 - `/loans/:loanId`
 - `/follow-ups`
 - `/reports`
-- `/portal`
 
-### ProtectedRoute
+Auditor:
 
-File:
+- `/auditor/exceptions`
+- `/auditor/journals`
+- `/auditor/journals/:id`
+- `/auditor/audit-logs`
+- `/auditor/reports`
 
-- [frontend/src/auth/ProtectedRoute.tsx](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/auth/ProtectedRoute.tsx)
+## Role Access (UI Layer)
 
-Purpose:
+- `platform_admin`: platform tenants/plans + setup, no tenant internal finance operations
+- `super_admin`: governance-level tenant screens, user control, approvals
+- `branch_manager`: member onboarding, applications, team operations, contributions, dividends
+- `loan_officer`: loan workflow appraisal/disbursement/monitoring
+- `teller`: cash desk and approved-loan disbursement + repayments
+- `auditor`: read-only auditor routes
+- `member`: portal only
 
-- guards by authentication
-- guards by role
-- blocks internal ops from tenant-internal pages where required
+Note: backend RBAC remains the source of truth.
 
-## Layout and Navigation
+## Loan Workflow UI
 
-Admin shell:
-
-- [frontend/src/components/Layout.tsx](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/components/Layout.tsx)
-
-Supporting UI state:
-
-- [frontend/src/ui/UIProvider.tsx](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/ui/UIProvider.tsx)
-- [frontend/src/ui/AppThemeProvider.tsx](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/ui/AppThemeProvider.tsx)
-
-Current behavior:
-
-- responsive sidebar
-- top bar with avatar menu only on the right
-- route search in top bar
-- tenant workspace switcher for platform owner
-- persistent theme mode
-- role-aware nav visibility
-
-### Nav Rules
-
-Current intended visibility:
-
-- `platform_admin`
-  - Dashboard
-  - Tenants
-  - Plans
-  - setup pages
-- tenant `super_admin`
-  - Dashboard
-  - Team Access
-  - Reports
-- `branch_manager`
-  - Dashboard
-  - Team Access
-  - Members
-  - Contributions
-  - Dividends
-  - Reports
-- `loan_officer`
-  - Dashboard
-  - Members
-  - Loans
-  - Reports
-- `teller`
-  - Dashboard
-  - Members
-  - Cash Desk
-- `auditor`
-  - Auditor Dashboard
-  - Exceptions
-  - Journals
-  - Audit Logs
-  - Reports
-- `member`
-  - `/portal` only
-
-Note:
-
-- the frontend hides menu items, but backend remains the real security boundary
-
-## Page Map
-
-### Sign-in and Setup
-
-- [frontend/src/pages/SignIn.tsx](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/pages/SignIn.tsx)
-- [frontend/src/pages/SetupTenant.tsx](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/pages/SetupTenant.tsx)
-- [frontend/src/pages/SetupSuperAdmin.tsx](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/pages/SetupSuperAdmin.tsx)
-
-Current setup flow:
-
-1. SaaS owner signs in
-2. creates tenant
-3. creates real tenant super admin account
-4. tenant super admin signs in separately
-
-Important:
-
-- there is still a [frontend/src/pages/SetupBranch.tsx](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/pages/SetupBranch.tsx) file in the tree, but the active product flow no longer uses a separate branch setup screen because tenant creation provisions the default branch automatically
-
-### Platform Admin Pages
-
-- [frontend/src/pages/PlatformTenants.tsx](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/pages/PlatformTenants.tsx)
-- [frontend/src/pages/PlatformPlans.tsx](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/pages/PlatformPlans.tsx)
-
-Purpose:
-
-- SaaS owner tenant inventory
-- plan editing
-- tenant subscription assignment
-
-### Dashboard
-
-- [frontend/src/pages/Dashboard.tsx](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/pages/Dashboard.tsx)
-
-This page is heavily role-conditional.
-
-Current role variants:
-
-- platform owner dashboard
-- teller dashboard
-- branch manager dashboard
-- loan officer dashboard
-- auditor dashboard
-
-Reusable chart helpers:
-
-- [frontend/src/components/ChartPanel.tsx](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/components/ChartPanel.tsx)
-- [frontend/src/lib/charts.ts](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/lib/charts.ts)
-- teller-specific cards in [frontend/src/components/teller](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/components/teller)
-
-### Follow-ups
-
-- [frontend/src/pages/FollowUps.tsx](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/pages/FollowUps.tsx)
-
-Purpose:
-
-- dedicated page for operational due-item review
-- filters:
-  - status
-  - loan/member search
-  - due-from
-  - due-to
-
-This page was added after the dashboard card grew too dense.
-
-### Auditor Workspace
-
-- [frontend/src/pages/AuditorDashboard.tsx](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/pages/AuditorDashboard.tsx)
-- [frontend/src/pages/AuditorExceptions.tsx](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/pages/AuditorExceptions.tsx)
-- [frontend/src/pages/AuditorJournals.tsx](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/pages/AuditorJournals.tsx)
-- [frontend/src/pages/AuditorAuditLogs.tsx](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/pages/AuditorAuditLogs.tsx)
-- [frontend/src/pages/AuditorReports.tsx](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/pages/AuditorReports.tsx)
-- [frontend/src/pages/AccessDenied.tsx](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/pages/AccessDenied.tsx)
-
-Purpose:
-
-- keep auditor strictly read-only
-- isolate auditor navigation from operational pages
-- provide exception-first oversight instead of generic branch operations
-
-Current auditor pages:
-
-- dashboard summary KPIs
-- exception feed
-- journals list and journal detail
-- audit log viewer
-- CSV export page
-
-### Team Access
-
-- [frontend/src/pages/StaffUsers.tsx](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/pages/StaffUsers.tsx)
+Main page: `frontend/src/pages/Loans.tsx`
 
 Current behavior:
 
-- provisioning form is modal-based from a page-level action button
-- workspace layout uses a left-side section instead of a raw directory dump
-- role options are restricted by the current actor
+- workflow card for loan application lifecycle
+- separate actions for:
+  - new application
+  - appraisal
+  - approval/rejection
+  - disbursement from approved applications
+  - loan repayment
+- disbursement action removed for super admin
+- details-first review flow:
+  - officer can open application details before appraisal
+  - portfolio rows link to dedicated loan details page (`/loans/:loanId`)
 
-### Members
+## Member UI
 
-- [frontend/src/pages/Members.tsx](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/pages/Members.tsx)
+Pages:
 
-Current behavior:
+- `frontend/src/pages/Members.tsx`
+- `frontend/src/pages/MemberImport.tsx`
+- `frontend/src/pages/MemberPortal.tsx`
 
-- branch manager is the onboarding role
-- onboarding form is modal-based
-- teller/member snapshot rendering is different from branch-manager admin rendering
-- member login can be provisioned later
+Highlights:
 
-### Cash
+- member onboarding via modal patterns
+- CSV import with robust error handling
+- optional portal account generation
+- import summary, failed rows pagination, credentials download flow
 
-- [frontend/src/pages/Cash.tsx](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/pages/Cash.tsx)
+## Theming
 
-Current behavior:
+Brand tokens:
 
-- teller-focused cash desk
-- deposit, withdrawal, and share contribution start from dedicated buttons
-- each action opens its own modal form
-- all postings still use confirmation modal before submit
+- primary dark: `#0A0573`
+- primary light/accent: `#1FA8E6`
 
-### Contributions and Dividends
+Theme files:
 
-- [frontend/src/pages/Contributions.tsx](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/pages/Contributions.tsx)
-- [frontend/src/pages/Dividends.tsx](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/pages/Dividends.tsx)
+- `frontend/src/theme/colors.ts`
+- `frontend/tailwind.config.js` (utility alignment where used)
 
-Current behavior:
+Chart color standards are aligned with financial semantics:
 
-- contributions is read-oriented and branch-scoped
-- dividends exposes cycle management and visibility for branch manager and auditor workflows
+- deposits green
+- withdrawals red
+- loans cyan
+- savings navy
+- dividends amber
 
-### Loans
+## Frontend Integration Contracts
 
-- [frontend/src/pages/Loans.tsx](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/pages/Loans.tsx)
-- [frontend/src/pages/LoanDetail.tsx](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/pages/LoanDetail.tsx)
+Core API files:
 
-Current behavior:
+- `frontend/src/lib/api.ts`
+- `frontend/src/lib/endpoints.ts`
+- `frontend/src/types/api.ts`
 
-- disbursement and repayment forms are modal-driven from header buttons
-- loan portfolio rows navigate to dedicated detail page, not modal
-- loan detail page includes:
-  - borrower details
-  - status
-  - metrics
-  - transactions
-  - amortization schedule
+These are the single source for endpoint paths and typed contracts used by pages.
 
-### Reports
+## Design and UX Notes
 
-- [frontend/src/pages/Reports.tsx](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/pages/Reports.tsx)
-
-Current behavior:
-
-- export-oriented page
-- advanced report visibility depends on subscription entitlements
-
-### Member Portal
-
-- [frontend/src/pages/MemberPortal.tsx](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/pages/MemberPortal.tsx)
-
-Current behavior:
-
-- dedicated member-only workspace
-- separate side nav styled similarly to admin shell
-- toggleable sidebar
-- flat top bar
-- menu items render dedicated views inside the portal:
-  - Overview
-  - Accounts
-  - Loans
-  - Transactions
-  - Contributions
-
-Important:
-
-- portal should not expose admin shell or dev tools
-- member data is loaded in a fault-tolerant way so one failing dataset does not destroy the whole page
-
-## API Integration Rules
-
-Main files:
-
-- [frontend/src/lib/api.ts](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/lib/api.ts)
-- [frontend/src/lib/endpoints.ts](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/lib/endpoints.ts)
-- [frontend/src/types/api.ts](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/types/api.ts)
-
-Current rules:
-
-- use backend endpoints rather than direct browser queries for scoped operational data
-- attach cache-control headers to avoid stale `304` empty-body problems
-- map all routes centrally in `endpoints.ts`
-
-Important historical fix:
-
-- several pages originally read Supabase tables directly in the browser
-- those were migrated to backend endpoints because role and branch scoping became inconsistent
-- if a future screen fails to read data that definitely exists, check whether it is trying to bypass the backend
-
-## Shared Components
-
-- [frontend/src/components/DataTable.tsx](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/components/DataTable.tsx)
-- [frontend/src/components/ConfirmModal.tsx](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/components/ConfirmModal.tsx)
-- [frontend/src/components/SearchableSelect.tsx](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/components/SearchableSelect.tsx)
-- [frontend/src/components/Toast.tsx](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/components/Toast.tsx)
-
-Supporting utilities:
-
-- [frontend/src/utils/downloadFile.ts](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/utils/downloadFile.ts)
-- [frontend/src/utils/format.ts](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/utils/format.ts)
-- [frontend/src/utils/plans.ts](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/utils/plans.ts)
-
-## UI Decisions Already Made
-
-These are current product decisions, not accidents:
-
-- Material UI is the main design system
-- admin top bar uses avatar-only account menu on the right
-- loan detail uses dedicated page, not modal
-- dashboard follow-up has a dedicated `View all` page
-- member portal uses its own left nav and top bar
-- setup flow no longer relies on a separate branch setup screen
-- tenant setup pulls real plan entitlements from backend instead of hardcoded benefit lists
-
-## What To Read Before Changing Frontend Behavior
-
-1. [frontend/src/App.tsx](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/App.tsx)
-2. [frontend/src/auth/AuthProvider.tsx](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/auth/AuthProvider.tsx)
-3. [frontend/src/components/Layout.tsx](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/components/Layout.tsx)
-4. [frontend/src/lib/endpoints.ts](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/src/lib/endpoints.ts)
-5. [docs/backend-context.md](/Users/pastoryjoseph/Desktop/saccos-backend/docs/backend-context.md)
+- member sidebar now supports dedicated pages + toggle behavior
+- top-level form actions are modal-driven for money-sensitive operations
+- blocked states are explicit for inactive subscriptions
+- loading, empty, and error states are implemented across role pages

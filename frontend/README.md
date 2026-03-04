@@ -1,58 +1,45 @@
 # SACCOS Frontend
 
-React 18 + TypeScript + Vite dashboard and member portal for the SACCOS backend in the repository root.
+React + TypeScript frontend for the SACCOS backend in the repository root.
 
-The detailed working context is documented here:
+## Stack
 
-- [frontend context](/Users/pastoryjoseph/Desktop/saccos-backend/docs/frontend-context.md)
-- [backend context](/Users/pastoryjoseph/Desktop/saccos-backend/docs/backend-context.md)
-
-## Frontend Scope
-
-This app includes:
-
-- platform owner workspace
-- tenant setup flow
-- tenant super admin bootstrap
-- staff onboarding workspace
-- product and posting-rule configuration
-- member application workflow
-- member onboarding and member service pages
-- teller cash desk
-- branch cash-control and receipt oversight
-- loan officer loan workspace
-- branch manager contributions and dividends visibility
-- reporting exports
-- member self-service portal
+- React 18
+- TypeScript
+- Vite
+- Material UI
+- React Router
+- Axios
+- Supabase Auth client
+- React Hook Form + Zod
+- Chart.js
 
 ## Environment
 
-Create `frontend/.env` from `frontend/.env.example`:
+Create `frontend/.env` from `frontend/.env.example`.
 
 ```bash
-cp frontend/.env.example frontend/.env
+cp .env.example .env
 ```
 
 Required values:
 
 ```env
 VITE_API_BASE_URL=http://localhost:5000/api
-VITE_SUPABASE_URL=https://your-project.supabase.co
-VITE_SUPABASE_ANON_KEY=your-anon-key
+VITE_SUPABASE_URL=https://<project>.supabase.co
+VITE_SUPABASE_ANON_KEY=<anon_key>
 ```
 
-Never place backend secrets or service-role keys in the frontend env file.
+Do not add service-role keys to frontend env.
 
-## Local Run
-
-Backend:
+## Run
 
 ```bash
 npm install
 npm run dev
 ```
 
-Frontend:
+From monorepo root:
 
 ```bash
 cd frontend
@@ -63,112 +50,51 @@ npm run dev
 ## Build
 
 ```bash
-cd frontend
 npm run build
 npm run preview
 ```
 
 ## Docker
 
-This frontend can be deployed independently with Docker from the `frontend/` directory.
-
 Files:
 
-- [Dockerfile](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/Dockerfile)
-- [docker-compose.yml](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/docker-compose.yml)
-- [nginx.conf](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/nginx.conf)
-- [.dockerignore](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/.dockerignore)
+- `frontend/Dockerfile`
+- `frontend/docker-compose.yml`
+- `frontend/nginx.conf`
 
-Build and run:
+Run:
 
 ```bash
-cd frontend
-cp .env.example .env
 docker compose build
 docker compose up -d
-docker compose logs -f frontend
 ```
 
-The app will be served on:
+## Route Coverage
 
-```bash
-http://localhost:8080
-```
+Public:
 
-Important:
-
-- `VITE_*` variables are build-time values and must be present before `docker compose build`
-- never put backend secrets or the Supabase service-role key in the frontend env
-- route fallback is handled by Nginx so direct navigation to dashboard routes still works
-
-## Current Important Flows
-
-### SaaS owner
-
-1. Sign in
-2. Create tenant in `Tenant Setup`
-3. Create real tenant super admin in `Setup Super Admin`
-4. Assign plan and subscription from platform pages if needed
-
-### Tenant super admin
-
-1. Sign in with separate credentials
-2. Go to `Team Access`
-3. Create the first branch manager
-
-### Branch manager
-
-1. Create operational staff:
-   - teller
-   - loan officer
-   - auditor
-2. Onboard members
-3. Use `Applications` for member review and approval flow
-4. Use `Member Import` for bulk CSV onboarding when needed
-5. Review contributions, dividends, and cash control
-
-### Teller
-
-1. Use `Members` as service lookup
-2. Open a teller session in `Cash Desk`
-3. Use `Cash Desk` for:
-   - deposit
-   - withdrawal
-   - share contribution
-4. Attach receipts when policy requires them
-5. Close the session with counted cash
-
-### Loan officer
-
-1. Use `Loans`
-2. Disburse and repay
-3. Open dedicated loan detail pages from the portfolio list
-
-### Member
-
-1. Sign in
-2. If provisioned with a temporary password, the app forces `/change-password`
-3. After password reset, land in `/portal`
-4. Navigate portal sections from the member sidebar
-
-## Route Summary
-
+- `/`
 - `/signin`
-- `/change-password`
+- `/service-unavailable`
 - `/access-denied`
+
+Account policy:
+
+- `/change-password`
+
+Setup:
+
 - `/setup/tenant`
 - `/setup/super-admin`
+
+Operational:
+
 - `/dashboard`
-- `/products`
-- `/applications`
-- `/auditor/exceptions`
-- `/auditor/journals`
-- `/auditor/journals/:id`
-- `/auditor/audit-logs`
-- `/auditor/reports`
 - `/platform/tenants`
 - `/platform/plans`
 - `/staff-users`
+- `/products`
+- `/member-applications`
 - `/members`
 - `/members/import`
 - `/cash`
@@ -179,65 +105,58 @@ Important:
 - `/loans/:loanId`
 - `/follow-ups`
 - `/reports`
+
+Auditor:
+
+- `/auditor/exceptions`
+- `/auditor/journals`
+- `/auditor/journals/:id`
+- `/auditor/audit-logs`
+- `/auditor/reports`
+
+Member:
+
 - `/portal`
 
-## CSV Member Import
+## Role Behavior
 
-1. Open `/members/import`
-2. Download the template from `/member-import-template.csv`
-3. Upload the CSV
-4. Optionally enable `Create member portal accounts`
-5. Review:
-   - import summary
-   - failed rows
-   - failures CSV
-   - one-time credentials CSV
-6. The template also supports optional migrated-portfolio columns:
-   - `loan_id`
-   - `loan_amount`
-   - `interest_rate`
-   - `term_months`
-   - `loan_status`
-   - `withdrawal_amount`
-   - `repayment_amount`
-   - `opening_savings_date`
-   - `opening_shares_date`
-   - `withdrawal_date`
-   - `loan_disbursed_at`
-   - `repayment_date`
-7. For legacy files, map:
-   - `member_id` -> `member_no`
-   - `cumulative_savings` -> `opening_savings`
-8. For a single-branch tenant, leave `branch_code` blank and the importer will attach rows to the default tenant branch automatically.
+- `platform_admin`: tenant and plan management only
+- `super_admin`: governance and approval controls
+- `branch_manager`: operations coordination and approvals
+- `loan_officer`: appraisal and loan workflow operations
+- `teller`: cash desk and disbursement execution
+- `auditor`: read-only auditor pages
+- `member`: portal only
 
-Credentials handling:
+Menu items are hidden by role and plan entitlements; backend authorization remains authoritative.
 
-- temporary passwords are generated server-side
-- the credentials CSV uses a signed URL with a short lifetime
-- distribute it securely and delete local copies after use
+## Loan Workflow in UI
 
-## Auditor Test Plan
+Implemented in `src/pages/Loans.tsx`:
 
-1. Provision a tenant user with role `auditor`.
-2. Sign in as the auditor.
-3. Confirm only auditor pages are visible in navigation:
-   - Auditor Dashboard
-   - Exceptions
-   - Journals
-   - Audit Logs
-   - Reports
-4. Post transactions using operational roles.
-5. Refresh auditor pages and confirm:
-   - exceptions load
-   - journals load
-   - audit logs load
-   - auditor CSV exports download
-6. Try opening blocked operational routes directly and confirm the app shows `Access Denied`.
-7. Confirm there are no create, update, or delete controls anywhere in the auditor UI.
+1. create/submit application
+2. appraise (loan officer)
+3. approve/reject (branch manager)
+4. disburse approved application (loan officer/teller only)
+5. repay and review portfolio/details
 
-## Notes For Future Changes
+## Member Import
 
-- prefer backend API reads over direct Supabase browser queries for operational data
-- keep role gating aligned with backend authorization
-- check [docs/frontend-context.md](/Users/pastoryjoseph/Desktop/saccos-backend/docs/frontend-context.md) before changing routing or workspace rules
-- check [docs/backend-context.md](/Users/pastoryjoseph/Desktop/saccos-backend/docs/backend-context.md) before changing finance or provisioning flows
+`/members/import` supports:
+
+- CSV upload
+- optional portal account creation
+- import summary
+- failed rows table + failures CSV
+- credentials download URL for generated temporary passwords
+
+Template file:
+
+- `../docs/member-import-template.csv`
+
+## Related Docs
+
+- `../docs/frontend-context.md`
+- `../docs/backend-context.md`
+- `../docs/api-examples.md`
+- `../docs/product-sales-guide.md`

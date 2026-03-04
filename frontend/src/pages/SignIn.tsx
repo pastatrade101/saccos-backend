@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Navigate, useLocation, useNavigate } from "react-router-dom";
+import { Link as RouterLink, Navigate, useNavigate } from "react-router-dom";
 import DarkModeRoundedIcon from "@mui/icons-material/DarkModeRounded";
 import LightModeRoundedIcon from "@mui/icons-material/LightModeRounded";
 
@@ -21,7 +21,6 @@ type SignInValues = z.infer<typeof schema>;
 
 export function SignInPage() {
     const navigate = useNavigate();
-    const location = useLocation();
     const { pushToast } = useToast();
     const { signIn, session } = useAuth();
     const { theme, toggleTheme } = useUI();
@@ -135,6 +134,18 @@ export function SignInPage() {
                             <span>Temporary credentials will force a password change after sign-in.</span>
                         </div>
                     </div>
+
+                    <p className={pageStyles.authLegal}>
+                        By signing in, you acknowledge the{" "}
+                        <RouterLink className={pageStyles.authLegalLink} to="/privacy-policy">
+                            Privacy Policy
+                        </RouterLink>{" "}
+                        and{" "}
+                        <RouterLink className={pageStyles.authLegalLink} to="/terms-and-agreement">
+                            Terms & Agreement
+                        </RouterLink>
+                        .
+                    </p>
                 </section>
             </div>
         </div>

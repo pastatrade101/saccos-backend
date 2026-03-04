@@ -292,6 +292,98 @@
   gap: 0.85rem;
 }
 
+.authLegal {
+  margin: 1rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+
+.authLegalLink {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.authLegalLink:hover {
+  color: var(--accent-strong);
+}
+
+.legalShell {
+  min-height: 100vh;
+  padding: 2rem;
+  background:
+    radial-gradient(circle at top left, rgba(31, 168, 230, 0.14), transparent 24%),
+    linear-gradient(180deg, rgba(10, 5, 115, 0.06), rgba(31, 168, 230, 0.03)),
+    var(--surface-canvas);
+}
+
+.legalFrame {
+  width: min(960px, 100%);
+  margin: 0 auto;
+  padding: 2rem;
+  border-radius: 1rem;
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-soft);
+}
+
+.legalHeader {
+  display: grid;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+}
+
+.legalEyebrow {
+  color: var(--accent-700);
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+
+.legalTitle {
+  margin: 0;
+  font-size: clamp(1.75rem, 2.8vw, 2.25rem);
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+}
+
+.legalSubtitle {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.65;
+}
+
+.legalActions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin: 1rem 0 1.5rem;
+}
+
+.legalSection {
+  padding: 1rem 0;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.legalSection h3 {
+  margin: 0;
+  font-size: 1.02rem;
+}
+
+.legalSection p,
+.legalSection li {
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+
+.legalSection ul {
+  margin: 0.6rem 0 0;
+  padding-left: 1rem;
+}
+
 @media (max-width: 900px) {
   .authShell {
     padding: 1rem;
@@ -319,5 +411,13 @@
   .metricGrid,
   .reportGrid {
     grid-template-columns: 1fr;
+  }
+
+  .legalShell {
+    padding: 1rem;
+  }
+
+  .legalFrame {
+    padding: 1.25rem;
   }
 }

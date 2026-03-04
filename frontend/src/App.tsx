@@ -34,6 +34,7 @@ import { MemberPortalPage } from "./pages/MemberPortal";
 import { MemberImportPage } from "./pages/MemberImport";
 import { ChangePasswordPage } from "./pages/ChangePassword";
 import { ServiceUnavailablePage } from "./pages/ServiceUnavailable";
+import { PrivacyPolicyPage, TermsAgreementPage } from "./pages/LegalPages";
 
 function WorkspaceRedirect() {
     const { session, profile, selectedTenantId, isInternalOps, backendUnavailable } = useAuth();
@@ -166,6 +167,8 @@ export default function App() {
         <Routes>
             <Route path="/" element={<PublicHomePage />} />
             <Route path="/signin" element={<SignInPage />} />
+            <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
+            <Route path="/terms-and-agreement" element={<TermsAgreementPage />} />
             <Route path="/access-denied" element={<AccessDeniedPage />} />
             <Route path="/service-unavailable" element={<ServiceUnavailablePage />} />
             <Route

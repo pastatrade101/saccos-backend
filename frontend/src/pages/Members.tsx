@@ -764,7 +764,7 @@ export function MembersPage() {
                                     Temporary password
                                 </Typography>
                                 <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ xs: "flex-start", sm: "center" }} sx={{ mt: 0.75 }}>
-                                    <Typography variant="h6" fontFamily="monospace">
+                                    <Typography variant="h6" fontFamily='"Source Sans 3", "Segoe UI", sans-serif'>
                                         {lastMemberCredentials.temporary_password}
                                     </Typography>
                                     <Button

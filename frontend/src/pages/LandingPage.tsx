@@ -20,7 +20,6 @@ import AccountBalanceRoundedIcon from "@mui/icons-material/AccountBalanceRounded
 import ArrowForwardRoundedIcon from "@mui/icons-material/ArrowForwardRounded";
 import AutoGraphRoundedIcon from "@mui/icons-material/AutoGraphRounded";
 import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
-import Diversity3RoundedIcon from "@mui/icons-material/Diversity3Rounded";
 import GavelRoundedIcon from "@mui/icons-material/GavelRounded";
 import HealthAndSafetyRoundedIcon from "@mui/icons-material/HealthAndSafetyRounded";
 import InsightsRoundedIcon from "@mui/icons-material/InsightsRounded";
@@ -106,16 +105,38 @@ const productModules = [
     }
 ] as const;
 
-const governancePoints = [
-    "Strict multi-tenant data isolation with tenant-scoped enforcement",
-    "Double-entry financial posting and server-side money logic",
-    "Role separation for SaaS owner, super admin, branch manager, teller, loan officer, auditor, and member",
-    "Read-only auditor workspace with exception-focused monitoring",
-    "Plan and entitlement gating enforced by the backend, not only the UI",
-    "Controlled onboarding where the platform owner chooses the plan before the tenant starts operating"
+const buyerValuePillars = [
+    {
+        title: "Financial Safety",
+        copy: "Protects real-money operations with controlled posting paths, role enforcement, and auditable transaction trails.",
+        icon: <HealthAndSafetyRoundedIcon color="primary" />
+    },
+    {
+        title: "Operational Efficiency",
+        copy: "Reduces manual work by unifying member onboarding, cash desk, loan workflow, dividends, and reporting.",
+        icon: <AutoGraphRoundedIcon color="primary" />
+    },
+    {
+        title: "Member Transparency",
+        copy: "Improves trust through clearer statements, receipts, member portal visibility, and consistent decision workflows.",
+        icon: <PeopleAltRoundedIcon color="primary" />
+    },
+    {
+        title: "Growth Capability",
+        copy: "Scales from small cooperatives to larger institutions with plan upgrades, limits, and governance-ready controls.",
+        icon: <LanRoundedIcon color="primary" />
+    }
 ] as const;
 
-const processSteps = [
+const whyDifferentPoints = [
+    "Requires the correct role before sensitive actions execute.",
+    "Logs and traces each high-risk operational event end-to-end.",
+    "Produces balanced accounting entries for financial actions.",
+    "Blocks execution when required approvals are missing.",
+    "Enforces controls at backend level, not only the UI layer."
+] as const;
+
+const onboardingSteps = [
     {
         step: "01",
         title: "Client contacts the system owner",
@@ -135,6 +156,49 @@ const processSteps = [
         step: "04",
         title: "Super admin launches operations",
         description: "The tenant super admin logs in, creates the branch manager, and operations begin in a controlled flow."
+    }
+] as const;
+
+const demoStorySteps = [
+    {
+        step: "01",
+        title: "A new SACCOS starts digitally",
+        description: "A cooperative decides to replace manual records with a governed operating platform."
+    },
+    {
+        step: "02",
+        title: "Owner provisions tenant in minutes",
+        description: "The platform owner creates tenant workspace, assigns plan, and activates subscription."
+    },
+    {
+        step: "03",
+        title: "Team begins onboarding members",
+        description: "Operational staff starts controlled member onboarding and relationship setup."
+    },
+    {
+        step: "04",
+        title: "Member submits loan request",
+        description: "The request enters a tracked workflow with branch and role context."
+    },
+    {
+        step: "05",
+        title: "Loan officer appraises",
+        description: "Terms and risk are assessed before the request can move to approval."
+    },
+    {
+        step: "06",
+        title: "Branch manager approves",
+        description: "Maker-checker is enforced before money can be disbursed."
+    },
+    {
+        step: "07",
+        title: "Teller disburses with receipt",
+        description: "Funds are released through controlled posting with evidence capture."
+    },
+    {
+        step: "08",
+        title: "Auditor reviews lifecycle",
+        description: "Auditor can inspect the full chain from request to journal evidence in read-only mode."
     }
 ] as const;
 
@@ -209,6 +273,9 @@ export function LandingPage() {
                         >
                             <Button component="a" href="#solutions" color="inherit">
                                 Solutions
+                            </Button>
+                            <Button component="a" href="#why-different" color="inherit">
+                                Why Different
                             </Button>
                             <Button component="a" href="#plans" color="inherit">
                                 Plans
@@ -294,7 +361,7 @@ export function LandingPage() {
                                     maxWidth: 820
                                 }}
                             >
-                                Launch and govern a modern SACCOS operation with one controlled platform.
+                                Operate your SACCOS with institutional-grade controls, transparency, and growth readiness.
                             </Typography>
                             <Typography
                                 variant="h6"
@@ -305,9 +372,9 @@ export function LandingPage() {
                                     color: alpha("#ffffff", 0.82)
                                 }}
                             >
-                                From member onboarding and cash desk workflows to loans, dividends, audit review,
-                                and SaaS oversight, this platform gives SACCOS operators one disciplined operating
-                                system instead of scattered spreadsheets and weak controls.
+                                This is not a dashboard over spreadsheets. It is a governed operating platform for
+                                member onboarding, cash, lending, dividends, and audit visibility with backend-enforced
+                                control points.
                             </Typography>
                             <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
                                 <Button
@@ -371,7 +438,7 @@ export function LandingPage() {
                                 </Stack>
 
                                 <Grid container spacing={1.5}>
-                                    {processSteps.map((step) => (
+                                    {onboardingSteps.map((step) => (
                         <Grid key={step.step} size={{ xs: 12, sm: 6 }}>
                                             <Card
                                                 sx={{
@@ -448,11 +515,42 @@ export function LandingPage() {
                             What the platform offers
                         </Typography>
                         <Typography variant="h3" sx={{ maxWidth: 760 }}>
+                            Built for real-money safety, operational speed, and member trust.
+                        </Typography>
+                        <Typography variant="body1" color="text.secondary" sx={{ maxWidth: 760 }}>
+                            Buyers get practical outcomes: safer financial execution, reduced manual work, better
+                            transparency to members, and a clear path to scale.
+                        </Typography>
+                    </Stack>
+
+                    <Grid container spacing={2} sx={{ mb: 3 }}>
+                        {buyerValuePillars.map((item) => (
+                            <Grid key={item.title} size={{ xs: 12, sm: 6, lg: 3 }}>
+                                <Card sx={{ height: "100%", borderRadius: 2 }}>
+                                    <CardContent sx={{ p: 2.75 }}>
+                                        {item.icon}
+                                        <Typography variant="h6" sx={{ mt: 1.5 }}>
+                                            {item.title}
+                                        </Typography>
+                                        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                                            {item.copy}
+                                        </Typography>
+                                    </CardContent>
+                                </Card>
+                            </Grid>
+                        ))}
+                    </Grid>
+
+                    <Stack spacing={1} sx={{ mb: 3 }}>
+                        <Typography variant="overline" color="primary.main" sx={{ fontWeight: 800 }}>
+                            Product modules
+                        </Typography>
+                        <Typography variant="h4" sx={{ maxWidth: 760 }}>
                             A complete operating system for SACCOS teams, leadership, and compliance.
                         </Typography>
                         <Typography variant="body1" color="text.secondary" sx={{ maxWidth: 760 }}>
-                            Every workspace is built around the realities of member-based finance: operational control,
-                            accounting integrity, branch execution, and audit visibility.
+                            Every workspace is structured around member-based finance realities: operational control,
+                            accounting integrity, execution quality, and audit visibility.
                         </Typography>
                     </Stack>
 
@@ -488,6 +586,7 @@ export function LandingPage() {
             </Box>
 
             <Box
+                id="why-different"
                 sx={{
                     py: { xs: 7, md: 9 },
                     bgcolor: alpha(theme.palette.primary.main, mode === "light" ? 0.03 : 0.08)
@@ -498,18 +597,18 @@ export function LandingPage() {
                         <Grid size={{ xs: 12, lg: 6 }}>
                             <Paper sx={{ p: { xs: 3, md: 4 }, borderRadius: 2, height: "100%" }}>
                                 <Typography variant="overline" color="primary.main" sx={{ fontWeight: 800 }}>
-                                    Governance built in
+                                    Why this platform is different
                                 </Typography>
                                 <Typography variant="h4" sx={{ mt: 1, mb: 1.5 }}>
-                                    Strong controls for real-money operations.
+                                    Governance is enforced by the system, not by policy documents alone.
                                 </Typography>
                                 <Typography variant="body1" color="text.secondary" sx={{ mb: 3, maxWidth: 620 }}>
-                                    This product is built to help a SACCOS operate with discipline, not just speed. It
-                                    separates roles, preserves audit visibility, and keeps tenant data isolated.
+                                    Unlike tools that act like spreadsheets with dashboards, this platform applies
+                                    control rules to each sensitive action before money moves.
                                 </Typography>
 
                                 <Stack spacing={1.75}>
-                                    {governancePoints.map((point) => (
+                                    {whyDifferentPoints.map((point) => (
                                         <Stack key={point} direction="row" spacing={1.5} alignItems="flex-start">
                                             <LockRoundedIcon color="primary" fontSize="small" sx={{ mt: 0.2 }} />
                                             <Typography variant="body2" color="text.secondary">
@@ -524,32 +623,32 @@ export function LandingPage() {
                         <Grid size={{ xs: 12, lg: 6 }}>
                             <Paper sx={{ p: { xs: 3, md: 4 }, borderRadius: 2, height: "100%" }}>
                                 <Typography variant="overline" color="primary.main" sx={{ fontWeight: 800 }}>
-                                    Why clients convert
+                                    Governance outcomes
                                 </Typography>
                                 <Typography variant="h4" sx={{ mt: 1, mb: 3 }}>
-                                    Clear business outcomes, not just software features.
+                                    The cooperative operates with institutional-grade control confidence.
                                 </Typography>
 
                                 <Grid container spacing={2}>
                                     {[
                                         {
-                                            title: "Faster launch",
-                                            copy: "New SACCOS tenants can be provisioned with plan controls and role-specific workspaces from day one.",
-                                            icon: <Diversity3RoundedIcon color="primary" />
+                                            title: "Correct role enforcement",
+                                            copy: "No sensitive action executes without a role that is explicitly authorized.",
+                                            icon: <GavelRoundedIcon color="primary" />
                                         },
                                         {
-                                            title: "Cleaner branch execution",
-                                            copy: "Tellers, loan officers, branch managers, auditors, and members each see only what they should operate or review.",
-                                            icon: <PeopleAltRoundedIcon color="primary" />
-                                        },
-                                        {
-                                            title: "Better visibility",
-                                            copy: "Leadership can track members, savings, loan quality, contributions, exceptions, and reports without fragmented tools.",
+                                            title: "Traceable operation chain",
+                                            copy: "Financial and governance steps remain auditable from request to posting outcome.",
                                             icon: <InsightsRoundedIcon color="primary" />
                                         },
                                         {
-                                            title: "Safer governance posture",
-                                            copy: "Auditor workspaces, approval rules, and immutable financial posting help reduce manipulation risk.",
+                                            title: "Balanced accounting integrity",
+                                            copy: "Posting paths are tied to controlled accounting logic and balanced journal outcomes.",
+                                            icon: <HealthAndSafetyRoundedIcon color="primary" />
+                                        },
+                                        {
+                                            title: "Approval-gated execution",
+                                            copy: "High-risk steps like disbursement stay blocked until required approvals are complete.",
                                             icon: <SecurityRoundedIcon color="primary" />
                                         }
                                     ].map((item) => (
@@ -638,15 +737,15 @@ export function LandingPage() {
                         <Grid container spacing={4}>
                             <Grid size={{ xs: 12, lg: 5 }}>
                                 <Typography variant="overline" color="primary.main" sx={{ fontWeight: 800 }}>
-                                    How onboarding works
+                                    Demo story
                                 </Typography>
                                 <Typography variant="h3" sx={{ mt: 1.25 }}>
-                                    A contact-led, controlled rollout.
+                                    Controlled money movement in one narrative.
                                 </Typography>
                                 <Typography variant="body1" color="text.secondary" sx={{ mt: 2 }}>
-                                    This is not open public self-signup. A client reaches out first, the platform owner
-                                    chooses the correct plan, and then the tenant is provisioned with the right control
-                                    structure before operations start.
+                                    A new SACCOS starts digital operations. The platform owner provisions the tenant,
+                                    teams onboard members, loan workflow approvals run by role, teller executes
+                                    disbursement with receipt capture, and the auditor can trace the full lifecycle.
                                 </Typography>
                                 <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} sx={{ mt: 3 }}>
                                     <Button component="a" href={contactHref} variant="contained">
@@ -661,8 +760,8 @@ export function LandingPage() {
                             </Grid>
                             <Grid size={{ xs: 12, lg: 7 }}>
                                 <Grid container spacing={2}>
-                                    {processSteps.map((step) => (
-                                        <Grid key={step.step} size={{ xs: 12, sm: 6 }}>
+                                    {demoStorySteps.map((step) => (
+                                        <Grid key={step.step} size={{ xs: 12, md: 6 }}>
                                             <Card sx={{ height: "100%", borderRadius: 2 }}>
                                                 <CardContent sx={{ p: 2.5 }}>
                                                     <Typography variant="h4" color="primary.main" sx={{ fontWeight: 800 }}>
@@ -780,11 +879,14 @@ export function LandingPage() {
                                 <Typography component="a" href="#solutions" variant="body2" color="text.secondary" sx={{ textDecoration: "none" }}>
                                     Solutions
                                 </Typography>
+                                <Typography component="a" href="#why-different" variant="body2" color="text.secondary" sx={{ textDecoration: "none" }}>
+                                    Why different
+                                </Typography>
                                 <Typography component="a" href="#plans" variant="body2" color="text.secondary" sx={{ textDecoration: "none" }}>
                                     Plans
                                 </Typography>
                                 <Typography component="a" href="#how-it-works" variant="body2" color="text.secondary" sx={{ textDecoration: "none" }}>
-                                    Onboarding process
+                                    Demo story
                                 </Typography>
                                 <Typography component={RouterLink} to="/signin" variant="body2" color="text.secondary" sx={{ textDecoration: "none" }}>
                                     Client sign in

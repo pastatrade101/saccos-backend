@@ -1,62 +1,40 @@
 # Core SACCOS Delivery Matrix
 
+Updated: March 4, 2026
+
 Status key:
-- `Done`: already implemented in the current codebase
-- `Partial`: baseline exists but the phase is incomplete for enterprise-grade scope
-- `Missing`: not yet implemented
 
-## Phase Audit
+- `Done`: implemented and integrated in current backend + frontend
+- `Partial`: implemented baseline exists, but enterprise-depth extensions still pending
+- `Missing`: not implemented
 
-| Phase | Area | Status | Notes |
+| Phase | Area | Status | Current Notes |
 | --- | --- | --- | --- |
-| 0 | Baseline audit and project structure | Partial | Modular backend/frontend exist; additive `src/db` and `frontend/src/features` anchors added, but broader refactor is still pending |
-| 1 | Core data model, member lifecycle, products, posting rules | Done | Implemented in migrations `013-015`, backend modules `products` and `member-applications`, live flow patches, and frontend pages |
-| 2 | Teller sessions, receipt proof policy, daily cash summary | Done | Implemented in migrations `016-018`, backend `cash-control` module, finance posting hooks, teller cash desk session flow, and manager cash-control page |
-| 3 | Loan products, applications, approvals, guarantors, collateral, PAR | Partial | Loans, schedules, repayment, PAR, and loan detail views exist; loan products/guarantors/collateral/multi-step approvals remain incomplete |
-| 4 | Contributions and member sub-ledgers | Partial | Member savings/shares/loan accounts exist with contributions view; recurring compulsory contribution policy and richer statements still need expansion |
-| 5 | Enterprise dividends | Partial | Dividend cycles, allocations, approvals, and payments exist; treasury-grade approvals and full simulation UX still need more depth |
-| 6 | Governance, audit, and security hardening | Partial | Auditor module, audit logs, temp credentials, and password-change gating exist; stronger role-change controls and full security hardening checklist remain |
-| 7 | Management and regulatory reporting | Partial | Trial balance, statements, PAR, aging, auditor exports exist; full income statement, balance sheet, PDF registers, and operational packs remain |
-| 8 | SaaS owner, plans, limits, billing prep | Partial | Plans, entitlements, platform admin console, tenant gating exist; billing engine and read-only suspension polish remain |
-| 9 | CSV import and opening balances | Partial | Secure member import, credentials export, opening balances, dated activity imports exist; opening loans and async background jobs remain |
-| 10 | UI/UX finish and role dashboards | Partial | Design system, dashboards, role navigation, public landing page, and member portal exist; more consistency passes remain |
-| 11 | QA, tests, integrity protections, go-live readiness | Missing | Automated tests, idempotency keys, migration runner discipline, and full go-live checklist are still pending |
+| 0 | Baseline structure and context | Done | Modular route/service architecture is in place; docs updated to current route and role model |
+| 1 | Core data model + products + posting rules | Done | Member lifecycle tables/procedures, product catalog, posting-rule checks, and seeded defaults are implemented |
+| 2 | Teller sessions + receipt proof + cash summary | Done | Cash-control module, receipt policies, signed upload flow, and daily summary exports are live |
+| 3 | Loan workflow + approvals + disbursement controls | Done | Application/appraisal/approval/disbursement lifecycle is live with maker-checker and disbursement gating |
+| 4 | Contributions + member sub-ledgers | Partial | Savings/shares/loan member accounts and contribution flows exist; recurring contribution automation remains limited |
+| 5 | Dividend lifecycle enterprise controls | Partial | Draft/freeze/allocate/submit/approve/pay/close exists; advanced simulation and policy modeling can be expanded |
+| 6 | Governance, audit, security hardening | Partial | Auditor module, immutable logs, rate limits, idempotency, and password-change forcing exist; deeper hardening continues |
+| 7 | Reporting + exports | Partial | Core CSV exports and auditor reports exist; broader regulatory and PDF packs remain incremental |
+| 8 | SaaS plans, entitlements, tenant controls | Done | Plans/features, subscription gating, platform tenant admin, and backend feature enforcement are active |
+| 9 | CSV import + secure first login | Done | Import jobs, row-level failures, optional auth provisioning, temp credentials export, and forced password change are active |
+| 10 | UI/UX role dashboards + design system | Partial | Role-aware dashboards and themed shell exist; ongoing polish continues by page/workflow |
+| 11 | Tests + QA + readiness | Partial | Procedure tests, API tests, and smoke flow exist; broader coverage and CI maturity are ongoing |
 
-## Phase 1 Deliverables Added
+## Completed Highlights Since Last Audit
 
-### Database
-- `013_phase1_foundation.sql`
-- `014_phase1_rls.sql`
-- `015_phase1_procedures.sql`
+- Loan workflow moved to strict approved-only disbursement path.
+- Super admin removed from loan disbursement route authorization.
+- Member application approval path stabilized (branch manager submit, super admin approve/reject).
+- Member CSV import supports richer historical migration fields and credentials export.
+- Frontend role gating aligned to latest route permissions.
+- Platform owner controls updated for plan/tenant management scope.
 
-### Backend
-- `src/modules/products/*`
-- `src/modules/member-applications/*`
-- Posting-rule enforcement in `finance.service.js`
-- Product seeding in `tenants.service.js`
-- `last_login_at` stamping in `auth.service.js`
-- CBS-grade member fields and status-history writes in `members.service.js`
+## Current Priority Gaps
 
-### Frontend
-- `frontend/src/pages/ProductCatalog.tsx`
-- `frontend/src/pages/MemberApplications.tsx`
-- Navigation and route wiring in `App.tsx` and `Layout.tsx`
-- New endpoint/type contracts in `frontend/src/lib/endpoints.ts` and `frontend/src/types/api.ts`
-
-## Phase 2 Deliverables Added
-
-### Database
-- `016_phase2_cash_control.sql`
-- `017_phase2_cash_control_rls.sql`
-- `018_phase2_receipts_storage.sql`
-
-### Backend
-- `src/modules/cash-control/*`
-- Teller-session enforcement hooks in `finance.service.js`
-- Receipt finalization hooks in `finance.service.js`
-- Phase 2 default seeding in `tenants.service.js`
-
-### Frontend
-- `frontend/src/pages/CashControl.tsx`
-- Teller session and receipt upload flow in `frontend/src/pages/Cash.tsx`
-- New cash-control routes and nav entries in `frontend/src/App.tsx` and `frontend/src/components/Layout.tsx`
+1. Expand reporting breadth (balance sheet/income statement production-grade packs).
+2. Increase automated test coverage for edge-case and failure-path financial scenarios.
+3. Continue UX consistency pass across all operational pages.
+4. Strengthen async/background handling for long-running import and batch tasks.

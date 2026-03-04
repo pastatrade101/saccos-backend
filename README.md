@@ -1,206 +1,124 @@
 # SACCOS Platform Monorepo
 
-Production-oriented multi-tenant SACCOS platform with:
+Enterprise multi-tenant SACCOS system for real-money operations.
 
-- Node.js + Express backend
-- Supabase Postgres + Auth
-- React 18 + TypeScript + Vite frontend
-- Material UI dashboard and member portal
+## Stack
 
-This README is the entry point. The detailed working context lives in:
+- Backend: Node.js + Express
+- Database/Auth: Supabase Postgres + Supabase Auth + Supabase Storage
+- Frontend: React 18 + TypeScript + Vite + Material UI
+- Security: RLS, JWT validation, RBAC, feature gating, idempotency, audit logs
 
-- [docs/backend-context.md](/Users/pastoryjoseph/Desktop/saccos-backend/docs/backend-context.md)
-- [docs/frontend-context.md](/Users/pastoryjoseph/Desktop/saccos-backend/docs/frontend-context.md)
-- [docs/deployment.md](/Users/pastoryjoseph/Desktop/saccos-backend/docs/deployment.md)
-- [docs/api-examples.md](/Users/pastoryjoseph/Desktop/saccos-backend/docs/api-examples.md)
+## Documentation Index
 
-## Repo Map
+- [Backend context](docs/backend-context.md)
+- [Frontend context](docs/frontend-context.md)
+- [Deployment guide](docs/deployment.md)
+- [API request examples](docs/api-examples.md)
+- [Delivery/status matrix](docs/phase-audit-matrix.md)
+- [Sales and marketing guide](docs/product-sales-guide.md)
 
-- [src](/Users/pastoryjoseph/Desktop/saccos-backend/src): backend runtime
-- [supabase/sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql): schema, RLS, procedures, additive migrations
-- [scripts](/Users/pastoryjoseph/Desktop/saccos-backend/scripts): bootstrap and demo seed
-- [frontend](/Users/pastoryjoseph/Desktop/saccos-backend/frontend): React app
-- [docs](/Users/pastoryjoseph/Desktop/saccos-backend/docs): project documentation
+## Repository Map
 
-## Current Operating Model
+- `src/`: backend runtime code
+- `supabase/sql/`: schema, RLS, procedures, and additive migrations
+- `scripts/`: bootstrap, seed, and reset utilities
+- `frontend/`: React application
+- `docs/`: product, engineering, and operations documentation
+- `test/`: Jest + Supertest + procedure smoke tests
 
-- `platform_admin` / SaaS owner:
-  - platform dashboard
-  - tenant management
-  - plan management
-  - tenant creation
-  - first tenant super admin creation
-  - cannot operate inside tenant finance workflows
-- tenant `super_admin`:
-  - creates branch managers only
-  - does not onboard members directly
-  - does not handle cash or loans directly
-- `branch_manager`:
-  - creates `loan_officer`, `teller`, `auditor`
-  - onboards members
-  - views contributions and dividends
-- `loan_officer`:
-  - handles loans
-- `teller`:
-  - handles deposits, withdrawals, share contributions
-- `auditor`:
-  - read-only operational/reporting access
-- `member`:
-  - member self-service portal only
+## Current Role Model
 
-## Core Financial Model
+- `platform_admin` (SaaS owner)
+  - manages tenants, plans, subscriptions
+  - can create tenant super admins
+  - does not perform tenant internal cash/loan/dividend operations
+- tenant `super_admin`
+  - governs tenant workspace
+  - provisions `branch_manager` users
+  - approves/rejects member applications
+- `branch_manager`
+  - provisions `loan_officer`, `teller`, `auditor`
+  - creates and submits member applications
+  - handles contributions/dividends/cash-control oversight
+  - approves/rejects loan applications
+- `loan_officer`
+  - appraises loan applications
+  - can disburse approved loans
+- `teller`
+  - deposit/withdraw/cash desk
+  - can disburse approved loans
+  - posts repayments
+- `auditor`
+  - strict read-only audit workspace
+- `member`
+  - self-service portal only
 
-- Tenant creation seeds default GL accounts via `seed_tenant_defaults`
-- Member creation auto-creates:
-  - savings account
-  - share capital account
-- Loan disbursement creates:
-  - `loans` master record
-  - `loan_schedules`
-  - `loan_accounts`
-  - `loan_account_transactions`
-- Deposits and withdrawals post against:
-  - tenant control GL accounts
-  - member sub-ledger accounts
-- Dividends use:
-  - cycles
-  - snapshots
-  - allocations
-  - approvals
-  - payment posting
+## Core Workflows
 
-## SQL Apply Order
+### Tenant bootstrap
 
-For a fresh environment, apply SQL in this order:
+1. `platform_admin` creates tenant
+2. System seeds defaults:
+   - chart of accounts
+   - posting rules
+   - baseline products
+   - subscription entry
+   - default branch
+3. `platform_admin` creates first tenant `super_admin`
 
-1. [001_schema.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/001_schema.sql)
-2. [002_rls.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/002_rls.sql)
-3. [003_procedures.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/003_procedures.sql)
-4. [001_plans.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/001_plans.sql)
-5. [002_rls_plans.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/002_rls_plans.sql)
-6. [004_shares_and_dividends.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/004_shares_and_dividends.sql)
-7. [005_dividend_module.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/005_dividend_module.sql)
-8. [006_performance_indexes.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/006_performance_indexes.sql)
-9. [007_loan_accounts.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/007_loan_accounts.sql)
-10. [008_loan_repayment_tracking_fix.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/008_loan_repayment_tracking_fix.sql)
-11. [009_auditor_upgrade.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/009_auditor_upgrade.sql)
-12. [010_member_import.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/010_member_import.sql)
-13. [011_import_storage_policies.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/011_import_storage_policies.sql)
-14. [013_phase1_foundation.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/013_phase1_foundation.sql)
-15. [014_phase1_rls.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/014_phase1_rls.sql)
-16. [015_phase1_procedures.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/015_phase1_procedures.sql)
-17. [016_phase2_cash_control.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/016_phase2_cash_control.sql)
-18. [017_phase2_cash_control_rls.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/017_phase2_cash_control_rls.sql)
-19. [018_phase2_receipts_storage.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/018_phase2_receipts_storage.sql)
-20. [019_idempotency_keys.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/019_idempotency_keys.sql)
+### Member onboarding
+
+1. `branch_manager` creates member application (`draft`)
+2. `branch_manager` submits for approval
+3. `super_admin` approves or rejects
+4. On approval:
+   - member is created/linked
+   - member accounts are ensured (savings/shares)
+   - optional membership fee posting is executed
+
+### Loan workflow (gated disbursement)
+
+1. Application created by member or staff (`draft`)
+2. Submitted (`submitted`)
+3. Loan officer appraisal (`appraised`)
+4. Branch manager approval (`approved`, maker-checker enforced)
+5. Disbursement by `loan_officer` or `teller` only (`disbursed`)
+6. Disbursement posts the final accounting entry through existing finance posting logic
+
+## Migration Order (Fresh Environment)
+
+Run in this sequence:
+
+1. `001_schema.sql`
+2. `002_rls.sql`
+3. `003_procedures.sql`
+4. `001_plans.sql`
+5. `002_rls_plans.sql`
+6. `004_shares_and_dividends.sql`
+7. `005_dividend_module.sql`
+8. `006_performance_indexes.sql`
+9. `007_loan_accounts.sql`
+10. `008_loan_repayment_tracking_fix.sql`
+11. `009_auditor_upgrade.sql`
+12. `010_member_import.sql`
+13. `011_import_storage_policies.sql`
+14. `012_temp_credentials.sql`
+15. `013_phase1_foundation.sql`
+16. `014_phase1_rls.sql`
+17. `015_phase1_procedures.sql`
+18. `016_phase2_cash_control.sql`
+19. `017_phase2_cash_control_rls.sql`
+20. `018_phase2_receipts_storage.sql`
+21. `019_idempotency_keys.sql`
+22. `020_dividend_submission_handoff.sql`
+23. `021_loan_workflow.sql`
+24. `022_loan_workflow_rls.sql`
 
 Important:
 
-- `002_rls.sql` is not idempotent because PostgreSQL policies do not support `if not exists`
-- do not rerun the entire file blindly on a live database that already has those policies
-- additive migrations like `006`, `007`, and `008` are safe to run when needed
-
-## Cash Control And Receipt Proof
-
-Phase 2 now adds:
-
-- teller sessions with open, close, and manager review
-- receipt policy with tenant default and optional branch override
-- signed receipt upload flow
-- immutable receipt records linked to posted journals
-- daily cash summary
-- CSV exports for:
-  - daily cashbook
-  - teller balancing
-
-New backend endpoints:
-
-- `GET /api/cash-control/sessions`
-- `GET /api/cash-control/sessions/current`
-- `POST /api/cash-control/sessions/open`
-- `POST /api/cash-control/sessions/:id/close`
-- `POST /api/cash-control/sessions/:id/review`
-- `GET /api/cash-control/receipt-policy`
-- `PUT /api/cash-control/receipt-policy`
-- `POST /api/cash-control/receipts/init`
-- `POST /api/cash-control/receipts/:id/confirm`
-- `GET /api/cash-control/journals/:journalId/receipts`
-- `GET /api/cash-control/receipts/:id/download`
-- `GET /api/cash-control/summary/daily`
-- `GET /api/cash-control/reports/daily-cashbook.csv`
-- `GET /api/cash-control/reports/teller-balancing.csv`
-
-How to test:
-
-1. Apply `016_phase2_cash_control.sql`
-2. Apply `017_phase2_cash_control_rls.sql`
-3. Apply `018_phase2_receipts_storage.sql`
-4. Restart backend and frontend
-5. Sign in as `teller`
-6. Open `Cash Desk`
-7. Open a teller session
-8. Post a deposit or withdrawal with a receipt attached
-9. Close the session with counted closing cash
-10. Sign in as `branch_manager`
-11. Open `Cash Control`
-12. Review receipt policy, teller sessions, and export reports
-
-## CSV Member Import + Secure First Login
-
-The platform now supports branch-manager-led CSV member import with optional member portal provisioning.
-
-Template:
-
-- [docs/member-import-template.csv](/Users/pastoryjoseph/Desktop/saccos-backend/docs/member-import-template.csv)
-
-New backend endpoints:
-
-- `POST /api/imports/members`
-- `GET /api/imports/members/:jobId`
-- `GET /api/imports/members/:jobId/rows?status=failed&page&limit`
-- `GET /api/imports/members/:jobId/failures.csv`
-- `GET /api/imports/members/:jobId/credentials`
-- `POST /api/users/me/password-changed`
-
-Security model:
-
-- temporary passwords are generated server-side only
-- passwords are never stored in Postgres
-- credentials are exposed only through a one-time signed CSV export
-- imported member logins are forced to change password on first login
-- import requests and auth-user creation are rate-limited
-- the importer accepts standard onboarding columns plus optional migration columns:
-  - `loan_id`
-  - `loan_amount`
-  - `interest_rate`
-  - `term_months`
-  - `loan_status`
-  - `withdrawal_amount`
-  - `repayment_amount`
-  - `opening_savings_date`
-  - `opening_shares_date`
-  - `withdrawal_date`
-  - `loan_disbursed_at`
-  - `repayment_date`
-- `member_id` from legacy files should be mapped into `member_no`
-- `cumulative_savings` from legacy files should be mapped into `opening_savings`
-- imported `loan_id` is treated as an external reference; the system still generates its own internal loan number
-- dated activity fields let imported transactions and loans appear across a realistic historical timeline in dashboards
-- for a single-branch tenant, leave `branch_code` blank and the importer will use the tenant's default branch automatically
-
-How to test:
-
-1. Apply `010_member_import.sql`
-2. Apply `011_import_storage_policies.sql`
-3. Restart backend and frontend
-4. Sign in as a `branch_manager`
-5. Open `Member Import`
-6. Upload the template CSV
-7. Enable `Create member portal accounts` if needed
-8. Download the credentials CSV and distribute it securely
-9. Sign in as an imported member
-10. Confirm the app forces `/change-password`
-11. Change password and verify the member is redirected into `/portal`
+- Policy files (`002_rls.sql`, `002_rls_plans.sql`, `014_phase1_rls.sql`, `017_phase2_cash_control_rls.sql`, `022_loan_workflow_rls.sql`) should be applied carefully on environments with existing policies.
+- Prefer additive migrations in production; do not rerun base schema files blindly.
 
 ## Local Run
 
@@ -212,12 +130,38 @@ cp .env.example .env
 npm run dev
 ```
 
-Backend with Docker Compose:
+Frontend:
 
 ```bash
+cd frontend
+npm install
 cp .env.example .env
+npm run dev
+```
+
+## Docker Run
+
+Backend:
+
+```bash
 docker compose build
 docker compose up -d
+```
+
+Frontend:
+
+```bash
+cd frontend
+docker compose build
+docker compose up -d
+```
+
+## High-Value References
+
+- Member import template: `docs/member-import-template.csv`
+- Demo seed script: `scripts/seed-demo-data.js`
+- Tenant reset script: `scripts/reset-tenants.js`
+- Member reset script: `scripts/reset-members.js`
 docker compose logs -f backend
 ```
 

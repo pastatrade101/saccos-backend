@@ -1,106 +1,141 @@
-# Deployment Notes
+# Deployment Guide
 
-## Runtime
+Production deployment notes for backend and frontend.
 
-- Node.js 20 or later.
-- Deploy the API as a stateless process behind a TLS terminator or load balancer.
-- Set `SSL_ENABLED=true` in production and terminate HTTPS at the edge.
-- Use at least two application instances for horizontal scaling.
+## Runtime Requirements
 
-## Docker Compose
+- Node.js 20+ (backend and local frontend builds)
+- Docker + Docker Compose (recommended deployment path)
+- Supabase project with:
+  - Postgres
+  - Auth
+  - Storage bucket `imports` (private)
+  - Storage bucket for receipts if configured
 
-The backend is ready to deploy with:
+## Environment Variables
 
-- [Dockerfile](/Users/pastoryjoseph/Desktop/saccos-backend/Dockerfile)
-- [docker-compose.yml](/Users/pastoryjoseph/Desktop/saccos-backend/docker-compose.yml)
+Backend `.env` (from `.env.example`):
 
-Recommended server flow:
+- `PORT`
+- `API_PREFIX`
+- `NODE_ENV`
+- `CORS_ORIGINS`
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `HIGH_VALUE_THRESHOLD_TZS`
+- import and receipt policy env keys (see `.env.example`)
 
-1. Copy `.env.example` to `.env`
-2. Fill all production environment variables
-3. Build and start:
+Frontend `frontend/.env` (from `frontend/.env.example`):
+
+- `VITE_API_BASE_URL`
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY`
+
+Never place service-role keys in frontend env.
+
+## Database Migration Apply Order
+
+Apply in this exact sequence on a fresh environment:
+
+1. `supabase/sql/001_schema.sql`
+2. `supabase/sql/002_rls.sql`
+3. `supabase/sql/003_procedures.sql`
+4. `supabase/sql/001_plans.sql`
+5. `supabase/sql/002_rls_plans.sql`
+6. `supabase/sql/004_shares_and_dividends.sql`
+7. `supabase/sql/005_dividend_module.sql`
+8. `supabase/sql/006_performance_indexes.sql`
+9. `supabase/sql/007_loan_accounts.sql`
+10. `supabase/sql/008_loan_repayment_tracking_fix.sql`
+11. `supabase/sql/009_auditor_upgrade.sql`
+12. `supabase/sql/010_member_import.sql`
+13. `supabase/sql/011_import_storage_policies.sql`
+14. `supabase/sql/012_temp_credentials.sql`
+15. `supabase/sql/013_phase1_foundation.sql`
+16. `supabase/sql/014_phase1_rls.sql`
+17. `supabase/sql/015_phase1_procedures.sql`
+18. `supabase/sql/016_phase2_cash_control.sql`
+19. `supabase/sql/017_phase2_cash_control_rls.sql`
+20. `supabase/sql/018_phase2_receipts_storage.sql`
+21. `supabase/sql/019_idempotency_keys.sql`
+22. `supabase/sql/020_dividend_submission_handoff.sql`
+23. `supabase/sql/021_loan_workflow.sql`
+24. `supabase/sql/022_loan_workflow_rls.sql`
+
+For existing environments, run only new additive migrations and validate policy collisions before execution.
+
+## Backend Deployment (Docker)
+
+Files:
+
+- `Dockerfile`
+- `docker-compose.yml`
+
+Commands:
 
 ```bash
+cp .env.example .env
 docker compose build
 docker compose up -d
-```
-
-4. Watch startup:
-
-```bash
 docker compose logs -f backend
 ```
 
-5. Verify health:
+Health checks:
 
 ```bash
 curl http://127.0.0.1:5000/health
+curl http://127.0.0.1:5000/api/health
 ```
 
-Operational notes:
+## Frontend Deployment (Docker)
 
-- keep `.env` on the server only
-- put the container behind Nginx/Caddy/Traefik for TLS termination
-- the compose service runs with `restart: unless-stopped`
-- the image uses a non-root `node` user
-- the container includes a healthcheck against `/health`
+Files:
 
-## Environment
+- `frontend/Dockerfile`
+- `frontend/docker-compose.yml`
+- `frontend/nginx.conf`
 
-- Populate the variables in `.env.example`.
-- Never expose `SUPABASE_SERVICE_ROLE_KEY` outside the backend runtime.
-- Keep `SUPABASE_ANON_KEY` public but restricted to the frontend origin list.
+Commands:
 
-## Supabase Setup
+```bash
+cd frontend
+cp .env.example .env
+docker compose build
+docker compose up -d
+docker compose logs -f frontend
+```
 
-1. Run the SQL files in order:
-   1. `supabase/sql/001_schema.sql`
-   2. `supabase/sql/002_rls.sql`
-   3. `supabase/sql/003_procedures.sql`
-   4. `supabase/sql/001_plans.sql`
-   5. `supabase/sql/002_rls_plans.sql`
-   6. `supabase/sql/004_shares_and_dividends.sql`
-   7. `supabase/sql/005_dividend_module.sql`
-   8. `supabase/sql/006_performance_indexes.sql`
-   9. `supabase/sql/007_loan_accounts.sql`
-   10. `supabase/sql/008_loan_repayment_tracking_fix.sql`
-   11. `supabase/sql/009_auditor_upgrade.sql`
-2. Verify that RLS is enabled on every table and that `service_role` can execute the financial procedures.
-3. Seed the first tenant through `POST /api/tenants` using an internal operations user.
+Default frontend URL:
 
-## Database Performance
+- `http://localhost:8080`
 
-- After applying new indexes, allow autovacuum/analyze to refresh statistics or run `analyze` during a maintenance window.
-- Recheck the slowest tenant-scoped queries after large demo seeds or bulk imports.
-- Prioritize `explain analyze` on:
-  - member statements
-  - loan aging / PAR
-  - tenant subscription lookups
-  - dividend cycle freeze and allocation paths
-- Keep additive indexes aligned with real query patterns; avoid broad speculative indexes.
+## Post-Deploy Validation Checklist
 
-## Security
+1. Login works for:
+   - platform owner
+   - tenant super admin
+   - branch manager
+   - loan officer
+   - teller
+   - auditor
+   - member
+2. Tenant setup + super admin bootstrap works.
+3. Member application approval path works.
+4. Loan workflow path works:
+   - submit -> appraise -> approve -> disburse
+5. Deposit/withdraw works with idempotency.
+6. Cash control session and receipt flow works.
+7. Auditor routes are read-only and accessible only by auditor.
+8. CSV import path and credentials download works.
+9. `/me/subscription` returns active entitlements.
+10. Exports download correctly.
 
-- Enforce TLS end to end.
-- Store secrets in a managed secret store.
-- Rotate `SUPABASE_SERVICE_ROLE_KEY` on a schedule.
-- Restrict Supabase dashboard access with MFA.
-- Enable Supabase point-in-time recovery, daily backups, and snapshot retention.
-- Review audit logs continuously and forward application logs to a SIEM.
+## Security and Operations
 
-## Availability
-
-- Use a health probe against `/health` or `/api/health`.
-- Configure readiness checks after environment validation completes.
-- Keep the application stateless so instances can scale horizontally.
-- Use rolling deployments and terminate gracefully with SIGTERM.
-
-## Batch Jobs
-
-- Schedule `POST /api/interest-accrual` nightly.
-- Schedule `POST /api/close-period` at the end of each reporting period after reconciliation.
-
-## Operational Validation
-
-- Reconcile journal balances against source account balances after each deployment.
-- Run smoke tests for deposit, withdrawal, loan disbursement, and repayment in a staging tenant before production rollout.
+- Run API behind TLS terminator (Nginx/Caddy/ALB).
+- Restrict Supabase dashboard access and require MFA.
+- Rotate service-role key on schedule.
+- Enable Supabase backup/PITR and retention policy.
+- Forward app logs and audit exceptions to central monitoring.
+- Use at least two backend instances for HA.
