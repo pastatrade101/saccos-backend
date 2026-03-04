@@ -1,0 +1,125 @@
+.authShell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+  background:
+    radial-gradient(circle at top left, rgba(31, 168, 230, 0.18), transparent 24%),
+    var(--gradient-fintech);
+}
+
+.authCard {
+  width: min(470px, 100%);
+  padding: 1.8rem;
+  border-radius: 0.85rem;
+  background: color-mix(in srgb, var(--surface-panel) 94%, white);
+  border: 1px solid color-mix(in srgb, var(--surface-panel) 80%, white);
+  box-shadow: 0 22px 48px rgba(10, 5, 115, 0.2);
+  backdrop-filter: blur(12px);
+}
+
+.authTitle {
+  margin: 0;
+  font-size: 2.15rem;
+  letter-spacing: -0.04em;
+}
+
+.authCopy {
+  margin: 0.5rem 0 1.25rem;
+  color: var(--text-muted);
+}
+
+.form {
+  display: grid;
+  gap: 1rem;
+}
+
+.sectionHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.sectionTitle {
+  margin: 0;
+  font-size: 1.1rem;
+  letter-spacing: -0.02em;
+}
+
+.sectionCopy {
+  margin: 0.25rem 0 0;
+  color: var(--text-muted);
+}
+
+.status {
+  padding: 0.7rem 0.85rem;
+  border-radius: 0.9rem;
+  background: var(--surface-soft);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+}
+
+.drawerGrid {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.detailsRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: center;
+  padding-bottom: 0.55rem;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.detailsLabel {
+  color: var(--text-faint);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.detailsValue {
+  color: var(--text-primary);
+  text-align: right;
+}
+
+.actionRow {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.checkboxLabel {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  color: var(--text-primary);
+}
+
+.checkboxLabel input {
+  margin-top: 0.2rem;
+}
+
+.metricGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.reportGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+@media (max-width: 900px) {
+  .metricGrid,
+  .reportGrid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "watch": ["src", "scripts"],
+  "ext": "js,json",
+  "ignore": [
+    "frontend",
+    "dist",
+    "node_modules",
+    "supabase",
+    "docs"
+  ],
+  "exec": "node src/server.js"
+}

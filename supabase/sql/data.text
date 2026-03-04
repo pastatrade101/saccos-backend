@@ -1,0 +1,131 @@
+{
+  "tenant": {
+    "id": "acaa6ba5-20b1-49f8-b788-69688dfa00e0",
+    "name": "Mwanga Community SACCOS",
+    "registration_number": "TZ-SACCOS-DEMO-2026-001",
+    "currency": "TZS"
+  },
+  "logins": {
+    "platform_owner": {
+      "email": "owner.demo@saccos.local",
+      "password": "Eyan@2016",
+      "role": "platform_owner + super_admin"
+    },
+    "staff": [
+      {
+        "email": "admin.demo@mwanga.co.tz",
+        "password": "DemoPass123!",
+        "role": "super_admin",
+        "scope": [
+          "Dar Central Branch",
+          "Mwanza Lake Branch"
+        ]
+      },
+      {
+        "email": "manager.dar.demo@mwanga.co.tz",
+        "password": "DemoPass123!",
+        "role": "branch_manager",
+        "scope": [
+          "Dar Central Branch"
+        ]
+      },
+      {
+        "email": "loans.mwanza.demo@mwanga.co.tz",
+        "password": "DemoPass123!",
+        "role": "loan_officer",
+        "scope": [
+          "Mwanza Lake Branch"
+        ]
+      },
+      {
+        "email": "teller.dar.demo@mwanga.co.tz",
+        "password": "DemoPass123!",
+        "role": "teller",
+        "scope": [
+          "Dar Central Branch"
+        ]
+      },
+      {
+        "email": "teller.mwanza.demo@mwanga.co.tz",
+        "password": "DemoPass123!",
+        "role": "teller",
+        "scope": [
+          "Mwanza Lake Branch"
+        ]
+      },
+      {
+        "email": "auditor.demo@mwanga.co.tz",
+        "password": "DemoPass123!",
+        "role": "auditor",
+        "scope": [
+          "Dar Central Branch",
+          "Mwanza Lake Branch"
+        ]
+      }
+    ],
+    "member_portal": [
+      {
+        "email": "asha.mwakalinga.member@mwanga.co.tz",
+        "password": "DemoPass123!",
+        "role": "member",
+        "branch": "Dar Central Branch"
+      },
+      {
+        "email": "rehema.mageni.member@mwanga.co.tz",
+        "password": "DemoPass123!",
+        "role": "member",
+        "branch": "Mwanza Lake Branch"
+      },
+      {
+        "email": "omari.kweka.member@mwanga.co.tz",
+        "password": "DemoPass123!",
+        "role": "member",
+        "branch": "Mwanza Lake Branch"
+      }
+    ]
+  },
+  "counts": {
+    "branches": 2,
+    "staff": 7,
+    "members": 8,
+    "loans": 4,
+    "dividend_cycles": 2
+  },
+  "checks": [
+    {
+      "login": "owner.demo@saccos.local",
+      "expected_role": "Platform Owner / Super Admin",
+      "expected_scope": "All tenant data, all branches, dividends workspace, reports, team access"
+    },
+    {
+      "login": "manager.dar.demo@mwanga.co.tz",
+      "expected_role": "Branch Manager",
+      "expected_scope": "Dar Central Branch members and reports only (4 seeded members)"
+    },
+    {
+      "login": "loans.mwanza.demo@mwanga.co.tz",
+      "expected_role": "Loan Officer",
+      "expected_scope": "Mwanza Lake Branch loan book, arrears, and member loan activity only"
+    },
+    {
+      "login": "teller.dar.demo@mwanga.co.tz",
+      "expected_role": "Teller",
+      "expected_scope": "Dar Central cash desk with recent 7-day TZS deposits, withdrawals, and share contributions"
+    },
+    {
+      "login": "teller.mwanza.demo@mwanga.co.tz",
+      "expected_role": "Teller",
+      "expected_scope": "Mwanza Lake cash desk with branch-only savings and share transactions"
+    },
+    {
+      "login": "asha.mwakalinga.member@mwanga.co.tz",
+      "expected_role": "Member",
+      "expected_scope": "Own savings, share capital, loan balance, and reinvested dividend history only"
+    },
+    {
+      "login": "rehema.mageni.member@mwanga.co.tz",
+      "expected_role": "Member",
+      "expected_scope": "Own Mwanza member portal with contributions, loans, and dividend credits only"
+    }
+  ]
+}
