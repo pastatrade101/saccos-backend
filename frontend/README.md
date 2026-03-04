@@ -68,6 +68,39 @@ npm run build
 npm run preview
 ```
 
+## Docker
+
+This frontend can be deployed independently with Docker from the `frontend/` directory.
+
+Files:
+
+- [Dockerfile](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/Dockerfile)
+- [docker-compose.yml](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/docker-compose.yml)
+- [nginx.conf](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/nginx.conf)
+- [.dockerignore](/Users/pastoryjoseph/Desktop/saccos-backend/frontend/.dockerignore)
+
+Build and run:
+
+```bash
+cd frontend
+cp .env.example .env
+docker compose build
+docker compose up -d
+docker compose logs -f frontend
+```
+
+The app will be served on:
+
+```bash
+http://localhost:8080
+```
+
+Important:
+
+- `VITE_*` variables are build-time values and must be present before `docker compose build`
+- never put backend secrets or the Supabase service-role key in the frontend env
+- route fallback is handled by Nginx so direct navigation to dashboard routes still works
+
 ## Current Important Flows
 
 ### SaaS owner
