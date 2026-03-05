@@ -54,6 +54,12 @@ exports.createMemberLogin = asyncHandler(async (req, res) => {
     res.status(201).json({ data: result });
 });
 
+exports.resetMemberPassword = asyncHandler(async (req, res) => {
+    const result = await memberService.resetMemberPassword(req.auth, req.params.id, req.validated.body);
+    applyNoStore(res);
+    res.status(200).json({ data: result });
+});
+
 exports.getTemporaryCredential = asyncHandler(async (req, res) => {
     const result = await memberService.getMemberTemporaryCredential(req.auth, req.params.id);
     res.json({ data: result });

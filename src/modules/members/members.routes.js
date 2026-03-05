@@ -11,6 +11,7 @@ const {
     createMemberSchema,
     updateMemberSchema,
     createMemberLoginSchema,
+    resetMemberPasswordSchema,
     listMembersQuerySchema,
     listMemberAccountsQuerySchema
 } = require("./members.schemas");
@@ -76,11 +77,21 @@ router.post(
     validate(createMemberLoginSchema),
     controller.createMemberLogin
 );
+router.post(
+    "/:id/reset-password",
+    authorize([ROLES.SUPER_ADMIN], { allowInternalOps: false }),
+    validate(resetMemberPasswordSchema),
+    controller.resetMemberPassword
+);
 router.get(
     "/:id/temporary-credential",
-    authorize([ROLES.BRANCH_MANAGER], { allowInternalOps: false }),
+    authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER], { allowInternalOps: false }),
     controller.getTemporaryCredential
 );
-router.delete("/:id", authorize([ROLES.BRANCH_MANAGER], { allowInternalOps: false }), controller.deleteMember);
+router.delete(
+    "/:id",
+    authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER], { allowInternalOps: false }),
+    controller.deleteMember
+);
 
 module.exports = router;

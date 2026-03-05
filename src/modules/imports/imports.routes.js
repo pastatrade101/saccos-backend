@@ -23,6 +23,14 @@ const router = express.Router();
 router.use(auth, requireSubscription());
 
 router.post(
+    "/members/preview",
+    authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER], { allowInternalOps: false }),
+    upload.single("file"),
+    validate(startMemberImportSchema),
+    controller.previewMembers
+);
+
+router.post(
     "/members",
     authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER], { allowInternalOps: false }),
     rateLimit({

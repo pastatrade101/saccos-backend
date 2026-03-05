@@ -256,6 +256,16 @@ Fields:
 - `create_portal_account`: `true|false`
 - `default_branch_id`: optional
 
+### `POST /api/imports/members/preview` (multipart form-data)
+
+Fields:
+
+- `file`: csv
+- `create_portal_account`: `true|false`
+- `default_branch_id`: optional
+
+Returns parsed rows with validation errors so users can review before actual import.
+
 ### `GET /api/imports/members/:jobId/rows?status=failed&page=1&limit=25`
 
 No body.

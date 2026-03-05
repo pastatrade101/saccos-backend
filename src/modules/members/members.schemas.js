@@ -57,6 +57,10 @@ const createMemberLoginSchema = z.object({
     password: z.string().min(8).max(128).optional().nullable()
 });
 
+const resetMemberPasswordSchema = z.object({
+    password: z.string().min(8).max(128).optional().nullable()
+});
+
 const paginationSchema = {
     page: z.coerce.number().int().positive().optional(),
     limit: z.coerce.number().int().positive().max(500).optional()
@@ -84,6 +88,7 @@ module.exports = {
     createMemberSchema,
     updateMemberSchema,
     createMemberLoginSchema,
+    resetMemberPasswordSchema,
     listMembersQuerySchema,
     listMemberAccountsQuerySchema
 };

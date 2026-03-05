@@ -9,6 +9,11 @@ const {
     recordSessionTransaction
 } = require("../cash-control/cash-control.service");
 
+function isMissingDeletedAtColumn(error) {
+    const message = error?.message || "";
+    return error?.code === "42703" && message.toLowerCase().includes("deleted_at");
+}
+
 function resolvePagination(query = {}) {
     if (query.page === undefined && query.limit === undefined) {
         return null;
@@ -26,12 +31,20 @@ function resolvePagination(query = {}) {
 }
 
 async function getAccountWithMember(accountId, expectedProductType = null) {
-    const { data, error } = await adminSupabase
+    let { data, error } = await adminSupabase
         .from("member_accounts")
         .select("*")
         .eq("id", accountId)
         .is("deleted_at", null)
         .single();
+
+    if (error && isMissingDeletedAtColumn(error)) {
+        ({ data, error } = await adminSupabase
+            .from("member_accounts")
+            .select("*")
+            .eq("id", accountId)
+            .single());
+    }
 
     if (error || !data) {
         throw new AppError(404, "ACCOUNT_NOT_FOUND", "Member account was not found.");

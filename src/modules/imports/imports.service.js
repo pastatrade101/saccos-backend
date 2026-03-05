@@ -37,6 +37,11 @@ const SUPPORTED_HEADERS = [
     "repayment_date"
 ];
 
+function isMissingDeletedAtColumn(error) {
+    const message = error?.message || "";
+    return error?.code === "42703" && message.toLowerCase().includes("deleted_at");
+}
+
 function normalizeString(value) {
     if (value === undefined || value === null) {
         return null;
@@ -355,13 +360,23 @@ async function upsertMember({ actor, tenantId, branchId, row }) {
 }
 
 async function getMemberProductAccount(memberId, productType) {
-    const { data, error } = await adminSupabase
+    let { data, error } = await adminSupabase
         .from("member_accounts")
         .select("id")
         .eq("member_id", memberId)
         .eq("product_type", productType)
         .is("deleted_at", null)
         .maybeSingle();
+
+    // Backward compatibility for environments where member_accounts.deleted_at is missing.
+    if (error && isMissingDeletedAtColumn(error)) {
+        ({ data, error } = await adminSupabase
+            .from("member_accounts")
+            .select("id")
+            .eq("member_id", memberId)
+            .eq("product_type", productType)
+            .maybeSingle());
+    }
 
     if (error || !data) {
         throw new AppError(500, "MEMBER_ACCOUNT_LOOKUP_FAILED", `Unable to load ${productType} account.`, error);
@@ -817,6 +832,122 @@ function ensureCsvHeaders(headers) {
     }
 }
 
+function validatePreviewRow(normalizedRow, options) {
+    const errors = [];
+
+    if (!normalizedRow.full_name) {
+        errors.push("full_name is required.");
+    }
+
+    if (options.create_portal_account && !normalizedRow.email) {
+        errors.push("email is required when create_portal_account is enabled.");
+    }
+
+    try {
+        parseMoney(normalizedRow.opening_savings);
+    } catch (error) {
+        errors.push(error.message);
+    }
+
+    try {
+        parseMoney(normalizedRow.opening_shares);
+    } catch (error) {
+        errors.push(error.message);
+    }
+
+    try {
+        parseOptionalPositiveNumber(normalizedRow.loan_amount, "loan_amount");
+    } catch (error) {
+        errors.push(error.message);
+    }
+
+    try {
+        parseOptionalPositiveNumber(normalizedRow.interest_rate, "interest_rate");
+    } catch (error) {
+        errors.push(error.message);
+    }
+
+    try {
+        parseOptionalPositiveNumber(normalizedRow.term_months, "term_months");
+    } catch (error) {
+        errors.push(error.message);
+    }
+
+    try {
+        parseOptionalPositiveNumber(normalizedRow.withdrawal_amount, "withdrawal_amount");
+    } catch (error) {
+        errors.push(error.message);
+    }
+
+    try {
+        parseOptionalPositiveNumber(normalizedRow.repayment_amount, "repayment_amount");
+    } catch (error) {
+        errors.push(error.message);
+    }
+
+    return errors;
+}
+
+async function previewMemberImport({ actor, fileBuffer, options }) {
+    const tenantId = actor.tenantId;
+    assertTenantAccess({ auth: actor }, tenantId);
+
+    const { headers, rows } = parseCsvBuffer(fileBuffer);
+    ensureCsvHeaders(headers);
+
+    const memberNoSeen = new Set();
+    const emailSeen = new Set();
+    const phoneSeen = new Set();
+
+    const previewRows = rows.map((rowEntry) => {
+        const normalized = normalizeImportRow(rowEntry.raw);
+        const errors = validatePreviewRow(normalized, options);
+
+        if (normalized.member_no) {
+            const key = normalized.member_no.toLowerCase();
+            if (memberNoSeen.has(key)) {
+                errors.push("Duplicate member_no in uploaded CSV.");
+            } else {
+                memberNoSeen.add(key);
+            }
+        }
+
+        if (normalized.email) {
+            const key = normalized.email.toLowerCase();
+            if (emailSeen.has(key)) {
+                errors.push("Duplicate email in uploaded CSV.");
+            } else {
+                emailSeen.add(key);
+            }
+        }
+
+        if (normalized.phone) {
+            const key = normalized.phone;
+            if (phoneSeen.has(key)) {
+                errors.push("Duplicate phone in uploaded CSV.");
+            } else {
+                phoneSeen.add(key);
+            }
+        }
+
+        return {
+            row_number: rowEntry.rowNumber,
+            data: normalized,
+            errors
+        };
+    });
+
+    const invalidRows = previewRows.filter((row) => row.errors.length > 0).length;
+
+    return {
+        headers,
+        total_rows: rows.length,
+        valid_rows: rows.length - invalidRows,
+        invalid_rows: invalidRows,
+        rows: previewRows
+    };
+}
+
 async function runMemberImportJob({ jobId, actor, fileBuffer, options, requestMeta }) {
     const tenantId = actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
@@ -961,7 +1092,7 @@ async function runMemberImportJob({ jobId, actor, fileBuffer, options, requestMe
                 }
 
                 await insertJobRow({
-                    job_id: job.id,
+                    job_id: jobId,
                     row_number: rowEntry.rowNumber,
                     raw: rowEntry.raw,
                     status: "success",
@@ -973,7 +1104,7 @@ async function runMemberImportJob({ jobId, actor, fileBuffer, options, requestMe
             } catch (error) {
                 failedRows += 1;
                 await insertJobRow({
-                    job_id: job.id,
+                    job_id: jobId,
                     row_number: rowEntry.rowNumber,
                     raw: rowEntry.raw,
                     status: "failed",
@@ -1170,6 +1301,7 @@ async function getCredentialsDownloadUrl(actor, jobId) {
 }
 
 module.exports = {
+    previewMemberImport,
     processMemberImport,
     getImportJob,
     listImportRows,

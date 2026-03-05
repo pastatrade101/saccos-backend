@@ -173,6 +173,21 @@ async function deleteByTenant(table, tenantIds) {
     }
 }
 
+async function updateByTenant(table, tenantIds, patch) {
+    if (!tenantIds.length) {
+        return;
+    }
+
+    const { error } = await adminSupabase
+        .from(table)
+        .update(patch)
+        .in("tenant_id", tenantIds);
+
+    if (error) {
+        throw new AppError(500, "TENANT_DELETE_FAILED", `Unable to prepare ${table} for deletion.`, error);
+    }
+}
+
 async function removeStorageTree(bucketName, prefix) {
     if (!bucketName) {
         return;
@@ -314,6 +329,12 @@ async function deleteTenant(actor, tenantId, payload) {
     await removeStorageTree(env.receiptsBucket, `tenant/${tenantId}`);
     await removeStorageTree(env.importsBucket, `tenant/${tenantId}`);
 
+    // Break cyclic references before delete order starts.
+    await updateByTenant("members", scope.tenantIds, { approved_application_id: null });
+    await updateByTenant("member_applications", scope.tenantIds, { approved_member_id: null });
+    await updateByTenant("membership_status_history", scope.tenantIds, { application_id: null });
+    await updateByTenant("loans", scope.tenantIds, { application_id: null });
+
     await deleteIn("credential_handoffs", "member_id", scope.memberIds);
     await deleteIn("credential_handoffs", "user_id", scope.userIds);
     await deleteByTenant("transaction_receipts", scope.tenantIds);
@@ -324,8 +345,12 @@ async function deleteTenant(actor, tenantId, payload) {
     await deleteByTenant("api_idempotency_requests", scope.tenantIds);
     await deleteByTenant("import_jobs", scope.tenantIds);
     await deleteByTenant("member_application_attachments", scope.tenantIds);
-    await deleteByTenant("member_applications", scope.tenantIds);
     await deleteByTenant("membership_status_history", scope.tenantIds);
+    await deleteByTenant("member_applications", scope.tenantIds);
+    await deleteByTenant("loan_approvals", scope.tenantIds);
+    await deleteByTenant("loan_guarantors", scope.tenantIds);
+    await deleteByTenant("collateral_items", scope.tenantIds);
+    await deleteByTenant("loan_applications", scope.tenantIds);
     await deleteByTenant("dividend_payments", scope.tenantIds);
     await deleteByTenant("dividend_approvals", scope.tenantIds);
     await deleteByTenant("dividend_allocations", scope.tenantIds);
@@ -333,12 +358,12 @@ async function deleteTenant(actor, tenantId, payload) {
     await deleteByTenant("dividend_components", scope.tenantIds);
     await deleteByTenant("dividend_cycles", scope.tenantIds);
     await deleteByTenant("journal_lines", scope.tenantIds);
-    await deleteIn("journal_entries", "id", scope.journalIds);
     await deleteByTenant("loan_account_transactions", scope.tenantIds);
+    await deleteByTenant("member_account_transactions", scope.tenantIds);
+    await deleteIn("journal_entries", "id", scope.journalIds);
     await deleteByTenant("loan_accounts", scope.tenantIds);
     await deleteByTenant("loan_schedules", scope.tenantIds);
     await deleteByTenant("loans", scope.tenantIds);
-    await deleteByTenant("member_account_transactions", scope.tenantIds);
     await deleteByTenant("member_accounts", scope.tenantIds);
     await deleteByTenant("period_closures", scope.tenantIds);
     await deleteByTenant("daily_account_snapshots", scope.tenantIds);
@@ -347,6 +372,8 @@ async function deleteTenant(actor, tenantId, payload) {
     await deleteByTenant("posting_rules", scope.tenantIds);
     await deleteByTenant("fee_rules", scope.tenantIds);
     await deleteByTenant("penalty_rules", scope.tenantIds);
+    await deleteByTenant("loan_policy_settings", scope.tenantIds);
+    await deleteByTenant("loan_products", scope.tenantIds);
     await deleteByTenant("share_products", scope.tenantIds);
     await deleteByTenant("savings_products", scope.tenantIds);
     await deleteByTenant("branch_staff_assignments", scope.tenantIds);

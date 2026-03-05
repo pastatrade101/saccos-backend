@@ -46,6 +46,11 @@ function buildPagination(query = {}) {
     };
 }
 
+function isMissingDeletedAtColumn(error) {
+    const message = error?.message || "";
+    return error?.code === "42703" && message.toLowerCase().includes("deleted_at");
+}
+
 async function listMembers(actor, filters = {}) {
     const tenantId = actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
@@ -107,12 +112,21 @@ async function listMemberAccounts(actor, query = {}) {
     assertTenantAccess({ auth: actor }, tenantId);
 
     const pagination = buildPagination(query);
-    let accountQuery = adminSupabase
-        .from("member_accounts")
-        .select("*", pagination ? { count: "exact" } : undefined)
-        .eq("tenant_id", tenantId)
-        .is("deleted_at", null)
-        .order("created_at", { ascending: false });
+    const buildAccountQuery = (includeSoftDeleteFilter = true) => {
+        let candidate = adminSupabase
+            .from("member_accounts")
+            .select("*", pagination ? { count: "exact" } : undefined)
+            .eq("tenant_id", tenantId)
+            .order("created_at", { ascending: false });
+
+        if (includeSoftDeleteFilter) {
+            candidate = candidate.is("deleted_at", null);
+        }
+
+        return candidate;
+    };
+
+    let accountQuery = buildAccountQuery(true);
 
     if (actor.role === "member") {
         const { data: ownMember, error: ownMemberError } = await adminSupabase
@@ -160,7 +174,59 @@ async function listMemberAccounts(actor, query = {}) {
         accountQuery = accountQuery.range(pagination.from, pagination.to);
     }
 
-    const { data, error, count } = await accountQuery;
+    let { data, error, count } = await accountQuery;
+
+    if (error && isMissingDeletedAtColumn(error)) {
+        accountQuery = buildAccountQuery(false);
+
+        if (actor.role === "member") {
+            const { data: ownMember, error: ownMemberError } = await adminSupabase
+                .from("members")
+                .select("id")
+                .eq("tenant_id", tenantId)
+                .eq("user_id", actor.user.id)
+                .is("deleted_at", null)
+                .single();
+
+            if (ownMemberError || !ownMember) {
+                throw new AppError(404, "MEMBER_NOT_FOUND", "Linked member record was not found.");
+            }
+
+            accountQuery = accountQuery.eq("member_id", ownMember.id);
+        } else if (!actor.isInternalOps && !["super_admin", "auditor"].includes(actor.role) && actor.branchIds.length) {
+            accountQuery = accountQuery.in("branch_id", actor.branchIds);
+        }
+
+        if (query.product_type) {
+            accountQuery = accountQuery.eq("product_type", query.product_type);
+        }
+
+        if (query.member_id) {
+            accountQuery = accountQuery.eq("member_id", query.member_id);
+        }
+
+        if (query.status) {
+            accountQuery = accountQuery.eq("status", query.status);
+        }
+
+        if (query.branch_id) {
+            assertBranchAccess({ auth: actor }, query.branch_id);
+            accountQuery = accountQuery.eq("branch_id", query.branch_id);
+        }
+
+        if (query.search) {
+            const escaped = query.search.replace(/[%_]/g, "\\$&");
+            accountQuery = accountQuery.or(
+                `account_number.ilike.%${escaped}%,account_name.ilike.%${escaped}%`
+            );
+        }
+
+        if (pagination) {
+            accountQuery = accountQuery.range(pagination.from, pagination.to);
+        }
+
+        ({ data, error, count } = await accountQuery);
+    }
 
     if (error) {
         throw new AppError(500, "MEMBER_ACCOUNTS_LIST_FAILED", "Unable to load member accounts.", error);
@@ -266,12 +332,20 @@ async function appendMembershipStatusHistory({ tenantId, memberId, applicationId
 }
 
 async function ensureMemberAccounts({ tenantId, branchId, member }) {
-    const { data: existingAccounts, error: existingAccountsError } = await adminSupabase
+    let { data: existingAccounts, error: existingAccountsError } = await adminSupabase
         .from("member_accounts")
         .select("id, product_type")
         .eq("tenant_id", tenantId)
         .eq("member_id", member.id)
         .is("deleted_at", null);
+
+    if (existingAccountsError && isMissingDeletedAtColumn(existingAccountsError)) {
+        ({ data: existingAccounts, error: existingAccountsError } = await adminSupabase
+            .from("member_accounts")
+            .select("id, product_type")
+            .eq("tenant_id", tenantId)
+            .eq("member_id", member.id));
+    }
 
     if (existingAccountsError) {
         throw new AppError(500, "MEMBER_ACCOUNT_LOOKUP_FAILED", "Unable to verify member accounts.", existingAccountsError);
@@ -372,8 +446,32 @@ async function provisionMemberLogin(actor, member, payload) {
     const temporaryPassword = !payload.send_invite && !payload.password
         ? generateTemporaryPassword()
         : null;
+
+    const assertAuthUserTenantConsistency = async (authUserId) => {
+        const { data: existingProfile, error: existingProfileError } = await adminSupabase
+            .from("user_profiles")
+            .select("tenant_id, role")
+            .eq("user_id", authUserId)
+            .is("deleted_at", null)
+            .maybeSingle();
+
+        if (existingProfileError) {
+            throw new AppError(500, "MEMBER_PROFILE_LOOKUP_FAILED", "Unable to verify existing user profile tenant.", existingProfileError);
+        }
+
+        if (existingProfile && existingProfile.tenant_id !== member.tenant_id) {
+            throw new AppError(
+                409,
+                "MEMBER_LOGIN_TENANT_MISMATCH",
+                "This email is already linked to a different tenant and cannot be reassigned."
+            );
+        }
+    };
+
     const linkExistingAuthUser = async (authUser) => {
         const authUserId = authUser.id;
+        await assertAuthUserTenantConsistency(authUserId);
+
         const { data: existingLinkedMember, error: existingLinkedMemberError } = await adminSupabase
             .from("members")
             .select("id, full_name")
@@ -489,6 +587,8 @@ async function provisionMemberLogin(actor, member, payload) {
     };
 
     if (member.user_id) {
+        await assertAuthUserTenantConsistency(member.user_id);
+
         const { data: existingProfile, error: existingProfileError } = await adminSupabase
             .from("user_profiles")
             .select("must_change_password, first_login_at")
@@ -880,6 +980,25 @@ async function updateMember(actor, memberId, payload) {
 async function deleteMember(actor, memberId) {
     const before = await getMember(actor, memberId);
 
+    const { count: activeLoansCount, error: activeLoansError } = await adminSupabase
+        .from("loans")
+        .select("id", { count: "exact", head: true })
+        .eq("tenant_id", before.tenant_id)
+        .eq("member_id", before.id)
+        .in("status", ["active", "in_arrears"]);
+
+    if (activeLoansError) {
+        throw new AppError(500, "MEMBER_DELETE_LOAN_CHECK_FAILED", "Unable to verify member active loans.", activeLoansError);
+    }
+
+    if ((activeLoansCount || 0) > 0) {
+        throw new AppError(
+            409,
+            "MEMBER_DELETE_BLOCKED_ACTIVE_LOANS",
+            "Member cannot be deleted while they have active or in-arrears loans."
+        );
+    }
+
     const payload = {
         status: "exited",
         deleted_at: new Date().toISOString(),
@@ -895,6 +1014,66 @@ async function deleteMember(actor, memberId) {
 
     if (error) {
         throw new AppError(500, "MEMBER_DELETE_FAILED", "Unable to soft delete member.", error);
+    }
+
+    const memberAccountArchivePayload = {
+        status: "closed",
+        deleted_by: actor.user.id,
+        deleted_at: new Date().toISOString()
+    };
+    let { error: memberAccountsError } = await adminSupabase
+        .from("member_accounts")
+        .update(memberAccountArchivePayload)
+        .eq("tenant_id", before.tenant_id)
+        .eq("member_id", before.id)
+        .is("deleted_at", null);
+
+    if (memberAccountsError && isMissingDeletedAtColumn(memberAccountsError)) {
+        ({ error: memberAccountsError } = await adminSupabase
+            .from("member_accounts")
+            .update({
+                status: "closed"
+            })
+            .eq("tenant_id", before.tenant_id)
+            .eq("member_id", before.id));
+    }
+
+    if (memberAccountsError) {
+        throw new AppError(500, "MEMBER_ACCOUNT_ARCHIVE_FAILED", "Unable to archive member accounts.", memberAccountsError);
+    }
+
+    await appendMembershipStatusHistory({
+        tenantId: before.tenant_id,
+        memberId: before.id,
+        statusCode: "exited",
+        changedBy: actor.user.id,
+        notes: "Member deleted by administrator."
+    });
+
+    if (before.user_id) {
+        const userProfileArchivePayload = {
+            is_active: false,
+            deleted_by: actor.user.id,
+            deleted_at: new Date().toISOString()
+        };
+        let { error: profileError } = await adminSupabase
+            .from("user_profiles")
+            .update(userProfileArchivePayload)
+            .eq("user_id", before.user_id)
+            .eq("tenant_id", before.tenant_id)
+            .is("deleted_at", null);
+
+        if (profileError && isMissingDeletedAtColumn(profileError)) {
+            ({ error: profileError } = await adminSupabase
+                .from("user_profiles")
+                .update({ is_active: false })
+                .eq("user_id", before.user_id)
+                .eq("tenant_id", before.tenant_id));
+        }
+
+        if (profileError) {
+            throw new AppError(500, "MEMBER_PROFILE_ARCHIVE_FAILED", "Unable to deactivate linked member profile.", profileError);
+        }
     }
 
     await logAudit({
@@ -929,6 +1108,113 @@ async function createMemberLogin(actor, memberId, payload) {
     return result;
 }
 
+async function resetMemberPassword(actor, memberId, payload = {}) {
+    const member = await getMember(actor, memberId);
+
+    if (!member.user_id) {
+        throw new AppError(404, "MEMBER_LOGIN_NOT_FOUND", "This member does not have a linked login.");
+    }
+
+    const nextPassword = payload.password?.trim()
+        ? payload.password.trim()
+        : generateTemporaryPassword();
+
+    const { error: authError } = await adminSupabase.auth.admin.updateUserById(member.user_id, {
+        password: nextPassword,
+        email_confirm: true,
+        user_metadata: {
+            full_name: member.full_name,
+            phone: member.phone
+        },
+        app_metadata: {
+            tenant_id: member.tenant_id,
+            role: "member",
+            member_id: member.id
+        }
+    });
+
+    if (authError) {
+        throw new AppError(500, "MEMBER_PASSWORD_RESET_FAILED", "Unable to reset member password.", authError);
+    }
+
+    const { data: profile, error: profileError } = await adminSupabase
+        .from("user_profiles")
+        .upsert(
+            {
+                user_id: member.user_id,
+                tenant_id: member.tenant_id,
+                branch_id: member.branch_id,
+                full_name: member.full_name,
+                phone: member.phone || null,
+                role: "member",
+                member_id: member.id,
+                must_change_password: true,
+                first_login_at: null,
+                is_active: true
+            },
+            { onConflict: "user_id" }
+        )
+        .select("*")
+        .single();
+
+    if (profileError) {
+        throw new AppError(500, "MEMBER_PROFILE_SYNC_FAILED", "Unable to enforce password reset policy.", profileError);
+    }
+
+    let loginEmail = member.email || null;
+
+    if (!loginEmail) {
+        const { data: authUserData, error: authUserError } = await adminSupabase.auth.admin.getUserById(member.user_id);
+
+        if (authUserError) {
+            throw new AppError(500, "MEMBER_LOGIN_LOOKUP_FAILED", "Unable to load member login details.", authUserError);
+        }
+
+        loginEmail = authUserData?.user?.email || null;
+    }
+
+    if (!loginEmail) {
+        throw new AppError(400, "MEMBER_EMAIL_REQUIRED", "Member email is required to reset login password.");
+    }
+
+    await saveCredentialHandoff({
+        tenantId: member.tenant_id,
+        userId: member.user_id,
+        memberId: member.id,
+        email: loginEmail,
+        password: nextPassword,
+        createdBy: actor.user.id
+    });
+
+    await logAudit({
+        tenantId: member.tenant_id,
+        userId: actor.user.id,
+        table: "members",
+        action: "reset_member_password",
+        beforeData: {
+            member_id: member.id,
+            user_id: member.user_id,
+            email: loginEmail
+        },
+        afterData: {
+            member_id: member.id,
+            user_id: member.user_id,
+            email: loginEmail,
+            must_change_password: true
+        }
+    });
+
+    return {
+        member,
+        profile,
+        user: {
+            id: member.user_id,
+            email: loginEmail
+        },
+        temporary_password: nextPassword
+    };
+}
+
 async function getMemberTemporaryCredential(actor, memberId) {
     const member = await getMember(actor, memberId);
 
@@ -960,6 +1246,7 @@ module.exports = {
     updateMember,
     deleteMember,
     createMemberLogin,
+    resetMemberPassword,
     ensureMemberAccounts,
     provisionMemberLogin,
     getMemberTemporaryCredential

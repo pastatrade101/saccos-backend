@@ -24,6 +24,25 @@ exports.importMembers = asyncHandler(async (req, res) => {
     res.status(202).json({ data: result });
 });
 
+exports.previewMembers = asyncHandler(async (req, res) => {
+    if (!req.file?.buffer) {
+        return res.status(400).json({
+            error: {
+                code: "IMPORT_FILE_REQUIRED",
+                message: "CSV file is required."
+            }
+        });
+    }
+
+    const result = await service.previewMemberImport({
+        actor: req.auth,
+        fileBuffer: req.file.buffer,
+        options: req.validated.body
+    });
+
+    res.json({ data: result });
+});
+
 exports.getImportJob = asyncHandler(async (req, res) => {
     const job = await service.getImportJob(req.auth, req.params.jobId);
     res.json({ data: job });
