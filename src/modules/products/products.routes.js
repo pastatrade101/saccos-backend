@@ -26,7 +26,7 @@ router.get(
 );
 router.get(
     "/loans",
-    authorize(PRODUCT_MANAGER_ROLES, { allowInternalOps: false }),
+    authorize([ROLES.BRANCH_MANAGER, ROLES.LOAN_OFFICER, ROLES.TELLER, ROLES.AUDITOR, ROLES.MEMBER], { allowInternalOps: false }),
     controller.listLoanProducts
 );
 router.post(
