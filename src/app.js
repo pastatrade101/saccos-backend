@@ -8,6 +8,7 @@ const routes = require("./routes");
 const errorHandler = require("./middleware/error-handler");
 const notFoundHandler = require("./middleware/not-found");
 const requestContext = require("./middleware/request-context");
+const { isOriginAllowed } = require("./utils/cors");
 
 const app = express();
 
@@ -23,15 +24,10 @@ app.use(
 app.use(
     cors({
         origin(origin, callback) {
-            if (!origin || env.corsOrigins.length === 0 || env.corsOrigins.includes("*")) {
+            if (isOriginAllowed(origin, env.corsOrigins)) {
                 return callback(null, true);
             }
-
-            if (env.corsOrigins.includes(origin)) {
-                return callback(null, true);
-            }
-
-            return callback(new Error("Origin not allowed by CORS"));
+            return callback(new Error(`Origin not allowed by CORS: ${origin}`));
         },
         credentials: true
     })

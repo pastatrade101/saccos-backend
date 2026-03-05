@@ -1,4 +1,5 @@
 const { z } = require("zod");
+const { normalizeOrigin } = require("../utils/cors");
 
 const envSchema = z.object({
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -43,7 +44,7 @@ module.exports = {
     apiPrefix: env.API_PREFIX,
     bodyLimit: env.BODY_LIMIT,
     corsOrigins: env.CORS_ORIGINS
-        ? env.CORS_ORIGINS.split(",").map((origin) => origin.trim()).filter(Boolean)
+        ? env.CORS_ORIGINS.split(",").map((origin) => normalizeOrigin(origin)).filter(Boolean)
         : [],
     supabaseUrl: env.SUPABASE_URL,
     supabaseServiceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY,
