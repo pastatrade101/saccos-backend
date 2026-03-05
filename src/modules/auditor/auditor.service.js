@@ -267,11 +267,11 @@ async function getAuditLogs(actor, query) {
 
     let auditQuery = adminSupabase
         .from("audit_logs")
-        .select("id, tenant_id, actor_user_id, user_id, action, entity_type, entity_id, before_data, after_data, ip, user_agent, created_at", { count: "exact" })
+        .select("*", { count: "exact" })
         .eq("tenant_id", tenantId)
-        .order("created_at", { ascending: false });
+        .order("timestamp", { ascending: false });
 
-    auditQuery = applyDateRange(auditQuery, "created_at", query.from, query.to);
+    auditQuery = applyDateRange(auditQuery, "timestamp", query.from, query.to);
 
     if (query.action) {
         auditQuery = auditQuery.ilike("action", `%${query.action}%`);
@@ -294,8 +294,39 @@ async function getAuditLogs(actor, query) {
         throw new AppError(500, "AUDIT_LOGS_FAILED", "Unable to load audit logs.", error);
     }
 
+    const rows = data || [];
+    const actorIds = Array.from(new Set(rows.map((row) => row.actor_user_id || row.user_id).filter(Boolean)));
+    let actorNameMap = new Map();
+
+    if (actorIds.length) {
+        const { data: actorProfiles, error: actorProfilesError } = await adminSupabase
+            .from("user_profiles")
+            .select("user_id, full_name")
+            .in("user_id", actorIds);
+
+        if (actorProfilesError) {
+            throw new AppError(500, "AUDIT_LOG_ACTOR_LOOKUP_FAILED", "Unable to resolve audit log actors.", actorProfilesError);
+        }
+
+        actorNameMap = new Map((actorProfiles || []).map((row) => [row.user_id, row.full_name]));
+    }
+
     return {
-        data: data || [],
+        data: rows.map((row) => {
+            const eventAt = row.timestamp || row.created_at || null;
+            const actorUserId = row.actor_user_id || row.user_id || null;
+
+            return {
+                ...row,
+                action: row.action || null,
+                entity_type: row.entity_type || row.table || "unknown",
+                actor_user_id: actorUserId,
+                actor_name: actorNameMap.get(actorUserId) || null,
+                event_at: eventAt,
+                created_at: row.created_at || eventAt,
+                timestamp: row.timestamp || eventAt
+            };
+        }),
         pagination: {
             page: query.page || 1,
             limit: query.limit || 20,

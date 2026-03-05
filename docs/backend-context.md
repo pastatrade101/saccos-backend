@@ -129,7 +129,16 @@ Core middleware:
 ### Reports
 
 - `src/modules/reports/*`
-- Management and accounting exports (trial balance, cash position, member statements, PAR, loan aging)
+- Management and accounting exports:
+  - trial balance
+  - cash position
+  - member statements
+  - loan portfolio summary
+  - member balances summary
+  - PAR
+  - loan aging
+  - audit exceptions report
+- list endpoints across members/finance/loan-applications support optional `page` + `limit` query params
 
 ### Imports
 
@@ -162,6 +171,7 @@ Latest major additive migrations:
 - `020_dividend_submission_handoff.sql`
 - `021_loan_workflow.sql`
 - `022_loan_workflow_rls.sql`
+- `023_performance_reliability.sql`
 
 ## Operational Scripts
 

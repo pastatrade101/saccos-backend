@@ -2,6 +2,7 @@ const express = require("express");
 
 const auth = require("../../middleware/auth");
 const authorize = require("../../middleware/authorize");
+const idempotency = require("../../middleware/idempotency");
 const requireSubscription = require("../../middleware/require-subscription");
 const validate = require("../../middleware/validate");
 const { ROLES } = require("../../constants/roles");
@@ -48,6 +49,7 @@ router.post(
 router.post(
     "/:id/approve",
     authorize([ROLES.SUPER_ADMIN], { allowInternalOps: false }),
+    idempotency,
     controller.approveApplication
 );
 router.post(

@@ -21,7 +21,7 @@ router.get(
 );
 router.get(
     "/trial-balance/export",
-    authorize([ROLES.SUPER_ADMIN, ROLES.AUDITOR], { allowInternalOps: false }),
+    authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER, ROLES.AUDITOR], { allowInternalOps: false }),
     requireFeature("advanced_reports"),
     validate(exportSchema, "query"),
     controller.trialBalance
@@ -45,6 +45,27 @@ router.get(
     requireFeature("advanced_reports"),
     validate(exportSchema, "query"),
     controller.loanAging
+);
+router.get(
+    "/loan-portfolio-summary/export",
+    authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER, ROLES.LOAN_OFFICER, ROLES.AUDITOR], { allowInternalOps: false }),
+    requireFeature("advanced_reports"),
+    validate(exportSchema, "query"),
+    controller.loanPortfolioSummary
+);
+router.get(
+    "/member-balances-summary/export",
+    authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER, ROLES.AUDITOR], { allowInternalOps: false }),
+    requireFeature("advanced_reports"),
+    validate(exportSchema, "query"),
+    controller.memberBalancesSummary
+);
+router.get(
+    "/audit-exceptions/export",
+    authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER, ROLES.AUDITOR], { allowInternalOps: false }),
+    requireFeature("advanced_reports"),
+    validate(exportSchema, "query"),
+    controller.auditExceptions
 );
 
 module.exports = router;

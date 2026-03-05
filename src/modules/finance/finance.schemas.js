@@ -1,6 +1,10 @@
 const { z } = require("zod");
 
 const moneyAmount = z.coerce.number().positive().multipleOf(0.01);
+const paginationSchema = {
+    page: z.coerce.number().int().positive().optional(),
+    limit: z.coerce.number().int().positive().max(500).optional()
+};
 
 const depositSchema = z.object({
     tenant_id: z.string().uuid().optional(),
@@ -63,7 +67,8 @@ const statementQuerySchema = z.object({
     member_id: z.string().uuid().optional(),
     account_id: z.string().uuid().optional(),
     from_date: z.string().date().optional(),
-    to_date: z.string().date().optional()
+    to_date: z.string().date().optional(),
+    ...paginationSchema
 });
 
 const loanQuerySchema = z.object({
@@ -71,14 +76,16 @@ const loanQuerySchema = z.object({
     member_id: z.string().uuid().optional(),
     loan_id: z.string().uuid().optional(),
     branch_id: z.string().uuid().optional(),
-    status: z.enum(["draft", "active", "closed", "in_arrears", "written_off"]).optional()
+    status: z.enum(["draft", "active", "closed", "in_arrears", "written_off"]).optional(),
+    ...paginationSchema
 });
 
 const ledgerQuerySchema = z.object({
     tenant_id: z.string().uuid().optional(),
     from_date: z.string().date().optional(),
     to_date: z.string().date().optional(),
-    account_id: z.string().uuid().optional()
+    account_id: z.string().uuid().optional(),
+    ...paginationSchema
 });
 
 const accrualSchema = z.object({

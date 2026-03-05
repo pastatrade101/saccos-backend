@@ -62,6 +62,7 @@ Apply in this exact sequence on a fresh environment:
 22. `supabase/sql/020_dividend_submission_handoff.sql`
 23. `supabase/sql/021_loan_workflow.sql`
 24. `supabase/sql/022_loan_workflow_rls.sql`
+25. `supabase/sql/023_performance_reliability.sql`
 
 For existing environments, run only new additive migrations and validate policy collisions before execution.
 
@@ -139,3 +140,5 @@ Default frontend URL:
 - Enable Supabase backup/PITR and retention policy.
 - Forward app logs and audit exceptions to central monitoring.
 - Use at least two backend instances for HA.
+- Run backup and restore drills monthly:
+  - see [backup-restore-drill-checklist.md](/Users/pastoryjoseph/Desktop/saccos-backend/docs/backup-restore-drill-checklist.md)

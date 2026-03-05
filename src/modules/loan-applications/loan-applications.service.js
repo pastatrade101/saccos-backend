@@ -155,6 +155,12 @@ async function listLoanApplications(actor, query) {
     const tenantId = query.tenant_id || actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
 
+    const hasPagination = query.page !== undefined || query.limit !== undefined;
+    const page = query.page ? Number(query.page) : 1;
+    const limit = query.limit ? Number(query.limit) : 50;
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
+
     let builder = adminSupabase
         .from("loan_applications")
         .select(`
@@ -164,16 +170,20 @@ async function listLoanApplications(actor, query) {
             loan_approvals(id, approver_id, decision, created_at),
             loan_guarantors(id, member_id, guaranteed_amount, consent_status),
             collateral_items(id, collateral_type, valuation_amount)
-        `)
+        `, hasPagination ? { count: "exact" } : undefined)
         .eq("tenant_id", tenantId)
         .order("created_at", { ascending: false });
 
     if (query.status) builder = builder.eq("status", query.status);
     if (query.member_id) builder = builder.eq("member_id", query.member_id);
-    if (query.branch_id) builder = builder.eq("branch_id", query.branch_id);
+    if (query.branch_id) {
+        assertBranchAccess({ auth: actor }, query.branch_id);
+        builder = builder.eq("branch_id", query.branch_id);
+    }
     if (query.product_id) builder = builder.eq("product_id", query.product_id);
+    if (hasPagination) builder = builder.range(from, to);
 
-    const { data, error } = await builder;
+    const { data, error, count } = await builder;
 
     if (error) {
         throw new AppError(500, "LOAN_APPLICATIONS_FETCH_FAILED", "Unable to load loan applications.", error);
@@ -191,7 +201,16 @@ async function listLoanApplications(actor, query) {
         return true;
     });
 
-    return applications;
+    return {
+        data: applications,
+        pagination: hasPagination
+            ? {
+                page,
+                limit,
+                total: count || 0
+            }
+            : null
+    };
 }
 
 async function createLoanApplication(actor, payload) {

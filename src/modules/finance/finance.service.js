@@ -9,6 +9,22 @@ const {
     recordSessionTransaction
 } = require("../cash-control/cash-control.service");
 
+function resolvePagination(query = {}) {
+    if (query.page === undefined && query.limit === undefined) {
+        return null;
+    }
+
+    const page = query.page ? Number(query.page) : 1;
+    const limit = query.limit ? Number(query.limit) : 50;
+
+    return {
+        page,
+        limit,
+        from: (page - 1) * limit,
+        to: (page - 1) * limit + limit - 1
+    };
+}
+
 async function getAccountWithMember(accountId, expectedProductType = null) {
     const { data, error } = await adminSupabase
         .from("member_accounts")
@@ -554,9 +570,10 @@ async function getStatements(actor, query) {
     const tenantId = query.tenant_id || actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
 
+    const pagination = resolvePagination(query);
     let statementQuery = adminSupabase
         .from("member_statement_view")
-        .select("*")
+        .select("*", pagination ? { count: "exact" } : undefined)
         .eq("tenant_id", tenantId)
         .order("transaction_date", { ascending: false });
 
@@ -609,22 +626,36 @@ async function getStatements(actor, query) {
         statementQuery = statementQuery.lte("transaction_date", query.to_date);
     }
 
-    const { data, error } = await statementQuery;
+    if (pagination) {
+        statementQuery = statementQuery.range(pagination.from, pagination.to);
+    }
+
+    const { data, error, count } = await statementQuery;
 
     if (error) {
         throw new AppError(500, "STATEMENT_FETCH_FAILED", "Unable to load statements.", error);
     }
 
-    return data || [];
+    return {
+        data: data || [],
+        pagination: pagination
+            ? {
+                page: pagination.page,
+                limit: pagination.limit,
+                total: count || 0
+            }
+            : null
+    };
 }
 
 async function getLedger(actor, query) {
     const tenantId = query.tenant_id || actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
 
+    const pagination = resolvePagination(query);
     let ledgerQuery = adminSupabase
         .from("ledger_entries_view")
-        .select("*")
+        .select("*", pagination ? { count: "exact" } : undefined)
         .eq("tenant_id", tenantId)
         .order("entry_date", { ascending: false });
 
@@ -640,22 +671,36 @@ async function getLedger(actor, query) {
         ledgerQuery = ledgerQuery.eq("account_id", query.account_id);
     }
 
-    const { data, error } = await ledgerQuery;
+    if (pagination) {
+        ledgerQuery = ledgerQuery.range(pagination.from, pagination.to);
+    }
+
+    const { data, error, count } = await ledgerQuery;
 
     if (error) {
         throw new AppError(500, "LEDGER_FETCH_FAILED", "Unable to load ledger.", error);
     }
 
-    return data || [];
+    return {
+        data: data || [],
+        pagination: pagination
+            ? {
+                page: pagination.page,
+                limit: pagination.limit,
+                total: count || 0
+            }
+            : null
+    };
 }
 
 async function getLoans(actor, query) {
     const tenantId = query.tenant_id || actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
 
+    const pagination = resolvePagination(query);
     let loanQuery = adminSupabase
         .from("loans")
-        .select("*")
+        .select("*", pagination ? { count: "exact" } : undefined)
         .eq("tenant_id", tenantId)
         .order("created_at", { ascending: false });
 
@@ -709,38 +754,57 @@ async function getLoans(actor, query) {
         loanQuery = loanQuery.eq("status", query.status);
     }
 
-    const { data, error } = await loanQuery;
+    if (pagination) {
+        loanQuery = loanQuery.range(pagination.from, pagination.to);
+    }
+
+    const { data, error, count } = await loanQuery;
 
     if (error) {
         throw new AppError(500, "LOANS_FETCH_FAILED", "Unable to load loans.", error);
     }
 
-    return data || [];
+    return {
+        data: data || [],
+        pagination: pagination
+            ? {
+                page: pagination.page,
+                limit: pagination.limit,
+                total: count || 0
+            }
+            : null
+    };
 }
 
 async function getLoanSchedules(actor, query) {
     const tenantId = query.tenant_id || actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
 
+    const pagination = resolvePagination(query);
     let visibleLoanIds = null;
 
     if (actor.role === "member") {
         const ownLoans = await getLoans(actor, { tenant_id: tenantId });
-        visibleLoanIds = ownLoans.map((loan) => loan.id);
+        visibleLoanIds = ownLoans.data.map((loan) => loan.id);
     } else if (!actor.isInternalOps && !["super_admin", "auditor"].includes(actor.role) && actor.branchIds.length) {
         const visibleLoans = await getLoans(actor, { tenant_id: tenantId });
-        visibleLoanIds = visibleLoans.map((loan) => loan.id);
+        visibleLoanIds = visibleLoans.data.map((loan) => loan.id);
     }
 
     let scheduleQuery = adminSupabase
         .from("loan_schedules")
-        .select("*")
+        .select("*", pagination ? { count: "exact" } : undefined)
         .eq("tenant_id", tenantId)
         .order("due_date", { ascending: true });
 
     if (visibleLoanIds) {
         if (!visibleLoanIds.length) {
-            return [];
+            return {
+                data: [],
+                pagination: pagination
+                    ? { page: pagination.page, limit: pagination.limit, total: 0 }
+                    : null
+            };
         }
 
         scheduleQuery = scheduleQuery.in("loan_id", visibleLoanIds);
@@ -757,22 +821,36 @@ async function getLoanSchedules(actor, query) {
         scheduleQuery = scheduleQuery.eq("status", query.status);
     }
 
-    const { data, error } = await scheduleQuery;
+    if (pagination) {
+        scheduleQuery = scheduleQuery.range(pagination.from, pagination.to);
+    }
+
+    const { data, error, count } = await scheduleQuery;
 
     if (error) {
         throw new AppError(500, "LOAN_SCHEDULES_FETCH_FAILED", "Unable to load loan schedules.", error);
     }
 
-    return data || [];
+    return {
+        data: data || [],
+        pagination: pagination
+            ? {
+                page: pagination.page,
+                limit: pagination.limit,
+                total: count || 0
+            }
+            : null
+    };
 }
 
 async function getLoanTransactions(actor, query) {
     const tenantId = query.tenant_id || actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
 
+    const pagination = resolvePagination(query);
     let transactionQuery = adminSupabase
         .from("loan_account_transactions")
-        .select("*")
+        .select("*", pagination ? { count: "exact" } : undefined)
         .eq("tenant_id", tenantId)
         .order("created_at", { ascending: false });
 
@@ -780,15 +858,20 @@ async function getLoanTransactions(actor, query) {
 
     if (actor.role === "member") {
         const ownLoans = await getLoans(actor, { tenant_id: tenantId });
-        visibleLoanIds = ownLoans.map((loan) => loan.id);
+        visibleLoanIds = ownLoans.data.map((loan) => loan.id);
     } else if (!actor.isInternalOps && !["super_admin", "auditor"].includes(actor.role) && actor.branchIds.length) {
         const visibleLoans = await getLoans(actor, { tenant_id: tenantId });
-        visibleLoanIds = visibleLoans.map((loan) => loan.id);
+        visibleLoanIds = visibleLoans.data.map((loan) => loan.id);
     }
 
     if (visibleLoanIds) {
         if (!visibleLoanIds.length) {
-            return [];
+            return {
+                data: [],
+                pagination: pagination
+                    ? { page: pagination.page, limit: pagination.limit, total: 0 }
+                    : null
+            };
         }
 
         transactionQuery = transactionQuery.in("loan_id", visibleLoanIds);
@@ -801,13 +884,26 @@ async function getLoanTransactions(actor, query) {
         transactionQuery = transactionQuery.eq("loan_id", query.loan_id);
     }
 
-    const { data, error } = await transactionQuery;
+    if (pagination) {
+        transactionQuery = transactionQuery.range(pagination.from, pagination.to);
+    }
+
+    const { data, error, count } = await transactionQuery;
 
     if (error) {
         throw new AppError(500, "LOAN_TRANSACTIONS_FETCH_FAILED", "Unable to load loan transactions.", error);
     }
 
-    return data || [];
+    return {
+        data: data || [],
+        pagination: pagination
+            ? {
+                page: pagination.page,
+                limit: pagination.limit,
+                total: count || 0
+            }
+            : null
+    };
 }
 
 module.exports = {

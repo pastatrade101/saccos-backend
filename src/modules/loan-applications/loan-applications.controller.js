@@ -2,7 +2,11 @@ const asyncHandler = require("../../utils/async-handler");
 const service = require("./loan-applications.service");
 
 exports.list = asyncHandler(async (req, res) => {
-    res.json({ data: await service.listLoanApplications(req.auth, req.validated.query) });
+    const result = await service.listLoanApplications(req.auth, req.validated.query);
+    res.json({
+        data: result.data,
+        pagination: result.pagination
+    });
 });
 
 exports.create = asyncHandler(async (req, res) => {

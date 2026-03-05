@@ -43,3 +43,15 @@ exports.par = asyncHandler(async (req, res) =>
 exports.loanAging = asyncHandler(async (req, res) =>
     runExport(req, res, reportService.loanAging, "export_loan_aging")
 );
+
+exports.loanPortfolioSummary = asyncHandler(async (req, res) =>
+    runExport(req, res, reportService.loanPortfolioSummary, "export_loan_portfolio_summary")
+);
+
+exports.memberBalancesSummary = asyncHandler(async (req, res) =>
+    runExport(req, res, reportService.memberBalancesSummary, "export_member_balances_summary")
+);
+
+exports.auditExceptions = asyncHandler(async (req, res) =>
+    runExport(req, res, reportService.auditExceptionsReport, "export_audit_exceptions")
+);

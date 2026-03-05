@@ -56,31 +56,46 @@ exports.closePeriod = asyncHandler(async (req, res) => {
 });
 
 exports.getStatements = asyncHandler(async (req, res) => {
-    const data = await financeService.getStatements(req.auth, req.validated.query);
+    const result = await financeService.getStatements(req.auth, req.validated.query);
     applyNoStore(res);
-    res.json({ data });
+    res.json({
+        data: result.data,
+        pagination: result.pagination
+    });
 });
 
 exports.getLedger = asyncHandler(async (req, res) => {
-    const data = await financeService.getLedger(req.auth, req.validated.query);
+    const result = await financeService.getLedger(req.auth, req.validated.query);
     applyNoStore(res);
-    res.json({ data });
+    res.json({
+        data: result.data,
+        pagination: result.pagination
+    });
 });
 
 exports.getLoans = asyncHandler(async (req, res) => {
-    const data = await financeService.getLoans(req.auth, req.validated.query);
+    const result = await financeService.getLoans(req.auth, req.validated.query);
     applyNoStore(res);
-    res.json({ data });
+    res.json({
+        data: result.data,
+        pagination: result.pagination
+    });
 });
 
 exports.getLoanSchedules = asyncHandler(async (req, res) => {
-    const data = await financeService.getLoanSchedules(req.auth, req.validated.query);
+    const result = await financeService.getLoanSchedules(req.auth, req.validated.query);
     applyNoStore(res);
-    res.json({ data });
+    res.json({
+        data: result.data,
+        pagination: result.pagination
+    });
 });
 
 exports.getLoanTransactions = asyncHandler(async (req, res) => {
-    const data = await financeService.getLoanTransactions(req.auth, req.validated.query);
+    const result = await financeService.getLoanTransactions(req.auth, req.validated.query);
     applyNoStore(res);
-    res.json({ data });
+    res.json({
+        data: result.data,
+        pagination: result.pagination
+    });
 });

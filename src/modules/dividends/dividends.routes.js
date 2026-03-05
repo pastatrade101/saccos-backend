@@ -2,6 +2,7 @@ const express = require("express");
 
 const auth = require("../../middleware/auth");
 const authorize = require("../../middleware/authorize");
+const idempotency = require("../../middleware/idempotency");
 const requireFeature = require("../../middleware/require-feature");
 const requireSubscription = require("../../middleware/require-subscription");
 const validate = require("../../middleware/validate");
@@ -28,9 +29,9 @@ router.patch("/cycles/:id", authorize([ROLES.BRANCH_MANAGER], { allowInternalOps
 router.post("/cycles/:id/freeze", authorize([ROLES.BRANCH_MANAGER], { allowInternalOps: false }), requireFeature("dividends_enabled"), validate(cycleParamSchema, "params"), controller.freezeCycle);
 router.post("/cycles/:id/allocate", authorize([ROLES.BRANCH_MANAGER], { allowInternalOps: false }), requireFeature("dividends_enabled"), validate(cycleParamSchema, "params"), controller.allocateCycle);
 router.post("/cycles/:id/submit", authorize([ROLES.BRANCH_MANAGER], { allowInternalOps: false }), requireFeature("dividends_enabled"), validate(cycleParamSchema, "params"), controller.submitCycle);
-router.post("/cycles/:id/approve", authorize([ROLES.SUPER_ADMIN], { allowInternalOps: false }), requireFeature("dividends_enabled"), validate(cycleParamSchema, "params"), validate(approvalSchema), controller.approveCycle);
+router.post("/cycles/:id/approve", authorize([ROLES.SUPER_ADMIN], { allowInternalOps: false }), requireFeature("dividends_enabled"), validate(cycleParamSchema, "params"), validate(approvalSchema), idempotency, controller.approveCycle);
 router.post("/cycles/:id/reject", authorize([ROLES.SUPER_ADMIN], { allowInternalOps: false }), requireFeature("dividends_enabled"), validate(cycleParamSchema, "params"), validate(approvalSchema), controller.rejectCycle);
-router.post("/cycles/:id/pay", authorize([ROLES.SUPER_ADMIN], { allowInternalOps: false }), requireFeature("dividends_enabled"), validate(cycleParamSchema, "params"), validate(paymentSchema), controller.payCycle);
-router.post("/cycles/:id/close", authorize([ROLES.SUPER_ADMIN], { allowInternalOps: false }), requireFeature("dividends_enabled"), validate(cycleParamSchema, "params"), controller.closeCycle);
+router.post("/cycles/:id/pay", authorize([ROLES.SUPER_ADMIN], { allowInternalOps: false }), requireFeature("dividends_enabled"), validate(cycleParamSchema, "params"), validate(paymentSchema), idempotency, controller.payCycle);
+router.post("/cycles/:id/close", authorize([ROLES.SUPER_ADMIN], { allowInternalOps: false }), requireFeature("dividends_enabled"), validate(cycleParamSchema, "params"), idempotency, controller.closeCycle);
 
 module.exports = router;

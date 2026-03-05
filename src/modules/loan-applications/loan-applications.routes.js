@@ -3,6 +3,7 @@ const express = require("express");
 const auth = require("../../middleware/auth");
 const authorize = require("../../middleware/authorize");
 const requireFeature = require("../../middleware/require-feature");
+const idempotency = require("../../middleware/idempotency");
 const requireSubscription = require("../../middleware/require-subscription");
 const validate = require("../../middleware/validate");
 const { ROLES } = require("../../constants/roles");
@@ -65,6 +66,7 @@ router.post(
     "/:id/disburse",
     authorize([ROLES.LOAN_OFFICER, ROLES.TELLER], { allowInternalOps: false }),
     validate(schemas.disburseApprovedLoanSchema),
+    idempotency,
     controller.disburse
 );
 

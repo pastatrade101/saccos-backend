@@ -114,11 +114,13 @@ Run in this sequence:
 22. `020_dividend_submission_handoff.sql`
 23. `021_loan_workflow.sql`
 24. `022_loan_workflow_rls.sql`
+25. `023_performance_reliability.sql`
 
 Important:
 
 - Policy files (`002_rls.sql`, `002_rls_plans.sql`, `014_phase1_rls.sql`, `017_phase2_cash_control_rls.sql`, `022_loan_workflow_rls.sql`) should be applied carefully on environments with existing policies.
 - Prefer additive migrations in production; do not rerun base schema files blindly.
+- Run monthly recovery exercises using [backup-restore-drill-checklist.md](/Users/pastoryjoseph/Desktop/saccos-backend/docs/backup-restore-drill-checklist.md).
 
 ## Local Run
 

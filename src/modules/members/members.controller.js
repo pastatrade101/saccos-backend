@@ -11,15 +11,21 @@ function applyNoStore(res) {
 }
 
 exports.listMembers = asyncHandler(async (req, res) => {
-    const members = await memberService.listMembers(req.auth);
+    const members = await memberService.listMembers(req.auth, req.validated.query);
     applyNoStore(res);
-    res.json({ data: members });
+    res.json({
+        data: members.data,
+        pagination: members.pagination
+    });
 });
 
 exports.listMemberAccounts = asyncHandler(async (req, res) => {
-    const accounts = await memberService.listMemberAccounts(req.auth, req.query);
+    const accounts = await memberService.listMemberAccounts(req.auth, req.validated.query);
     applyNoStore(res);
-    res.json({ data: accounts });
+    res.json({
+        data: accounts.data,
+        pagination: accounts.pagination
+    });
 });
 
 exports.createMember = asyncHandler(async (req, res) => {

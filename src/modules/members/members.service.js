@@ -28,39 +28,88 @@ function generateTemporaryPassword() {
     return characters.sort(() => Math.random() - 0.5).join("");
 }
 
-async function listMembers(actor) {
+function buildPagination(query = {}) {
+    if (query.page === undefined && query.limit === undefined) {
+        return null;
+    }
+
+    const page = query.page ? Number(query.page) : 1;
+    const limit = query.limit ? Number(query.limit) : 50;
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
+
+    return {
+        page,
+        limit,
+        from,
+        to
+    };
+}
+
+async function listMembers(actor, filters = {}) {
     const tenantId = actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
 
-    let query = adminSupabase
+    const pagination = buildPagination(filters);
+    let memberQuery = adminSupabase
         .from("members")
-        .select("*")
+        .select("*", pagination ? { count: "exact" } : undefined)
         .eq("tenant_id", tenantId)
         .is("deleted_at", null)
         .order("created_at", { ascending: false });
 
     if (actor.role === "member") {
-        query = query.eq("user_id", actor.user.id);
+        memberQuery = memberQuery.eq("user_id", actor.user.id);
     } else if (!actor.isInternalOps && !["super_admin", "auditor"].includes(actor.role) && actor.branchIds.length) {
-        query = query.in("branch_id", actor.branchIds);
+        memberQuery = memberQuery.in("branch_id", actor.branchIds);
     }
 
-    const { data, error } = await query;
+    if (filters.branch_id) {
+        assertBranchAccess({ auth: actor }, filters.branch_id);
+        memberQuery = memberQuery.eq("branch_id", filters.branch_id);
+    }
+
+    if (filters.status) {
+        memberQuery = memberQuery.eq("status", filters.status);
+    }
+
+    if (filters.search) {
+        const escaped = filters.search.replace(/[%_]/g, "\\$&");
+        memberQuery = memberQuery.or(
+            `full_name.ilike.%${escaped}%,phone.ilike.%${escaped}%,email.ilike.%${escaped}%,member_no.ilike.%${escaped}%`
+        );
+    }
+
+    if (pagination) {
+        memberQuery = memberQuery.range(pagination.from, pagination.to);
+    }
+
+    const { data, error, count } = await memberQuery;
 
     if (error) {
         throw new AppError(500, "MEMBERS_LIST_FAILED", "Unable to load members.", error);
     }
 
-    return data || [];
+    return {
+        data: data || [],
+        pagination: pagination
+            ? {
+                page: pagination.page,
+                limit: pagination.limit,
+                total: count || 0
+            }
+            : null
+    };
 }
 
 async function listMemberAccounts(actor, query = {}) {
     const tenantId = query.tenant_id || actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
 
+    const pagination = buildPagination(query);
     let accountQuery = adminSupabase
         .from("member_accounts")
-        .select("*")
+        .select("*", pagination ? { count: "exact" } : undefined)
         .eq("tenant_id", tenantId)
         .is("deleted_at", null)
         .order("created_at", { ascending: false });
@@ -87,13 +136,46 @@ async function listMemberAccounts(actor, query = {}) {
         accountQuery = accountQuery.eq("product_type", query.product_type);
     }
 
-    const { data, error } = await accountQuery;
+    if (query.member_id) {
+        accountQuery = accountQuery.eq("member_id", query.member_id);
+    }
+
+    if (query.status) {
+        accountQuery = accountQuery.eq("status", query.status);
+    }
+
+    if (query.branch_id) {
+        assertBranchAccess({ auth: actor }, query.branch_id);
+        accountQuery = accountQuery.eq("branch_id", query.branch_id);
+    }
+
+    if (query.search) {
+        const escaped = query.search.replace(/[%_]/g, "\\$&");
+        accountQuery = accountQuery.or(
+            `account_number.ilike.%${escaped}%,account_name.ilike.%${escaped}%`
+        );
+    }
+
+    if (pagination) {
+        accountQuery = accountQuery.range(pagination.from, pagination.to);
+    }
+
+    const { data, error, count } = await accountQuery;
 
     if (error) {
         throw new AppError(500, "MEMBER_ACCOUNTS_LIST_FAILED", "Unable to load member accounts.", error);
     }
 
-    return data || [];
+    return {
+        data: data || [],
+        pagination: pagination
+            ? {
+                page: pagination.page,
+                limit: pagination.limit,
+                total: count || 0
+            }
+            : null
+    };
 }
 
 async function safeDeleteAuthUser(userId) {

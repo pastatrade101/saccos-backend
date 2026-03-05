@@ -7,7 +7,13 @@ const requireSubscription = require("../../middleware/require-subscription");
 const validate = require("../../middleware/validate");
 const { ROLES } = require("../../constants/roles");
 const controller = require("./members.controller");
-const { createMemberSchema, updateMemberSchema, createMemberLoginSchema } = require("./members.schemas");
+const {
+    createMemberSchema,
+    updateMemberSchema,
+    createMemberLoginSchema,
+    listMembersQuerySchema,
+    listMemberAccountsQuerySchema
+} = require("./members.schemas");
 
 const router = express.Router();
 
@@ -23,6 +29,7 @@ router.get(
         ROLES.AUDITOR,
         ROLES.MEMBER
     ], { allowInternalOps: false }),
+    validate(listMembersQuerySchema, "query"),
     controller.listMembers
 );
 router.get(
@@ -35,6 +42,7 @@ router.get(
         ROLES.AUDITOR,
         ROLES.MEMBER
     ], { allowInternalOps: false }),
+    validate(listMemberAccountsQuerySchema, "query"),
     controller.listMemberAccounts
 );
 router.post(

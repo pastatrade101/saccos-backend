@@ -65,7 +65,9 @@ const loanApplicationQuerySchema = z.object({
     status: z.enum(["draft", "submitted", "appraised", "approved", "rejected", "disbursed", "cancelled"]).optional(),
     member_id: uuid.optional(),
     branch_id: uuid.optional(),
-    product_id: uuid.optional()
+    product_id: uuid.optional(),
+    page: z.coerce.number().int().positive().optional(),
+    limit: z.coerce.number().int().positive().max(500).optional()
 });
 
 module.exports = {

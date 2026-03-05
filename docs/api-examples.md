@@ -300,13 +300,31 @@ Returns signed URL for credentials export when available.
 
 ## Reports
 
-### `GET /api/reports/trial-balance/export?tenant_id=<uuid>&from=2026-01-01&to=2026-12-31`
+### `GET /api/reports/trial-balance/export?tenant_id=<uuid>&from_date=2026-01-01&to_date=2026-12-31`
 
 ### `GET /api/reports/loan-aging/export?tenant_id=<uuid>`
 
 ### `GET /api/reports/par/export?tenant_id=<uuid>`
 
+### `GET /api/reports/loan-portfolio-summary/export?tenant_id=<uuid>&format=csv`
+
+### `GET /api/reports/member-balances-summary/export?tenant_id=<uuid>&format=csv`
+
+### `GET /api/reports/audit-exceptions/export?tenant_id=<uuid>&reason_code=HIGH_VALUE_TX&from_date=2026-01-01&to_date=2026-12-31&format=csv`
+
 ### `GET /api/reports/member-statements/export?tenant_id=<uuid>&member_id=<uuid>`
+
+## Pagination (Operational Lists)
+
+### `GET /api/members?page=1&limit=50&search=amina`
+
+### `GET /api/members/accounts?page=1&limit=50&product_type=savings`
+
+### `GET /api/loan-applications?page=1&limit=25&status=submitted`
+
+### `GET /api/loan/portfolio?page=1&limit=50&status=active`
+
+### `GET /api/loan/transactions?page=1&limit=50&loan_id=<uuid>`
 
 ## Auditor
 

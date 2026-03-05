@@ -57,8 +57,33 @@ const createMemberLoginSchema = z.object({
     password: z.string().min(8).max(128).optional().nullable()
 });
 
+const paginationSchema = {
+    page: z.coerce.number().int().positive().optional(),
+    limit: z.coerce.number().int().positive().max(500).optional()
+};
+
+const listMembersQuerySchema = z.object({
+    tenant_id: z.string().uuid().optional(),
+    branch_id: z.string().uuid().optional(),
+    status: z.enum(["active", "suspended", "exited"]).optional(),
+    search: z.string().min(1).max(120).optional(),
+    ...paginationSchema
+});
+
+const listMemberAccountsQuerySchema = z.object({
+    tenant_id: z.string().uuid().optional(),
+    branch_id: z.string().uuid().optional(),
+    member_id: z.string().uuid().optional(),
+    product_type: z.enum(["savings", "shares", "fixed_deposit"]).optional(),
+    status: z.enum(["active", "dormant", "closed"]).optional(),
+    search: z.string().min(1).max(120).optional(),
+    ...paginationSchema
+});
+
 module.exports = {
     createMemberSchema,
     updateMemberSchema,
-    createMemberLoginSchema
+    createMemberLoginSchema,
+    listMembersQuerySchema,
+    listMemberAccountsQuerySchema
 };

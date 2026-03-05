@@ -61,7 +61,11 @@ exports.journalDetail = asyncHandler(async (req, res) => {
 exports.auditLogs = asyncHandler(async (req, res) => {
     applyNoStore(res);
     const data = await auditorService.getAuditLogs(req.auth, req.validated.query);
-    res.json({ data });
+    res.json({
+        data,
+        rows: data.data,
+        pagination: data.pagination
+    });
 });
 
 exports.trialBalanceCsv = asyncHandler(async (req, res) =>
