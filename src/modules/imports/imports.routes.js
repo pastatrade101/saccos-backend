@@ -24,7 +24,7 @@ router.use(auth, requireSubscription());
 
 router.post(
     "/members/preview",
-    authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER], { allowInternalOps: false }),
+    authorize([ROLES.BRANCH_MANAGER], { allowInternalOps: false }),
     upload.single("file"),
     validate(startMemberImportSchema),
     controller.previewMembers
@@ -32,7 +32,7 @@ router.post(
 
 router.post(
     "/members",
-    authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER], { allowInternalOps: false }),
+    authorize([ROLES.BRANCH_MANAGER], { allowInternalOps: false }),
     rateLimit({
         max: env.memberImportRateLimitMax,
         windowMs: env.memberImportRateLimitWindowMs,
@@ -47,26 +47,26 @@ router.post(
 
 router.get(
     "/members/:jobId",
-    authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER, ROLES.AUDITOR], { allowInternalOps: false }),
+    authorize([ROLES.BRANCH_MANAGER], { allowInternalOps: false }),
     controller.getImportJob
 );
 
 router.get(
     "/members/:jobId/rows",
-    authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER, ROLES.AUDITOR], { allowInternalOps: false }),
+    authorize([ROLES.BRANCH_MANAGER], { allowInternalOps: false }),
     validate(listImportRowsQuerySchema, "query"),
     controller.listImportRows
 );
 
 router.get(
     "/members/:jobId/failures.csv",
-    authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER, ROLES.AUDITOR], { allowInternalOps: false }),
+    authorize([ROLES.BRANCH_MANAGER], { allowInternalOps: false }),
     controller.downloadFailuresCsv
 );
 
 router.get(
     "/members/:jobId/credentials",
-    authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER], { allowInternalOps: false }),
+    authorize([ROLES.BRANCH_MANAGER], { allowInternalOps: false }),
     controller.getCredentialsDownloadUrl
 );
 
