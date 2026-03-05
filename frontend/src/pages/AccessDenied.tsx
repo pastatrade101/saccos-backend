@@ -1,3 +1,4 @@
+import { MotionCard, MotionModal } from "../ui/motion";
 import LockRoundedIcon from "@mui/icons-material/LockRounded";
 import { Alert, Box, Button, Card, CardContent, Stack, Typography } from "@mui/material";
 import { useNavigate } from "react-router-dom";
@@ -7,7 +8,7 @@ export function AccessDeniedPage() {
 
     return (
         <Box sx={{ minHeight: "100vh", display: "grid", placeItems: "center", px: 2 }}>
-            <Card variant="outlined" sx={{ maxWidth: 560, width: "100%" }}>
+            <MotionCard variant="outlined" sx={{ maxWidth: 560, width: "100%" }}>
                 <CardContent sx={{ p: 4 }}>
                     <Stack spacing={2.5} alignItems="flex-start">
                         <Stack direction="row" spacing={1.5} alignItems="center">
@@ -25,7 +26,7 @@ export function AccessDeniedPage() {
                         </Button>
                     </Stack>
                 </CardContent>
-            </Card>
+            </MotionCard>
         </Box>
     );
 }

@@ -1,3 +1,4 @@
+import { MotionCard, MotionModal } from "../ui/motion";
 import ApartmentRoundedIcon from "@mui/icons-material/ApartmentRounded";
 import ArrowForwardRoundedIcon from "@mui/icons-material/ArrowForwardRounded";
 import CorporateFareRoundedIcon from "@mui/icons-material/CorporateFareRounded";
@@ -27,6 +28,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { useAuth } from "../auth/AuthProvider";
+import { AppLoader } from "../components/AppLoader";
 import { ChartPanel } from "../components/ChartPanel";
 import { DataTable, type Column } from "../components/DataTable";
 import { useToast } from "../components/Toast";
@@ -52,7 +54,7 @@ function MetricCard({
     icon: React.ReactNode;
 }) {
     return (
-        <Card variant="outlined" sx={{ height: "100%" }}>
+        <MotionCard variant="outlined" sx={{ height: "100%" }}>
             <CardContent>
                 <Stack direction="row" justifyContent="space-between" spacing={2}>
                     <Stack spacing={1}>
@@ -65,7 +67,7 @@ function MetricCard({
                     </Avatar>
                 </Stack>
             </CardContent>
-        </Card>
+        </MotionCard>
     );
 }
 
@@ -433,21 +435,21 @@ export function PlatformTenantsPage() {
                 </Grid>
             </Grid>
 
-            <Card variant="outlined">
+            <MotionCard variant="outlined">
                 <CardContent>
                     <Typography variant="h6" gutterBottom>Tenant Inventory</Typography>
                     <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
                         Assign plans, monitor subscription health, and intentionally switch into a tenant workspace.
                     </Typography>
                     {loading ? (
-                        <div className="empty-state">Loading platform tenants...</div>
+                        <AppLoader fullscreen={false} minHeight={260} message="Loading platform tenants..." />
                     ) : (
                         <DataTable rows={tenants} columns={columns} emptyMessage="No tenants available on the platform." />
                     )}
                 </CardContent>
-            </Card>
+            </MotionCard>
 
-            <Dialog open={Boolean(editingTenant)} onClose={() => setEditingTenant(null)} fullWidth maxWidth="sm">
+            <MotionModal open={Boolean(editingTenant)} onClose={() => setEditingTenant(null)} fullWidth maxWidth="sm">
                 <DialogTitle>Assign Subscription</DialogTitle>
                 <DialogContent>
                     <Stack spacing={2} sx={{ pt: 1 }}>
@@ -498,9 +500,9 @@ export function PlatformTenantsPage() {
                         {submitting ? "Saving..." : "Save Subscription"}
                     </Button>
                 </DialogActions>
-            </Dialog>
+            </MotionModal>
 
-            <Dialog open={Boolean(deletingTenant)} onClose={deleteSubmitting ? undefined : () => setDeletingTenant(null)} fullWidth maxWidth="sm">
+            <MotionModal open={Boolean(deletingTenant)} onClose={deleteSubmitting ? undefined : () => setDeletingTenant(null)} fullWidth maxWidth="sm">
                 <DialogTitle>Delete Tenant</DialogTitle>
                 <DialogContent>
                     <Stack spacing={2} sx={{ pt: 1 }}>
@@ -537,7 +539,7 @@ export function PlatformTenantsPage() {
                         {deleteSubmitting ? "Deleting..." : "Delete Tenant"}
                     </Button>
                 </DialogActions>
-            </Dialog>
+            </MotionModal>
         </Stack>
     );
 }

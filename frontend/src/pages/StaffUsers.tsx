@@ -1,3 +1,4 @@
+import { MotionCard, MotionModal } from "../ui/motion";
 import AdminPanelSettingsRoundedIcon from "@mui/icons-material/AdminPanelSettingsRounded";
 import ApartmentRoundedIcon from "@mui/icons-material/ApartmentRounded";
 import BadgeRoundedIcon from "@mui/icons-material/BadgeRounded";
@@ -100,7 +101,7 @@ function MetricCard({
     chips?: string[];
 }) {
     return (
-        <Card variant="outlined" sx={{ height: "100%" }}>
+        <MotionCard variant="outlined" sx={{ height: "100%" }}>
             <CardContent>
                 <Stack spacing={2}>
                     <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={2}>
@@ -138,7 +139,7 @@ function MetricCard({
                     ) : null}
                 </Stack>
             </CardContent>
-        </Card>
+        </MotionCard>
     );
 }
 
@@ -403,7 +404,7 @@ export function StaffUsersPage() {
 
     return (
         <Stack spacing={3}>
-            <Card
+            <MotionCard
                 variant="outlined"
                 sx={{
                     background: `linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.1)}, ${alpha(theme.palette.secondary.main, 0.08)} 55%, ${alpha(theme.palette.background.paper, 0.96)})`
@@ -431,7 +432,7 @@ export function StaffUsersPage() {
                         </Stack>
                     </Stack>
                 </CardContent>
-            </Card>
+            </MotionCard>
 
             {loadError ? (
                 <Alert
@@ -531,7 +532,7 @@ export function StaffUsersPage() {
                     )}
                 </Grid>
                 <Grid size={{ xs: 12, lg: 8 }}>
-                    <Card variant="outlined" ref={conflictsRef}>
+                    <MotionCard variant="outlined" ref={conflictsRef}>
                         <CardContent>
                             <Stack spacing={0.5} sx={{ mb: 2 }}>
                                 <Typography variant="h6">Governance Flags</Typography>
@@ -570,12 +571,12 @@ export function StaffUsersPage() {
                                 </Alert>
                             )}
                         </CardContent>
-                    </Card>
+                    </MotionCard>
                 </Grid>
             </Grid>
 
             {lastProvisionedCredentials ? (
-                <Card
+                <MotionCard
                     variant="outlined"
                     sx={{
                         borderColor: alpha(theme.palette.warning.main, 0.24),
@@ -649,10 +650,10 @@ export function StaffUsersPage() {
                             </Box>
                         </Stack>
                     </CardContent>
-                </Card>
+                </MotionCard>
             ) : null}
 
-            <Card variant="outlined">
+            <MotionCard variant="outlined">
                 <CardContent>
                     <Stack
                         direction={{ xs: "column", md: "row" }}
@@ -687,9 +688,9 @@ export function StaffUsersPage() {
                         />
                     )}
                 </CardContent>
-            </Card>
+            </MotionCard>
 
-            <Dialog
+            <MotionModal
                 open={showProvisionModal}
                 onClose={() => !submitting && setShowProvisionModal(false)}
                 fullWidth
@@ -844,9 +845,9 @@ export function StaffUsersPage() {
                         </Button>
                     </Stack>
                 </DialogActions>
-            </Dialog>
+            </MotionModal>
 
-            <Dialog
+            <MotionModal
                 open={credentialViewerOpen && Boolean(lastProvisionedCredentials)}
                 onClose={() => setCredentialViewerOpen(false)}
                 fullWidth
@@ -901,7 +902,7 @@ export function StaffUsersPage() {
                 <DialogActions>
                     <Button onClick={() => setCredentialViewerOpen(false)}>Close</Button>
                 </DialogActions>
-            </Dialog>
+            </MotionModal>
 
             <ConfirmModal
                 open={Boolean(pendingUpdate)}

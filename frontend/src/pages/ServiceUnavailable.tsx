@@ -1,3 +1,4 @@
+import { MotionCard, MotionModal } from "../ui/motion";
 import WifiOffRoundedIcon from "@mui/icons-material/WifiOffRounded";
 import { Alert, Box, Button, Card, CardContent, Stack, Typography } from "@mui/material";
 
@@ -12,7 +13,7 @@ export function ServiceUnavailablePage() {
                 bgcolor: "background.default"
             }}
         >
-            <Card variant="outlined" sx={{ maxWidth: 560, width: "100%", borderRadius: 2 }}>
+            <MotionCard variant="outlined" sx={{ maxWidth: 560, width: "100%", borderRadius: 2 }}>
                 <CardContent sx={{ p: 4 }}>
                     <Stack spacing={2.5} alignItems="flex-start">
                         <Box
@@ -44,7 +45,7 @@ export function ServiceUnavailablePage() {
                         </Button>
                     </Stack>
                 </CardContent>
-            </Card>
+            </MotionCard>
         </Box>
     );
 }

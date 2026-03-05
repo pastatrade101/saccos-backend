@@ -1,3 +1,4 @@
+import { MotionCard, MotionModal } from "../ui/motion";
 import AddCircleOutlineRoundedIcon from "@mui/icons-material/AddCircleOutlineRounded";
 import CheckCircleOutlineRoundedIcon from "@mui/icons-material/CheckCircleOutlineRounded";
 import DownloadRoundedIcon from "@mui/icons-material/DownloadRounded";
@@ -30,6 +31,7 @@ import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 
 import { useAuth } from "../auth/AuthProvider";
+import { AppLoader } from "../components/AppLoader";
 import { DataTable, type Column } from "../components/DataTable";
 import { useToast } from "../components/Toast";
 import { api, getApiErrorMessage } from "../lib/api";
@@ -141,7 +143,7 @@ function MetricCard({
     icon: React.ReactNode;
 }) {
     return (
-        <Card variant="outlined" sx={{ height: "100%" }}>
+        <MotionCard variant="outlined" sx={{ height: "100%" }}>
             <CardContent>
                 <Stack direction="row" justifyContent="space-between" spacing={2}>
                     <Box>
@@ -158,7 +160,7 @@ function MetricCard({
                     <Box sx={{ color: "primary.main" }}>{icon}</Box>
                 </Stack>
             </CardContent>
-        </Card>
+        </MotionCard>
     );
 }
 
@@ -603,7 +605,7 @@ export function DividendsPage() {
 
     return (
         <Stack spacing={3}>
-            <Card
+            <MotionCard
                 variant="outlined"
                 sx={{
                     background: `linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.08)}, ${alpha(theme.palette.background.paper, 0.94)})`
@@ -649,7 +651,7 @@ export function DividendsPage() {
                         </Stack>
                     </Stack>
                 </CardContent>
-            </Card>
+            </MotionCard>
 
             <Grid container spacing={2}>
                 <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
@@ -667,7 +669,7 @@ export function DividendsPage() {
             </Grid>
 
             {profile?.role === "super_admin" ? (
-                <Card variant="outlined">
+                <MotionCard variant="outlined">
                     <CardContent>
                         <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" spacing={2}>
                             <Box>
@@ -710,26 +712,26 @@ export function DividendsPage() {
                             )}
                         </Stack>
                     </CardContent>
-                </Card>
+                </MotionCard>
             ) : null}
 
             <Grid container spacing={2}>
                 <Grid size={{ xs: 12, xl: 5 }}>
-                    <Card variant="outlined">
+                    <MotionCard variant="outlined">
                         <CardContent>
                             <Typography variant="h6" gutterBottom>
                                 Dividend Cycles
                             </Typography>
                             {loading ? (
-                                <Box className="empty-state">Loading dividend cycles...</Box>
+                                <AppLoader fullscreen={false} minHeight={260} message="Loading dividend cycles..." />
                             ) : (
                                 <DataTable rows={cycles} columns={cycleColumns} emptyMessage="No dividend cycles yet." />
                             )}
                         </CardContent>
-                    </Card>
+                    </MotionCard>
                 </Grid>
                 <Grid size={{ xs: 12, xl: 7 }}>
-                    <Card variant="outlined" sx={{ height: "100%" }}>
+                    <MotionCard variant="outlined" sx={{ height: "100%" }}>
                         <CardContent>
                             {selectedCycle ? (
                                 <Stack spacing={2.5}>
@@ -829,12 +831,12 @@ export function DividendsPage() {
                                 </Alert>
                             )}
                         </CardContent>
-                    </Card>
+                    </MotionCard>
                 </Grid>
             </Grid>
 
             {selectedCycleDetail ? (
-                <Card variant="outlined">
+                <MotionCard variant="outlined">
                     <CardContent>
                         <Stack spacing={2}>
                             <Box>
@@ -846,10 +848,10 @@ export function DividendsPage() {
                             <DataTable rows={selectedCycleDetail.allocations} columns={allocationColumns} emptyMessage="No allocations generated yet." />
                         </Stack>
                     </CardContent>
-                </Card>
+                </MotionCard>
             ) : null}
 
-            <Dialog open={showCreateDialog} onClose={submitting ? undefined : () => setShowCreateDialog(false)} maxWidth="lg" fullWidth>
+            <MotionModal open={showCreateDialog} onClose={submitting ? undefined : () => setShowCreateDialog(false)} maxWidth="lg" fullWidth>
                 <DialogTitle>Create Dividend Cycle</DialogTitle>
                 <DialogContent dividers>
                     <Stack spacing={3} sx={{ pt: 0.5 }}>
@@ -900,7 +902,7 @@ export function DividendsPage() {
                                 </Stack>
 
                                 {fields.map((field, index) => (
-                                    <Card key={field.id} variant="outlined">
+                                    <MotionCard key={field.id} variant="outlined">
                                         <CardContent>
                                             <Stack spacing={2}>
                                                 <Stack direction="row" justifyContent="space-between" alignItems="center">
@@ -1021,7 +1023,7 @@ export function DividendsPage() {
                                                 </Grid>
                                             </Stack>
                                         </CardContent>
-                                    </Card>
+                                    </MotionCard>
                                 ))}
                             </Stack>
                         </Box>
@@ -1033,9 +1035,9 @@ export function DividendsPage() {
                         {submitting ? "Creating cycle..." : "Create Cycle"}
                     </Button>
                 </DialogActions>
-            </Dialog>
+            </MotionModal>
 
-            <Dialog open={Boolean(actionDialog)} onClose={submitting ? undefined : () => setActionDialog(null)} maxWidth="sm" fullWidth>
+            <MotionModal open={Boolean(actionDialog)} onClose={submitting ? undefined : () => setActionDialog(null)} maxWidth="sm" fullWidth>
                 <DialogTitle>
                     {actionDialog?.type === "approve" ? "Approve Dividend Cycle" : actionDialog?.type === "reject" ? "Reject Dividend Cycle" : "Process Dividend Payment"}
                 </DialogTitle>
@@ -1073,7 +1075,7 @@ export function DividendsPage() {
                         {submitting ? "Working..." : "Confirm"}
                     </Button>
                 </DialogActions>
-            </Dialog>
+            </MotionModal>
         </Stack>
     );
 }

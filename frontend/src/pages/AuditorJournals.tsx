@@ -1,8 +1,10 @@
+import { MotionCard, MotionModal } from "../ui/motion";
 import ArrowBackRoundedIcon from "@mui/icons-material/ArrowBackRounded";
 import { Alert, Box, Button, Card, CardContent, Chip, Grid, Pagination, Stack, TextField, Typography } from "@mui/material";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
+import { AppLoader } from "../components/AppLoader";
 import { DataTable, type Column } from "../components/DataTable";
 import { useToast } from "../components/Toast";
 import { api, getApiErrorMessage } from "../lib/api";
@@ -110,7 +112,7 @@ export function AuditorJournalsPage() {
 
     return (
         <Stack spacing={3}>
-            <Card variant="outlined">
+            <MotionCard variant="outlined">
                 <CardContent>
                     <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" spacing={2}>
                         <Box>
@@ -126,14 +128,14 @@ export function AuditorJournalsPage() {
                         ) : null}
                     </Stack>
                 </CardContent>
-            </Card>
+            </MotionCard>
 
             {id ? (
                 detailLoading ? (
-                    <div className="empty-state">Loading journal detail...</div>
+                    <AppLoader fullscreen={false} minHeight={260} message="Loading journal detail..." />
                 ) : detail ? (
                     <Stack spacing={2}>
-                        <Card variant="outlined">
+                        <MotionCard variant="outlined">
                             <CardContent>
                                 <Grid container spacing={2}>
                                     <Grid size={{ xs: 12, md: 4 }}>
@@ -153,20 +155,20 @@ export function AuditorJournalsPage() {
                                     {detail.journal.description || "No description recorded."}
                                 </Typography>
                             </CardContent>
-                        </Card>
-                        <Card variant="outlined">
+                        </MotionCard>
+                        <MotionCard variant="outlined">
                             <CardContent>
                                 <Typography variant="h6" sx={{ mb: 2 }}>Journal Lines</Typography>
                                 <DataTable rows={detail.lines} columns={detailColumns} emptyMessage="No lines were found for this journal." />
                             </CardContent>
-                        </Card>
+                        </MotionCard>
                     </Stack>
                 ) : (
                     <Alert severity="warning" variant="outlined">Journal detail is not available.</Alert>
                 )
             ) : (
                 <>
-                    <Card variant="outlined">
+                    <MotionCard variant="outlined">
                         <CardContent>
                             <Grid container spacing={2}>
                                 <Grid size={{ xs: 12, md: 4 }}>
@@ -180,11 +182,11 @@ export function AuditorJournalsPage() {
                                 </Grid>
                             </Grid>
                         </CardContent>
-                    </Card>
+                    </MotionCard>
                     {loading ? (
-                        <div className="empty-state">Loading journals...</div>
+                        <AppLoader fullscreen={false} minHeight={280} message="Loading journals..." />
                     ) : (
-                        <Card variant="outlined">
+                        <MotionCard variant="outlined">
                             <CardContent>
                                 <Stack spacing={2}>
                                     <DataTable rows={rows} columns={columns} emptyMessage="No journals match the current filters." />
@@ -198,7 +200,7 @@ export function AuditorJournalsPage() {
                                     ) : null}
                                 </Stack>
                             </CardContent>
-                        </Card>
+                        </MotionCard>
                     )}
                 </>
             )}

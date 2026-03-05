@@ -1,10 +1,11 @@
-import { Box, Card, CardContent, Stack, Typography } from "@mui/material";
+import { Box, CardContent, Stack, Typography } from "@mui/material";
 import { alpha, useTheme } from "@mui/material/styles";
 import type { ChartData, ChartOptions, TooltipItem } from "chart.js";
 import { Line } from "react-chartjs-2";
 
 import { registerCharts } from "../../lib/charts";
 import type { TellerTimePoint } from "../../lib/tellerDashboard";
+import { MotionCard } from "../../ui/motion";
 import { formatCurrency } from "../../utils/format";
 
 registerCharts();
@@ -93,7 +94,7 @@ export function CashFlowChart({ points }: CashFlowChartProps) {
     };
 
     return (
-        <Card variant="outlined" sx={{ height: "100%" }}>
+        <MotionCard variant="outlined" inView sx={{ height: "100%" }}>
             <CardContent sx={{ height: "100%" }}>
                 <Typography variant="h6">Cash Flow Over 7 Days</Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, mb: 2.5 }}>
@@ -121,6 +122,6 @@ export function CashFlowChart({ points }: CashFlowChartProps) {
                     )}
                 </Box>
             </CardContent>
-        </Card>
+        </MotionCard>
     );
 }

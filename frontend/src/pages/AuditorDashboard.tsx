@@ -1,3 +1,4 @@
+import { MotionCard, MotionModal } from "../ui/motion";
 import BalanceRoundedIcon from "@mui/icons-material/BalanceRounded";
 import HistoryRoundedIcon from "@mui/icons-material/HistoryRounded";
 import ReceiptLongRoundedIcon from "@mui/icons-material/ReceiptLongRounded";
@@ -6,6 +7,7 @@ import { Alert, Avatar, Card, CardContent, Grid, Stack, Typography } from "@mui/
 import { useEffect, useState } from "react";
 
 import { useToast } from "../components/Toast";
+import { AppLoader } from "../components/AppLoader";
 import { api, getApiErrorMessage } from "../lib/api";
 import { endpoints, type AuditorSummaryResponse } from "../lib/endpoints";
 import type { AuditorSummary } from "../types/api";
@@ -22,7 +24,7 @@ function MetricCard({
     icon: React.ReactNode;
 }) {
     return (
-        <Card variant="outlined" sx={{ height: "100%" }}>
+        <MotionCard variant="outlined" sx={{ height: "100%" }}>
             <CardContent>
                 <Stack direction="row" justifyContent="space-between" spacing={2}>
                     <Stack spacing={0.75}>
@@ -39,7 +41,7 @@ function MetricCard({
                     </Avatar>
                 </Stack>
             </CardContent>
-        </Card>
+        </MotionCard>
     );
 }
 
@@ -62,7 +64,7 @@ export function AuditorDashboardPage() {
     }, [pushToast]);
 
     if (loading) {
-        return <div className="empty-state">Loading auditor dashboard...</div>;
+        return <AppLoader message="Loading auditor dashboard..." />;
     }
 
     if (!summary) {
@@ -71,14 +73,14 @@ export function AuditorDashboardPage() {
 
     return (
         <Stack spacing={3}>
-            <Card variant="outlined">
+            <MotionCard variant="outlined">
                 <CardContent>
                     <Typography variant="h5">Auditor Dashboard</Typography>
                     <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>
                         Exceptions-first oversight for accounting integrity, posting discipline, and audit traceability.
                     </Typography>
                 </CardContent>
-            </Card>
+            </MotionCard>
 
             <Grid container spacing={2}>
                 <Grid size={{ xs: 12, sm: 6, lg: 4 }}>

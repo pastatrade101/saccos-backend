@@ -1,3 +1,4 @@
+import { MotionCard, MotionModal } from "../ui/motion";
 import AddRoundedIcon from "@mui/icons-material/AddRounded";
 import CreditScoreRoundedIcon from "@mui/icons-material/CreditScoreRounded";
 import RuleRoundedIcon from "@mui/icons-material/RuleRounded";
@@ -9,9 +10,7 @@ import {
     Alert,
     Box,
     Button,
-    Card,
     CardContent,
-    Dialog,
     DialogActions,
     DialogContent,
     DialogTitle,
@@ -82,25 +81,30 @@ function SectionCard({
     children: React.ReactNode;
 }) {
     return (
-        <Card variant="outlined">
+        <MotionCard variant="outlined">
             <CardContent>
                 <Stack spacing={3}>
                     <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={2}>
-                        <Stack direction="row" spacing={1.5} alignItems="center">
+                        <Stack direction="row" spacing={1.5} alignItems="center" sx={{ minWidth: 0, flex: 1 }}>
                             {icon}
-                            <Box>
+                            <Box sx={{ minWidth: 0, maxWidth: { xs: "100%", md: 460 } }}>
                                 <Typography variant="h6">{title}</Typography>
-                                <Typography variant="body2" color="text.secondary">
+                                <Typography
+                                    variant="body2"
+                                    color="text.secondary"
+                                    noWrap
+                                    sx={{ textOverflow: "ellipsis", overflow: "hidden" }}
+                                >
                                     {helper}
                                 </Typography>
                             </Box>
                         </Stack>
-                        {action}
+                        <Box sx={{ flexShrink: 0 }}>{action}</Box>
                     </Stack>
                     {children}
                 </Stack>
             </CardContent>
-        </Card>
+        </MotionCard>
     );
 }
 
@@ -252,7 +256,7 @@ export function ProductCatalogPage() {
         );
 
         return (
-            <Dialog open onClose={() => setDialog(null)} maxWidth="md" fullWidth>
+            <MotionModal open onClose={() => setDialog(null)} maxWidth="md" fullWidth>
                 <DialogTitle>{dialog.record ? `Edit ${titleMap[kind]}` : `New ${titleMap[kind]}`}</DialogTitle>
                 <DialogContent dividers>
                     <Grid container spacing={2} sx={{ mt: 0.25 }}>
@@ -341,13 +345,13 @@ export function ProductCatalogPage() {
                         {saving ? "Saving..." : "Save configuration"}
                     </Button>
                 </DialogActions>
-            </Dialog>
+            </MotionModal>
         );
     };
 
     return (
         <Stack spacing={3}>
-            <Card
+            <MotionCard
                 sx={{
                     color: "#fff",
                     background: "linear-gradient(135deg, #0A0573 0%, #1FA8E6 100%)"
@@ -364,7 +368,7 @@ export function ProductCatalogPage() {
                         </Typography>
                     </Stack>
                 </CardContent>
-            </Card>
+            </MotionCard>
 
             <Alert severity="info">
                 Posting rules are enforced at transaction time. If a rule is disabled or missing, deposits, withdrawals, fees, and loan actions will be blocked until configuration is restored.
@@ -376,7 +380,7 @@ export function ProductCatalogPage() {
                         title="Loan products"
                         helper="Pricing, tenor controls, and ledger mappings that govern application, appraisal, and disbursement."
                         icon={<CreditScoreRoundedIcon color="primary" />}
-                        action={<Button startIcon={<AddRoundedIcon />} variant="contained" onClick={() => openDialog("loans")}>Add loan product</Button>}
+                        action={<Button startIcon={<AddRoundedIcon />} variant="contained" sx={{ whiteSpace: "nowrap" }} onClick={() => openDialog("loans")}>Add loan product</Button>}
                     >
                         <DataTable
                             rows={payload.loan_products}
@@ -396,7 +400,7 @@ export function ProductCatalogPage() {
                         title="Savings products"
                         helper="Compulsory and voluntary savings definitions mapped to liability accounts."
                         icon={<SavingsRoundedIcon color="primary" />}
-                        action={<Button startIcon={<AddRoundedIcon />} variant="contained" onClick={() => openDialog("savings")}>Add savings product</Button>}
+                        action={<Button startIcon={<AddRoundedIcon />} variant="contained" sx={{ whiteSpace: "nowrap" }} onClick={() => openDialog("savings")}>Add savings product</Button>}
                     >
                         <DataTable
                             rows={payload.savings_products}
@@ -415,7 +419,7 @@ export function ProductCatalogPage() {
                         title="Share products"
                         helper="Share capital structures and refund restrictions for ownership balances."
                         icon={<ShareRoundedIcon color="primary" />}
-                        action={<Button startIcon={<AddRoundedIcon />} variant="contained" onClick={() => openDialog("shares")}>Add share product</Button>}
+                        action={<Button startIcon={<AddRoundedIcon />} variant="contained" sx={{ whiteSpace: "nowrap" }} onClick={() => openDialog("shares")}>Add share product</Button>}
                     >
                         <DataTable
                             rows={payload.share_products}
@@ -434,7 +438,7 @@ export function ProductCatalogPage() {
                         title="Fee rules"
                         helper="Membership, withdrawal, and processing fees with explicit income mapping."
                         icon={<SellRoundedIcon color="primary" />}
-                        action={<Button startIcon={<AddRoundedIcon />} variant="contained" onClick={() => openDialog("fees")}>Add fee rule</Button>}
+                        action={<Button startIcon={<AddRoundedIcon />} variant="contained" sx={{ whiteSpace: "nowrap" }} onClick={() => openDialog("fees")}>Add fee rule</Button>}
                     >
                         <DataTable
                             rows={payload.fee_rules}
@@ -453,7 +457,7 @@ export function ProductCatalogPage() {
                         title="Penalty rules"
                         helper="Late repayment and arrears penalties mapped to revenue accounts."
                         icon={<WarningAmberRoundedIcon color="primary" />}
-                        action={<Button startIcon={<AddRoundedIcon />} variant="contained" onClick={() => openDialog("penalties")}>Add penalty rule</Button>}
+                        action={<Button startIcon={<AddRoundedIcon />} variant="contained" sx={{ whiteSpace: "nowrap" }} onClick={() => openDialog("penalties")}>Add penalty rule</Button>}
                     >
                         <DataTable
                             rows={payload.penalty_rules}
@@ -472,7 +476,7 @@ export function ProductCatalogPage() {
                         title="Posting rules"
                         helper="Operation-to-ledger mapping that must exist before any money movement can post."
                         icon={<RuleRoundedIcon color="primary" />}
-                        action={<Button startIcon={<AddRoundedIcon />} variant="contained" onClick={() => openDialog("posting-rules")}>Add posting rule</Button>}
+                        action={<Button startIcon={<AddRoundedIcon />} variant="contained" sx={{ whiteSpace: "nowrap" }} onClick={() => openDialog("posting-rules")}>Add posting rule</Button>}
                     >
                         <DataTable
                             rows={payload.posting_rules}

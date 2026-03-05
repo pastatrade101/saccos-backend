@@ -1,5 +1,6 @@
-import { Button, Dialog, DialogActions, DialogContent, DialogTitle, Typography } from "@mui/material";
+import { DialogActions, DialogContent, DialogTitle, Typography } from "@mui/material";
 import type { ReactNode } from "react";
+import { MotionButton, MotionModal } from "../ui/motion";
 
 interface ConfirmModalProps {
     open: boolean;
@@ -23,7 +24,7 @@ export function ConfirmModal({
     onConfirm
 }: ConfirmModalProps) {
     return (
-        <Dialog open={open} onClose={loading ? undefined : onCancel} maxWidth="sm" fullWidth>
+        <MotionModal open={open} onClose={loading ? undefined : onCancel} maxWidth="sm" fullWidth>
             <DialogTitle>{title}</DialogTitle>
             <DialogContent dividers>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
@@ -32,13 +33,13 @@ export function ConfirmModal({
                 {summary}
             </DialogContent>
             <DialogActions sx={{ px: 3, pb: 2 }}>
-                <Button onClick={onCancel} disabled={loading} color="inherit">
+                <MotionButton onClick={onCancel} disabled={loading} color="inherit">
                     {cancelLabel}
-                </Button>
-                <Button onClick={onConfirm} disabled={loading} variant="contained">
+                </MotionButton>
+                <MotionButton onClick={onConfirm} disabled={loading} variant="contained">
                     {loading ? "Processing..." : confirmLabel}
-                </Button>
+                </MotionButton>
             </DialogActions>
-        </Dialog>
+        </MotionModal>
     );
 }

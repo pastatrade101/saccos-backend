@@ -1,3 +1,4 @@
+import { MotionCard, MotionModal } from "../ui/motion";
 import {
     Alert,
     Card,
@@ -11,6 +12,7 @@ import { alpha, useTheme } from "@mui/material/styles";
 import { useEffect, useMemo, useState } from "react";
 
 import { useAuth } from "../auth/AuthProvider";
+import { AppLoader } from "../components/AppLoader";
 import { ChartPanel } from "../components/ChartPanel";
 import { DataTable, type Column } from "../components/DataTable";
 import { api, getApiErrorMessage } from "../lib/api";
@@ -147,7 +149,7 @@ export function ContributionsPage() {
         <Stack spacing={3}>
             <Grid container spacing={2}>
                 <Grid size={{ xs: 12, md: 3 }}>
-                    <Card variant="outlined" sx={{ height: "100%" }}>
+                    <MotionCard variant="outlined" sx={{ height: "100%" }}>
                         <CardContent>
                             <Typography variant="overline" color="text.secondary">Share Capital Base</Typography>
                             <Typography variant="h4" sx={{ mt: 1 }}>{formatCurrency(metrics.totalShareCapital)}</Typography>
@@ -155,10 +157,10 @@ export function ContributionsPage() {
                                 Total member share balance visible to {profile?.role === "branch_manager" ? "this branch" : "this workspace"}.
                             </Typography>
                         </CardContent>
-                    </Card>
+                    </MotionCard>
                 </Grid>
                 <Grid size={{ xs: 12, md: 3 }}>
-                    <Card variant="outlined" sx={{ height: "100%" }}>
+                    <MotionCard variant="outlined" sx={{ height: "100%" }}>
                         <CardContent>
                             <Typography variant="overline" color="text.secondary">Contributions Posted</Typography>
                             <Typography variant="h4" sx={{ mt: 1 }}>{formatCurrency(metrics.totalContributions)}</Typography>
@@ -166,10 +168,10 @@ export function ContributionsPage() {
                                 Share subscriptions received from active members.
                             </Typography>
                         </CardContent>
-                    </Card>
+                    </MotionCard>
                 </Grid>
                 <Grid size={{ xs: 12, md: 3 }}>
-                    <Card variant="outlined" sx={{ height: "100%" }}>
+                    <MotionCard variant="outlined" sx={{ height: "100%" }}>
                         <CardContent>
                             <Typography variant="overline" color="text.secondary">Dividends Reinvested</Typography>
                             <Typography variant="h4" sx={{ mt: 1 }}>{formatCurrency(metrics.totalDividends)}</Typography>
@@ -177,10 +179,10 @@ export function ContributionsPage() {
                                 Approved dividends credited back into share capital.
                             </Typography>
                         </CardContent>
-                    </Card>
+                    </MotionCard>
                 </Grid>
                 <Grid size={{ xs: 12, md: 3 }}>
-                    <Card variant="outlined" sx={{ height: "100%" }}>
+                    <MotionCard variant="outlined" sx={{ height: "100%" }}>
                         <CardContent>
                             <Typography variant="overline" color="text.secondary">Active Contributors</Typography>
                             <Typography variant="h4" sx={{ mt: 1 }}>{metrics.activeContributors}</Typography>
@@ -188,7 +190,7 @@ export function ContributionsPage() {
                                 Members with recorded share contributions in the visible history.
                             </Typography>
                         </CardContent>
-                    </Card>
+                    </MotionCard>
                 </Grid>
             </Grid>
 
@@ -222,7 +224,7 @@ export function ContributionsPage() {
                     />
                 </Grid>
                 <Grid size={{ xs: 12, lg: 4 }}>
-                    <Card variant="outlined" sx={{ height: "100%" }}>
+                    <MotionCard variant="outlined" sx={{ height: "100%" }}>
                         <CardContent>
                             <Typography variant="h6" gutterBottom>Contribution Oversight</Typography>
                             <Stack spacing={1.5}>
@@ -237,34 +239,34 @@ export function ContributionsPage() {
                                 </Alert>
                             </Stack>
                         </CardContent>
-                    </Card>
+                    </MotionCard>
                 </Grid>
             </Grid>
 
             <Grid container spacing={2}>
                 <Grid size={{ xs: 12, lg: 5 }}>
-                    <Card variant="outlined">
+                    <MotionCard variant="outlined">
                         <CardContent>
                             <Typography variant="h6" gutterBottom>Share Accounts</Typography>
                             {loading ? (
-                                <div className="empty-state">Loading share accounts...</div>
+                                <AppLoader fullscreen={false} minHeight={240} message="Loading share accounts..." />
                             ) : (
                                 <DataTable rows={shareAccounts} columns={accountColumns} emptyMessage="No share accounts available." />
                             )}
                         </CardContent>
-                    </Card>
+                    </MotionCard>
                 </Grid>
                 <Grid size={{ xs: 12, lg: 7 }}>
-                    <Card variant="outlined">
+                    <MotionCard variant="outlined">
                         <CardContent>
                             <Typography variant="h6" gutterBottom>Contribution Activity</Typography>
                             {loading ? (
-                                <div className="empty-state">Loading contribution history...</div>
+                                <AppLoader fullscreen={false} minHeight={240} message="Loading contribution history..." />
                             ) : (
                                 <DataTable rows={transactions} columns={transactionColumns} emptyMessage="No share contribution activity available." />
                             )}
                         </CardContent>
-                    </Card>
+                    </MotionCard>
                 </Grid>
             </Grid>
         </Stack>

@@ -1,3 +1,4 @@
+import { MotionCard, MotionModal } from "../ui/motion";
 import ApprovalRoundedIcon from "@mui/icons-material/ApprovalRounded";
 import ChecklistRoundedIcon from "@mui/icons-material/ChecklistRounded";
 import DoDisturbRoundedIcon from "@mui/icons-material/DoDisturbRounded";
@@ -242,7 +243,7 @@ export function MemberApplicationsPage() {
 
     return (
         <Stack spacing={3}>
-            <Card sx={{ color: "#fff", background: "linear-gradient(135deg, #0A0573 0%, #1FA8E6 100%)" }}>
+            <MotionCard sx={{ color: "#fff", background: "linear-gradient(135deg, #0A0573 0%, #1FA8E6 100%)" }}>
                 <CardContent>
                     <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" spacing={2}>
                         <Stack spacing={1}>
@@ -275,13 +276,13 @@ export function MemberApplicationsPage() {
                         </Stack>
                     </Stack>
                 </CardContent>
-            </Card>
+            </MotionCard>
 
             <Grid container spacing={2}>
-                <Grid size={{ xs: 12, md: 3 }}><Card variant="outlined"><CardContent><Typography variant="overline">Draft</Typography><Typography variant="h4">{summary.draft}</Typography></CardContent></Card></Grid>
-                <Grid size={{ xs: 12, md: 3 }}><Card variant="outlined"><CardContent><Typography variant="overline">In Review</Typography><Typography variant="h4">{summary.review}</Typography></CardContent></Card></Grid>
-                <Grid size={{ xs: 12, md: 3 }}><Card variant="outlined"><CardContent><Typography variant="overline">Approved</Typography><Typography variant="h4">{summary.approved}</Typography></CardContent></Card></Grid>
-                <Grid size={{ xs: 12, md: 3 }}><Card variant="outlined"><CardContent><Typography variant="overline">Rejected</Typography><Typography variant="h4">{summary.rejected}</Typography></CardContent></Card></Grid>
+                <Grid size={{ xs: 12, md: 3 }}><MotionCard variant="outlined"><CardContent><Typography variant="overline">Draft</Typography><Typography variant="h4">{summary.draft}</Typography></CardContent></MotionCard></Grid>
+                <Grid size={{ xs: 12, md: 3 }}><MotionCard variant="outlined"><CardContent><Typography variant="overline">In Review</Typography><Typography variant="h4">{summary.review}</Typography></CardContent></MotionCard></Grid>
+                <Grid size={{ xs: 12, md: 3 }}><MotionCard variant="outlined"><CardContent><Typography variant="overline">Approved</Typography><Typography variant="h4">{summary.approved}</Typography></CardContent></MotionCard></Grid>
+                <Grid size={{ xs: 12, md: 3 }}><MotionCard variant="outlined"><CardContent><Typography variant="overline">Rejected</Typography><Typography variant="h4">{summary.rejected}</Typography></CardContent></MotionCard></Grid>
             </Grid>
 
             <Alert severity="info">
@@ -323,7 +324,7 @@ export function MemberApplicationsPage() {
                 emptyMessage={loading ? "Loading member applications..." : "No member applications recorded yet."}
             />
 
-            <Dialog open={dialogMode === "create"} onClose={() => { setDialogMode(null); setSelected(null); }} maxWidth="md" fullWidth>
+            <MotionModal open={dialogMode === "create"} onClose={() => { setDialogMode(null); setSelected(null); }} maxWidth="md" fullWidth>
                 <DialogTitle>{selected ? "Edit rejected application" : "New member application"}</DialogTitle>
                 <DialogContent dividers>
                     <Grid container spacing={2} sx={{ mt: 0.25 }}>
@@ -352,9 +353,9 @@ export function MemberApplicationsPage() {
                         {selected ? "Save changes" : "Create application"}
                     </Button>
                 </DialogActions>
-            </Dialog>
+            </MotionModal>
 
-            <Dialog open={dialogMode === "review"} onClose={() => setDialogMode(null)} maxWidth="sm" fullWidth>
+            <MotionModal open={dialogMode === "review"} onClose={() => setDialogMode(null)} maxWidth="sm" fullWidth>
                 <DialogTitle>Review application</DialogTitle>
                 <DialogContent dividers>
                     <Stack spacing={2} sx={{ mt: 0.25 }}>
@@ -372,9 +373,9 @@ export function MemberApplicationsPage() {
                     <Button onClick={() => setDialogMode(null)}>Cancel</Button>
                     <Button variant="contained" onClick={() => void reviewApplication()} disabled={submitting}>Save review</Button>
                 </DialogActions>
-            </Dialog>
+            </MotionModal>
 
-            <Dialog open={dialogMode === "reject"} onClose={() => setDialogMode(null)} maxWidth="sm" fullWidth>
+            <MotionModal open={dialogMode === "reject"} onClose={() => setDialogMode(null)} maxWidth="sm" fullWidth>
                 <DialogTitle>Reject application</DialogTitle>
                 <DialogContent dividers>
                     <TextField fullWidth multiline minRows={3} label="Reason" {...rejectForm.register("reason")} />
@@ -383,7 +384,7 @@ export function MemberApplicationsPage() {
                     <Button onClick={() => setDialogMode(null)}>Cancel</Button>
                     <Button variant="contained" color="error" onClick={() => void rejectApplication()} disabled={submitting}>Reject application</Button>
                 </DialogActions>
-            </Dialog>
+            </MotionModal>
         </Stack>
     );
 }

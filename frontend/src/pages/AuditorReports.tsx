@@ -1,3 +1,4 @@
+import { MotionCard, MotionModal } from "../ui/motion";
 import DownloadRoundedIcon from "@mui/icons-material/DownloadRounded";
 import { Card, CardContent, Grid, Stack, TextField, Typography } from "@mui/material";
 import { useState } from "react";
@@ -64,18 +65,18 @@ export function AuditorReportsPage() {
 
     return (
         <Stack spacing={3}>
-            <Card variant="outlined">
+            <MotionCard variant="outlined">
                 <CardContent>
                     <Typography variant="h5">Auditor Reports</Typography>
                     <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>
                         Download read-only CSV extracts for control testing, portfolio review, and audit evidence.
                     </Typography>
                 </CardContent>
-            </Card>
+            </MotionCard>
 
             <Grid container spacing={2}>
                 <Grid size={{ xs: 12, md: 6 }}>
-                    <Card variant="outlined">
+                    <MotionCard variant="outlined">
                         <CardContent>
                             <Stack spacing={2}>
                                 <Typography variant="h6">Trial Balance</Typography>
@@ -93,10 +94,10 @@ export function AuditorReportsPage() {
                                 </button>
                             </Stack>
                         </CardContent>
-                    </Card>
+                    </MotionCard>
                 </Grid>
                 <Grid size={{ xs: 12, md: 6 }}>
-                    <Card variant="outlined">
+                    <MotionCard variant="outlined">
                         <CardContent>
                             <Stack spacing={2}>
                                 <Typography variant="h6">Loan Aging</Typography>
@@ -111,10 +112,10 @@ export function AuditorReportsPage() {
                                 </button>
                             </Stack>
                         </CardContent>
-                    </Card>
+                    </MotionCard>
                 </Grid>
                 <Grid size={{ xs: 12, md: 6 }}>
-                    <Card variant="outlined">
+                    <MotionCard variant="outlined">
                         <CardContent>
                             <Stack spacing={2}>
                                 <Typography variant="h6">PAR</Typography>
@@ -129,10 +130,10 @@ export function AuditorReportsPage() {
                                 </button>
                             </Stack>
                         </CardContent>
-                    </Card>
+                    </MotionCard>
                 </Grid>
                 <Grid size={{ xs: 12, md: 6 }}>
-                    <Card variant="outlined">
+                    <MotionCard variant="outlined">
                         <CardContent>
                             <Stack spacing={2}>
                                 <Typography variant="h6">Dividends Register</Typography>
@@ -147,7 +148,7 @@ export function AuditorReportsPage() {
                                 </button>
                             </Stack>
                         </CardContent>
-                    </Card>
+                    </MotionCard>
                 </Grid>
             </Grid>
         </Stack>

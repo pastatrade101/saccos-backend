@@ -1,10 +1,10 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import type { ReactNode } from "react";
-import { Box, CircularProgress } from "@mui/material";
 
 import { useAuth } from "./auth/AuthProvider";
 import { ProtectedRoute } from "./auth/ProtectedRoute";
 import { AppLayout } from "./components/Layout";
+import { AppLoader } from "./components/AppLoader";
 import { LandingPage } from "./pages/LandingPage";
 import { SignInPage } from "./pages/SignIn";
 import { SetupTenantPage } from "./pages/SetupTenant";
@@ -94,17 +94,7 @@ function PublicHomePage() {
     const { session, loading } = useAuth();
 
     if (loading) {
-        return (
-            <Box
-                sx={{
-                    minHeight: "100vh",
-                    display: "grid",
-                    placeItems: "center"
-                }}
-            >
-                <CircularProgress />
-            </Box>
-        );
+        return <AppLoader message="Loading workspace..." />;
     }
 
     if (!session) {

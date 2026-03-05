@@ -1,11 +1,9 @@
 import {
     Box,
-    Button,
     Chip,
     FormControl,
     InputLabel,
     MenuItem,
-    Paper,
     Select,
     Stack,
     Switch,
@@ -21,6 +19,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 
 import type { Branch, StaffAccessUser } from "../types/api";
+import { MotionButton, MotionCard } from "../ui/motion";
 import { formatDate, formatRole } from "../utils/format";
 
 type StaffRole = "super_admin" | "branch_manager" | "loan_officer" | "teller" | "auditor";
@@ -107,12 +106,12 @@ export function UsersTable({ users, branches, editable, loading = false, onSave,
 
     if (!users.length && !loading) {
         return (
-            <Paper variant="outlined" sx={{ p: 4, textAlign: "center" }}>
+            <MotionCard variant="outlined" inView sx={{ p: 4, textAlign: "center" }}>
                 <Typography variant="subtitle1">No staff users yet</Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>
                     Provision the first operating users to start branch activity and governance review.
                 </Typography>
-            </Paper>
+            </MotionCard>
         );
     }
 
@@ -143,7 +142,7 @@ export function UsersTable({ users, branches, editable, loading = false, onSave,
                 </FormControl>
             </Stack>
 
-            <Paper variant="outlined">
+            <MotionCard variant="outlined" inView sx={{ overflow: "hidden" }}>
                 <Table size="small">
                     <TableHead>
                         <TableRow>
@@ -239,23 +238,23 @@ export function UsersTable({ users, branches, editable, loading = false, onSave,
                                     <TableCell align="right">
                                         <Stack direction="row" spacing={1} justifyContent="flex-end">
                                             {user.has_temporary_password && onViewTemporaryPassword ? (
-                                                <Button
+                                                <MotionButton
                                                     variant="outlined"
                                                     size="small"
                                                     onClick={() => void onViewTemporaryPassword(user)}
                                                 >
                                                     View temp password
-                                                </Button>
+                                                </MotionButton>
                                             ) : null}
                                             {editable ? (
-                                                <Button
+                                                <MotionButton
                                                     variant="contained"
                                                     size="small"
                                                     disabled={!hasChanges || savingUserId === user.user_id}
                                                     onClick={() => void handleSave(user.user_id)}
                                                 >
                                                     {savingUserId === user.user_id ? "Saving..." : "Save changes"}
-                                                </Button>
+                                                </MotionButton>
                                             ) : (
                                                 !user.has_temporary_password ? (
                                                     <Typography variant="caption" color="text.secondary">
@@ -281,7 +280,7 @@ export function UsersTable({ users, branches, editable, loading = false, onSave,
                         rowsPerPageOptions={rowsPerPageOptions}
                     />
                 </Box>
-            </Paper>
+            </MotionCard>
         </Stack>
     );
 }

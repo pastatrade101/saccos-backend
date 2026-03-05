@@ -1,4 +1,4 @@
-import { Card, CardContent, Stack, Typography, useTheme } from "@mui/material";
+import { CardContent, Stack, Typography, useTheme } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 import type { ChartData, ChartOptions } from "chart.js";
 import { Bar } from "react-chartjs-2";
@@ -7,6 +7,7 @@ import { registerCharts } from "../lib/charts";
 import type { StaffRoleCounts } from "../types/api";
 import { roleCoverageLabels } from "../utils/roleRules";
 import { brandColors } from "../theme/colors";
+import { MotionCard } from "../ui/motion";
 
 registerCharts();
 
@@ -70,7 +71,7 @@ export function RoleDistributionChart({ roleCounts }: RoleDistributionChartProps
     };
 
     return (
-        <Card variant="outlined" sx={{ height: "100%" }}>
+        <MotionCard variant="outlined" inView sx={{ height: "100%" }}>
             <CardContent>
                 <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={2} sx={{ mb: 2 }}>
                     <BoxCopy title="Role Distribution" subtitle="See staffing balance by control role and execution role." />
@@ -80,7 +81,7 @@ export function RoleDistributionChart({ roleCounts }: RoleDistributionChartProps
                     <Bar data={data} options={options} />
                 </div>
             </CardContent>
-        </Card>
+        </MotionCard>
     );
 }
 

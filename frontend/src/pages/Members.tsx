@@ -1,3 +1,4 @@
+import { MotionCard, MotionModal } from "../ui/motion";
 import AccountBalanceWalletRoundedIcon from "@mui/icons-material/AccountBalanceWalletRounded";
 import BadgeRoundedIcon from "@mui/icons-material/BadgeRounded";
 import CreditScoreRoundedIcon from "@mui/icons-material/CreditScoreRounded";
@@ -37,6 +38,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useNavigate } from "react-router-dom";
 
 import { useAuth } from "../auth/AuthProvider";
+import { AppLoader } from "../components/AppLoader";
 import { DataTable, type Column } from "../components/DataTable";
 import { useToast } from "../components/Toast";
 import { api, getApiErrorMessage } from "../lib/api";
@@ -131,7 +133,7 @@ function MetricCard({
     icon: React.ReactNode;
 }) {
     return (
-        <Card
+        <MotionCard
             variant="outlined"
             sx={{
                 height: "100%",
@@ -167,7 +169,7 @@ function MetricCard({
                     </Avatar>
                 </Stack>
             </CardContent>
-        </Card>
+        </MotionCard>
     );
 }
 
@@ -629,7 +631,7 @@ export function MembersPage() {
 
     return (
         <Stack spacing={3}>
-            <Card
+            <MotionCard
                 variant="outlined"
                 sx={{
                     borderRadius: 2,
@@ -683,7 +685,7 @@ export function MembersPage() {
                         </Stack>
                     </Stack>
                 </CardContent>
-            </Card>
+            </MotionCard>
 
             <Grid container spacing={2}>
                 <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
@@ -721,7 +723,7 @@ export function MembersPage() {
             </Grid>
 
             {lastMemberCredentials ? (
-                <Card
+                <MotionCard
                     variant="outlined"
                     sx={{
                         borderColor: alpha(theme.palette.warning.main, 0.24),
@@ -786,13 +788,13 @@ export function MembersPage() {
                             </Box>
                         </Stack>
                     </CardContent>
-                </Card>
+                </MotionCard>
             ) : null}
 
             <Grid container spacing={2}>
                 <Grid size={{ xs: 12, xl: 7 }}>
                     {isTeller ? (
-                        <Card
+                        <MotionCard
                             variant="outlined"
                             sx={{
                                 height: "100%",
@@ -838,10 +840,10 @@ export function MembersPage() {
                                     </Grid>
                                 </Stack>
                             </CardContent>
-                        </Card>
+                        </MotionCard>
                     ) : canCreateMembers ? (
                         (
-                            <Card variant="outlined">
+                            <MotionCard variant="outlined">
                                 <CardContent>
                                     <Stack
                                         direction={{ xs: "column", sm: "row" }}
@@ -862,22 +864,22 @@ export function MembersPage() {
                                         ) : null}
                                     </Stack>
                                 </CardContent>
-                            </Card>
+                            </MotionCard>
                         )
                     ) : (
-                        <Card variant="outlined">
+                        <MotionCard variant="outlined">
                             <CardContent>
                                 <Typography variant="h6">Member Monitoring</Typography>
                                 <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>
                                     Your current role is read-only here. You can review member balances, onboarding status, and linked access, but not create or edit profiles.
                                 </Typography>
                             </CardContent>
-                        </Card>
+                        </MotionCard>
                     )}
                 </Grid>
 
                 <Grid size={{ xs: 12, xl: 5 }}>
-                    <Card
+                    <MotionCard
                         variant="outlined"
                         sx={{
                             height: "100%",
@@ -1221,11 +1223,11 @@ export function MembersPage() {
                                 )}
                             </Stack>
                         </CardContent>
-                    </Card>
+                    </MotionCard>
                 </Grid>
             </Grid>
 
-            <Card
+            <MotionCard
                 variant="outlined"
                 sx={{
                     borderRadius: 2,
@@ -1271,7 +1273,7 @@ export function MembersPage() {
                     </Stack>
 
                     {loading ? (
-                        <Box className="empty-state">Loading members...</Box>
+                        <AppLoader fullscreen={false} minHeight={280} message="Loading members..." />
                     ) : (
                         <Stack spacing={2}>
                             <DataTable rows={paginatedMembers} columns={columns} emptyMessage="No members yet." />
@@ -1288,9 +1290,9 @@ export function MembersPage() {
                         </Stack>
                     )}
                 </CardContent>
-            </Card>
+            </MotionCard>
 
-            <Dialog
+            <MotionModal
                 open={showOnboardForm}
                 onClose={submitting ? undefined : () => setShowOnboardForm(false)}
                 maxWidth="md"
@@ -1460,7 +1462,7 @@ export function MembersPage() {
                         {submitting ? "Creating member..." : "Create Member"}
                     </Button>
                 </DialogActions>
-            </Dialog>
+            </MotionModal>
         </Stack>
     );
 }

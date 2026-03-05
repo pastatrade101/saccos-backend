@@ -1,6 +1,7 @@
-import { Button, Card, CardContent, Chip, Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography } from "@mui/material";
+import { CardContent, Chip, Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography } from "@mui/material";
 
 import type { StaffRoleCounts } from "../types/api";
+import { MotionButton, MotionCard } from "../ui/motion";
 import { getCoverageStatus, recommendedRoleMinimums, roleCoverageLabels } from "../utils/roleRules";
 
 interface RoleCoverageMatrixProps {
@@ -30,7 +31,7 @@ export function RoleCoverageMatrix({
     });
 
     return (
-        <Card variant="outlined" sx={{ height: "100%" }}>
+        <MotionCard variant="outlined" inView sx={{ height: "100%" }}>
             <CardContent>
                 <Stack spacing={0.5} sx={{ mb: 2 }}>
                     <Typography variant="h6">Role Coverage Matrix</Typography>
@@ -65,13 +66,13 @@ export function RoleCoverageMatrix({
                                 </TableCell>
                                 <TableCell align="right">
                                     {row.status !== "ok" && canInviteRole(row.role) ? (
-                                        <Button size="small" variant="contained" color="secondary" onClick={() => onInvite(row.role)}>
+                                        <MotionButton size="small" variant="contained" color="secondary" onClick={() => onInvite(row.role)}>
                                             Invite
-                                        </Button>
+                                        </MotionButton>
                                     ) : (
-                                        <Button size="small" variant="text" onClick={onViewUsers}>
+                                        <MotionButton size="small" variant="text" onClick={onViewUsers}>
                                             View users
-                                        </Button>
+                                        </MotionButton>
                                     )}
                                 </TableCell>
                             </TableRow>
@@ -79,6 +80,6 @@ export function RoleCoverageMatrix({
                     </TableBody>
                 </Table>
             </CardContent>
-        </Card>
+        </MotionCard>
     );
 }

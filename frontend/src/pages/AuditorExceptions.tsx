@@ -1,7 +1,9 @@
+import { MotionCard, MotionModal } from "../ui/motion";
 import { Alert, Card, CardContent, Chip, Grid, MenuItem, Pagination, Stack, TextField, Typography } from "@mui/material";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
+import { AppLoader } from "../components/AppLoader";
 import { DataTable, type Column } from "../components/DataTable";
 import { useToast } from "../components/Toast";
 import { api, getApiErrorMessage } from "../lib/api";
@@ -74,16 +76,16 @@ export function AuditorExceptionsPage() {
 
     return (
         <Stack spacing={3}>
-            <Card variant="outlined">
+            <MotionCard variant="outlined">
                 <CardContent>
                     <Typography variant="h5">Exceptions</Typography>
                     <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>
                         Review flagged postings, timing anomalies, manual journals, and maker-checker issues.
                     </Typography>
                 </CardContent>
-            </Card>
+            </MotionCard>
 
-            <Card variant="outlined">
+            <MotionCard variant="outlined">
                 <CardContent>
                     <Grid container spacing={2}>
                         <Grid size={{ xs: 12, md: 4 }}>
@@ -102,12 +104,12 @@ export function AuditorExceptionsPage() {
                         </Grid>
                     </Grid>
                 </CardContent>
-            </Card>
+            </MotionCard>
 
             {loading ? (
-                <div className="empty-state">Loading exception feed...</div>
+                <AppLoader fullscreen={false} minHeight={280} message="Loading exception feed..." />
             ) : (
-                <Card variant="outlined">
+                <MotionCard variant="outlined">
                     <CardContent>
                         {!rows.length ? <Alert severity="info" variant="outlined" sx={{ mb: 2 }}>No exceptions match the current filters.</Alert> : null}
                         <Stack spacing={2}>
@@ -122,7 +124,7 @@ export function AuditorExceptionsPage() {
                             ) : null}
                         </Stack>
                     </CardContent>
-                </Card>
+                </MotionCard>
             )}
         </Stack>
     );

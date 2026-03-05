@@ -1,3 +1,4 @@
+import { MotionCard, MotionModal } from "../ui/motion";
 import {
     AppBar,
     Box,
@@ -440,7 +441,7 @@ export function LandingPage() {
                                 <Grid container spacing={1.5}>
                                     {onboardingSteps.map((step) => (
                         <Grid key={step.step} size={{ xs: 12, sm: 6 }}>
-                                            <Card
+                                            <MotionCard
                                                 sx={{
                                                     height: "100%",
                                                     borderRadius: 2,
@@ -458,7 +459,7 @@ export function LandingPage() {
                                                         {step.description}
                                                     </Typography>
                                                 </CardContent>
-                                            </Card>
+                                            </MotionCard>
                                         </Grid>
                                     ))}
                                 </Grid>
@@ -526,7 +527,7 @@ export function LandingPage() {
                     <Grid container spacing={2} sx={{ mb: 3 }}>
                         {buyerValuePillars.map((item) => (
                             <Grid key={item.title} size={{ xs: 12, sm: 6, lg: 3 }}>
-                                <Card sx={{ height: "100%", borderRadius: 2 }}>
+                                <MotionCard sx={{ height: "100%", borderRadius: 2 }}>
                                     <CardContent sx={{ p: 2.75 }}>
                                         {item.icon}
                                         <Typography variant="h6" sx={{ mt: 1.5 }}>
@@ -536,7 +537,7 @@ export function LandingPage() {
                                             {item.copy}
                                         </Typography>
                                     </CardContent>
-                                </Card>
+                                </MotionCard>
                             </Grid>
                         ))}
                     </Grid>
@@ -557,7 +558,7 @@ export function LandingPage() {
                     <Grid container spacing={2}>
                         {productModules.map((module) => (
                             <Grid key={module.title} size={{ xs: 12, md: 6, lg: 4 }}>
-                                <Card sx={{ height: "100%", borderRadius: 2 }}>
+                                <MotionCard sx={{ height: "100%", borderRadius: 2 }}>
                                     <CardContent sx={{ p: 3 }}>
                                         <Box
                                             sx={{
@@ -578,7 +579,7 @@ export function LandingPage() {
                                             {module.copy}
                                         </Typography>
                                     </CardContent>
-                                </Card>
+                                </MotionCard>
                             </Grid>
                         ))}
                     </Grid>
@@ -653,7 +654,7 @@ export function LandingPage() {
                                         }
                                     ].map((item) => (
                                         <Grid key={item.title} size={{ xs: 12, sm: 6 }}>
-                                            <Card sx={{ height: "100%", borderRadius: 2 }}>
+                                            <MotionCard sx={{ height: "100%", borderRadius: 2 }}>
                                                 <CardContent sx={{ p: 2.5 }}>
                                                     {item.icon}
                                                     <Typography variant="subtitle1" sx={{ mt: 1.5, fontWeight: 700 }}>
@@ -663,7 +664,7 @@ export function LandingPage() {
                                                         {item.copy}
                                                     </Typography>
                                                 </CardContent>
-                                            </Card>
+                                            </MotionCard>
                                         </Grid>
                                     ))}
                                 </Grid>
@@ -762,7 +763,7 @@ export function LandingPage() {
                                 <Grid container spacing={2}>
                                     {demoStorySteps.map((step) => (
                                         <Grid key={step.step} size={{ xs: 12, md: 6 }}>
-                                            <Card sx={{ height: "100%", borderRadius: 2 }}>
+                                            <MotionCard sx={{ height: "100%", borderRadius: 2 }}>
                                                 <CardContent sx={{ p: 2.5 }}>
                                                     <Typography variant="h4" color="primary.main" sx={{ fontWeight: 800 }}>
                                                         {step.step}
@@ -774,7 +775,7 @@ export function LandingPage() {
                                                         {step.description}
                                                     </Typography>
                                                 </CardContent>
-                                            </Card>
+                                            </MotionCard>
                                         </Grid>
                                     ))}
                                 </Grid>

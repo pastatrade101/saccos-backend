@@ -1,3 +1,4 @@
+import { MotionCard, MotionModal } from "../ui/motion";
 import CloudUploadRoundedIcon from "@mui/icons-material/CloudUploadRounded";
 import DownloadRoundedIcon from "@mui/icons-material/DownloadRounded";
 import FilePresentRoundedIcon from "@mui/icons-material/FilePresentRounded";
@@ -73,7 +74,7 @@ function SummaryCard({
     helper: string;
 }) {
     return (
-        <Card variant="outlined" sx={{ borderRadius: 2 }}>
+        <MotionCard variant="outlined" sx={{ borderRadius: 2 }}>
             <CardContent>
                 <Typography variant="overline" color="text.secondary">
                     {label}
@@ -85,7 +86,7 @@ function SummaryCard({
                     {helper}
                 </Typography>
             </CardContent>
-        </Card>
+        </MotionCard>
     );
 }
 
@@ -425,7 +426,7 @@ export function MemberImportPage() {
 
     return (
         <Stack spacing={3}>
-            <Card
+            <MotionCard
                 sx={{
                     borderRadius: 2,
                     background: "linear-gradient(135deg, rgba(10,5,115,0.98), rgba(31,168,230,0.92))",
@@ -452,7 +453,7 @@ export function MemberImportPage() {
                         </Stack>
                     </Stack>
                 </CardContent>
-            </Card>
+            </MotionCard>
 
             <Grid container spacing={2}>
                 <Grid size={{ xs: 12, md: 4 }}>
@@ -480,7 +481,7 @@ export function MemberImportPage() {
 
             <Grid container spacing={3}>
                 <Grid size={{ xs: 12, lg: 5 }}>
-                    <Card variant="outlined" sx={{ borderRadius: 2 }}>
+                    <MotionCard variant="outlined" sx={{ borderRadius: 2 }}>
                         <CardContent sx={{ p: 3 }}>
                             <Stack spacing={2.5} component="form" onSubmit={onSubmit}>
                                 <Box>
@@ -501,7 +502,7 @@ export function MemberImportPage() {
                                 </Alert>
 
                                 {submitting ? (
-                                    <Card
+                                    <MotionCard
                                         variant="outlined"
                                         sx={{
                                             borderRadius: 2,
@@ -553,7 +554,7 @@ export function MemberImportPage() {
                                                 )}
                                             </Stack>
                                         </CardContent>
-                                    </Card>
+                                    </MotionCard>
                                 ) : null}
 
                                 {hasSingleBranch ? (
@@ -635,11 +636,11 @@ export function MemberImportPage() {
                                 </Stack>
                             </Stack>
                         </CardContent>
-                    </Card>
+                    </MotionCard>
                 </Grid>
 
                 <Grid size={{ xs: 12, lg: 7 }}>
-                    <Card variant="outlined" sx={{ borderRadius: 2, height: "100%" }}>
+                    <MotionCard variant="outlined" sx={{ borderRadius: 2, height: "100%" }}>
                         <CardContent sx={{ p: 3 }}>
                             <Stack spacing={2.5}>
                                 <Box>
@@ -698,11 +699,11 @@ export function MemberImportPage() {
                                 )}
                             </Stack>
                         </CardContent>
-                    </Card>
+                    </MotionCard>
                 </Grid>
             </Grid>
 
-            <Card variant="outlined" sx={{ borderRadius: 2 }}>
+            <MotionCard variant="outlined" sx={{ borderRadius: 2 }}>
                 <CardContent sx={{ p: 3 }}>
                     <Stack spacing={2}>
                         <Stack
@@ -765,7 +766,7 @@ export function MemberImportPage() {
                         ) : null}
                     </Stack>
                 </CardContent>
-            </Card>
+            </MotionCard>
         </Stack>
     );
 }

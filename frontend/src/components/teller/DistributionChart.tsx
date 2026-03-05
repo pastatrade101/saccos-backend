@@ -1,10 +1,11 @@
-import { Box, Card, CardContent, Stack, Typography } from "@mui/material";
+import { Box, CardContent, Stack, Typography } from "@mui/material";
 import { alpha, useTheme } from "@mui/material/styles";
 import type { ChartData, ChartOptions } from "chart.js";
 import { Bar } from "react-chartjs-2";
 
 import { registerCharts } from "../../lib/charts";
 import type { TellerDistributionPoint } from "../../lib/tellerDashboard";
+import { MotionCard } from "../../ui/motion";
 
 registerCharts();
 
@@ -54,7 +55,7 @@ export function DistributionChart({ points }: DistributionChartProps) {
     };
 
     return (
-        <Card variant="outlined" sx={{ height: "100%" }}>
+        <MotionCard variant="outlined" inView sx={{ height: "100%" }}>
             <CardContent sx={{ height: "100%" }}>
                 <Typography variant="h6">Transaction Size Distribution</Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, mb: 2.5 }}>
@@ -82,6 +83,6 @@ export function DistributionChart({ points }: DistributionChartProps) {
                     )}
                 </Box>
             </CardContent>
-        </Card>
+        </MotionCard>
     );
 }

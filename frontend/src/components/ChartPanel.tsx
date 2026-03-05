@@ -1,10 +1,11 @@
-import { Card, CardContent, Stack, Typography } from "@mui/material";
+import { CardContent, Stack, Typography } from "@mui/material";
 import { alpha, useTheme } from "@mui/material/styles";
 import type { ChartData, ChartOptions } from "chart.js";
 import { Bar, Doughnut, Line } from "react-chartjs-2";
 import type { ReactNode } from "react";
 
 import { registerCharts } from "../lib/charts";
+import { MotionCard } from "../ui/motion";
 
 registerCharts();
 
@@ -30,8 +31,9 @@ export function ChartPanel({
     const theme = useTheme();
 
     return (
-        <Card
+        <MotionCard
             variant="outlined"
+            inView
             sx={{
                 background: `linear-gradient(180deg, ${alpha(theme.palette.background.paper, 0.98)}, ${alpha(theme.palette.secondary.main, 0.03)})`
             }}
@@ -58,6 +60,6 @@ export function ChartPanel({
                     )}
                 </div>
             </CardContent>
-        </Card>
+        </MotionCard>
     );
 }

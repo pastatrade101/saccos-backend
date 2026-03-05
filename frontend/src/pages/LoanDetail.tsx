@@ -1,3 +1,4 @@
+import { MotionCard, MotionModal } from "../ui/motion";
 import ArrowBackRoundedIcon from "@mui/icons-material/ArrowBackRounded";
 import CalendarMonthRoundedIcon from "@mui/icons-material/CalendarMonthRounded";
 import CreditScoreRoundedIcon from "@mui/icons-material/CreditScoreRounded";
@@ -20,6 +21,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import { useAuth } from "../auth/AuthProvider";
+import { AppLoader } from "../components/AppLoader";
 import { DataTable, type Column } from "../components/DataTable";
 import { useToast } from "../components/Toast";
 import { api, getApiErrorMessage } from "../lib/api";
@@ -45,7 +47,7 @@ function MetricCard({
     icon: React.ReactNode;
 }) {
     return (
-        <Card variant="outlined" sx={{ height: "100%" }}>
+        <MotionCard variant="outlined" sx={{ height: "100%" }}>
             <CardContent>
                 <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={2}>
                     <Box>
@@ -73,7 +75,7 @@ function MetricCard({
                     </Avatar>
                 </Stack>
             </CardContent>
-        </Card>
+        </MotionCard>
     );
 }
 
@@ -184,7 +186,7 @@ export function LoanDetailPage() {
     );
 
     if (loading) {
-        return <Box className="empty-state">Loading loan details...</Box>;
+        return <AppLoader message="Loading loan details..." />;
     }
 
     if (!loan) {
@@ -209,7 +211,7 @@ export function LoanDetailPage() {
 
     return (
         <Stack spacing={3}>
-            <Card
+            <MotionCard
                 variant="outlined"
                 sx={{
                     background: `linear-gradient(135deg, ${theme.palette.background.paper}, ${theme.palette.action.hover})`
@@ -282,7 +284,7 @@ export function LoanDetailPage() {
                         </Grid>
                     </Stack>
                 </CardContent>
-            </Card>
+            </MotionCard>
 
             <Grid container spacing={2}>
                 <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
@@ -319,7 +321,7 @@ export function LoanDetailPage() {
                 </Grid>
             </Grid>
 
-            <Card variant="outlined">
+            <MotionCard variant="outlined">
                 <CardContent>
                     <Stack spacing={1.5} sx={{ mb: 2 }}>
                         <Typography variant="h6">Repayment and Activity History</Typography>
@@ -329,9 +331,9 @@ export function LoanDetailPage() {
                     </Stack>
                     <DataTable rows={transactions} columns={transactionColumns} emptyMessage="No loan activity recorded yet." />
                 </CardContent>
-            </Card>
+            </MotionCard>
 
-            <Card variant="outlined">
+            <MotionCard variant="outlined">
                 <CardContent>
                     <Stack spacing={1.5} sx={{ mb: 2 }}>
                         <Typography variant="h6">Amortization Schedule</Typography>
@@ -341,7 +343,7 @@ export function LoanDetailPage() {
                     </Stack>
                     <DataTable rows={schedules} columns={scheduleColumns} emptyMessage="No amortization schedule found for this loan." />
                 </CardContent>
-            </Card>
+            </MotionCard>
         </Stack>
     );
 }

@@ -1,3 +1,4 @@
+import { MotionCard, MotionModal } from "../ui/motion";
 import FileDownloadRoundedIcon from "@mui/icons-material/FileDownloadRounded";
 import PolicyRoundedIcon from "@mui/icons-material/PolicyRounded";
 import PointOfSaleRoundedIcon from "@mui/icons-material/PointOfSaleRounded";
@@ -163,7 +164,7 @@ export function CashControlPage() {
 
     return (
         <Stack spacing={3}>
-            <Card sx={{ color: "#fff", background: "linear-gradient(135deg, #0A0573 0%, #1FA8E6 100%)" }}>
+            <MotionCard sx={{ color: "#fff", background: "linear-gradient(135deg, #0A0573 0%, #1FA8E6 100%)" }}>
                 <CardContent>
                     <Stack spacing={1}>
                         <Typography variant="overline" sx={{ color: "rgba(255,255,255,0.72)" }}>
@@ -175,14 +176,14 @@ export function CashControlPage() {
                         </Typography>
                     </Stack>
                 </CardContent>
-            </Card>
+            </MotionCard>
 
             <Grid container spacing={2}>
-                <Grid size={{ xs: 12, md: 3 }}><Card variant="outlined"><CardContent><Typography variant="overline">Deposits</Typography><Typography variant="h5">{formatCurrency(totals.deposits)}</Typography></CardContent></Card></Grid>
-                <Grid size={{ xs: 12, md: 3 }}><Card variant="outlined"><CardContent><Typography variant="overline">Withdrawals</Typography><Typography variant="h5">{formatCurrency(totals.withdrawals)}</Typography></CardContent></Card></Grid>
-                <Grid size={{ xs: 12, md: 3 }}><Card variant="outlined"><CardContent><Typography variant="overline">Variance</Typography><Typography variant="h5">{formatCurrency(totals.variance)}</Typography></CardContent></Card></Grid>
+                <Grid size={{ xs: 12, md: 3 }}><MotionCard variant="outlined"><CardContent><Typography variant="overline">Deposits</Typography><Typography variant="h5">{formatCurrency(totals.deposits)}</Typography></CardContent></MotionCard></Grid>
+                <Grid size={{ xs: 12, md: 3 }}><MotionCard variant="outlined"><CardContent><Typography variant="overline">Withdrawals</Typography><Typography variant="h5">{formatCurrency(totals.withdrawals)}</Typography></CardContent></MotionCard></Grid>
+                <Grid size={{ xs: 12, md: 3 }}><MotionCard variant="outlined"><CardContent><Typography variant="overline">Variance</Typography><Typography variant="h5">{formatCurrency(totals.variance)}</Typography></CardContent></MotionCard></Grid>
                 <Grid size={{ xs: 12, md: 3 }}>
-                    <Card variant="outlined">
+                    <MotionCard variant="outlined">
                         <CardContent>
                             <Typography variant="overline">Branch filter</Typography>
                             <TextField
@@ -201,13 +202,13 @@ export function CashControlPage() {
                                 ))}
                             </TextField>
                         </CardContent>
-                    </Card>
+                    </MotionCard>
                 </Grid>
             </Grid>
 
             <Grid container spacing={3}>
                 <Grid size={{ xs: 12, lg: 5 }}>
-                    <Card variant="outlined">
+                    <MotionCard variant="outlined">
                         <CardContent>
                             <Stack spacing={2}>
                                 <Stack direction="row" spacing={1.5} alignItems="center">
@@ -303,10 +304,10 @@ export function CashControlPage() {
                                 )}
                             </Stack>
                         </CardContent>
-                    </Card>
+                    </MotionCard>
                 </Grid>
                 <Grid size={{ xs: 12, lg: 7 }}>
-                    <Card variant="outlined">
+                    <MotionCard variant="outlined">
                         <CardContent>
                             <Stack spacing={2}>
                                 <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={2}>
@@ -341,11 +342,11 @@ export function CashControlPage() {
                                 />
                             </Stack>
                         </CardContent>
-                    </Card>
+                    </MotionCard>
                 </Grid>
             </Grid>
 
-            <Card variant="outlined">
+            <MotionCard variant="outlined">
                 <CardContent>
                     <Stack spacing={2}>
                         <Typography variant="h6">Teller sessions</Typography>
@@ -363,7 +364,7 @@ export function CashControlPage() {
                         />
                     </Stack>
                 </CardContent>
-            </Card>
+            </MotionCard>
         </Stack>
     );
 }

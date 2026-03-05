@@ -2,6 +2,7 @@ import { Navigate, Outlet, useLocation } from "react-router-dom";
 
 import { useAuth } from "./AuthProvider";
 import type { Role } from "../types/api";
+import { AppLoader } from "../components/AppLoader";
 
 interface ProtectedRouteProps {
     allowedRoles?: Role[];
@@ -18,7 +19,7 @@ export function ProtectedRoute({
     const location = useLocation();
 
     if (loading) {
-        return <div style={{ padding: "2rem", color: "var(--text-primary)" }}>Loading session...</div>;
+        return <AppLoader message="Loading session..." />;
     }
 
     if (!session) {

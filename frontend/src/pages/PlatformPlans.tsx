@@ -1,3 +1,4 @@
+import { MotionCard, MotionModal } from "../ui/motion";
 import AutoAwesomeRoundedIcon from "@mui/icons-material/AutoAwesomeRounded";
 import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
 import EditRoundedIcon from "@mui/icons-material/EditRounded";
@@ -30,6 +31,7 @@ import {
 import { alpha, useTheme } from "@mui/material/styles";
 import { useEffect, useMemo, useState } from "react";
 
+import { AppLoader } from "../components/AppLoader";
 import { DataTable, type Column } from "../components/DataTable";
 import { useToast } from "../components/Toast";
 import { api, getApiErrorMessage } from "../lib/api";
@@ -331,7 +333,7 @@ export function PlatformPlansPage() {
 
     return (
         <Stack spacing={3}>
-            <Card
+            <MotionCard
                 variant="outlined"
                 sx={{
                     overflow: "hidden",
@@ -397,7 +399,7 @@ export function PlatformPlansPage() {
                         </Grid>
                     </Grid>
                 </CardContent>
-            </Card>
+            </MotionCard>
 
             {error ? <Alert severity="error">{error}</Alert> : null}
 
@@ -409,7 +411,7 @@ export function PlatformPlansPage() {
 
                     return (
                         <Grid key={plan.id} size={{ xs: 12, xl: 4 }}>
-                            <Card
+                            <MotionCard
                                 variant="outlined"
                                 sx={{
                                     height: "100%",
@@ -511,13 +513,13 @@ export function PlatformPlansPage() {
                                         </Button>
                                     </Stack>
                                 </CardContent>
-                            </Card>
+                            </MotionCard>
                         </Grid>
                     );
                 })}
             </Grid>
 
-            <Card variant="outlined" sx={{ borderRadius: 3 }}>
+            <MotionCard variant="outlined" sx={{ borderRadius: 3 }}>
                 <CardContent sx={{ p: 3 }}>
                     <Stack spacing={1}>
                         <Typography variant="h6">Plan Matrix</Typography>
@@ -527,15 +529,15 @@ export function PlatformPlansPage() {
                     </Stack>
                     <Box sx={{ mt: 2 }}>
                         {loading ? (
-                            <div className="empty-state">Loading plans...</div>
+                            <AppLoader fullscreen={false} minHeight={240} message="Loading plans..." />
                         ) : (
                             <DataTable rows={plans} columns={columns} emptyMessage="No plans configured." />
                         )}
                     </Box>
                 </CardContent>
-            </Card>
+            </MotionCard>
 
-            <Dialog open={Boolean(editingPlan)} onClose={() => setEditingPlan(null)} fullWidth maxWidth="md">
+            <MotionModal open={Boolean(editingPlan)} onClose={() => setEditingPlan(null)} fullWidth maxWidth="md">
                 <DialogTitle>Edit Plan Features</DialogTitle>
                 <DialogContent>
                     <Stack spacing={2.5} sx={{ pt: 1 }}>
@@ -594,7 +596,7 @@ export function PlatformPlansPage() {
                         {submitting ? "Saving..." : "Save Changes"}
                     </Button>
                 </DialogActions>
-            </Dialog>
+            </MotionModal>
         </Stack>
     );
 }

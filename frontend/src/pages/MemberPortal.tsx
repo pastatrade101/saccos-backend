@@ -1,3 +1,4 @@
+import { MotionCard, MotionModal } from "../ui/motion";
 import AccountBalanceWalletRoundedIcon from "@mui/icons-material/AccountBalanceWalletRounded";
 import ApprovalRoundedIcon from "@mui/icons-material/ApprovalRounded";
 import AutoGraphRoundedIcon from "@mui/icons-material/AutoGraphRounded";
@@ -57,6 +58,7 @@ import { ChartPanel } from "../components/ChartPanel";
 import { DataTable, type Column } from "../components/DataTable";
 import { SearchableSelect } from "../components/SearchableSelect";
 import { useToast } from "../components/Toast";
+import { AppLoader } from "../components/AppLoader";
 import { api, getApiErrorMessage } from "../lib/api";
 import {
     endpoints,
@@ -180,7 +182,7 @@ function MetricCard({ icon: Icon, label, value, helper, tone, delta }: MetricCar
     const toneStyles = getToneStyles(tone);
 
     return (
-        <Card variant="outlined" sx={contentCardSx}>
+        <MotionCard variant="outlined" sx={contentCardSx}>
             <CardContent sx={{ p: 2.25 }}>
                 <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1.5}>
                     <Box
@@ -216,7 +218,7 @@ function MetricCard({ icon: Icon, label, value, helper, tone, delta }: MetricCar
                     {helper}
                 </Typography>
             </CardContent>
-        </Card>
+        </MotionCard>
     );
 }
 
@@ -606,7 +608,7 @@ export function MemberPortalPage() {
     );
 
     const renderHero = () => (
-        <Card
+        <MotionCard
             sx={{
                 borderRadius: 2,
                 color: "#fff",
@@ -695,7 +697,7 @@ export function MemberPortalPage() {
                     </Stack>
                 </Stack>
             </CardContent>
-        </Card>
+        </MotionCard>
     );
 
     const renderOverviewView = () => (
@@ -757,7 +759,7 @@ export function MemberPortalPage() {
 
     const renderAccountsView = () => (
         <Stack spacing={3}>
-            <Card variant="outlined" sx={contentCardSx}>
+            <MotionCard variant="outlined" sx={contentCardSx}>
                 <CardContent sx={{ p: { xs: 2.5, md: 3 } }}>
                     <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" spacing={2}>
                         <Box>
@@ -777,7 +779,7 @@ export function MemberPortalPage() {
                         </Stack>
                     </Stack>
                 </CardContent>
-            </Card>
+            </MotionCard>
 
             <Grid container spacing={2}>
                 <Grid size={{ xs: 12, sm: 6, lg: 4 }}>
@@ -832,20 +834,20 @@ export function MemberPortalPage() {
                 }}
             />
 
-            <Card variant="outlined" sx={contentCardSx}>
+            <MotionCard variant="outlined" sx={contentCardSx}>
                 <CardContent>
                     <Typography variant="h6" sx={{ mb: 2 }}>
                         My Accounts
                     </Typography>
                     <DataTable rows={accounts} columns={accountColumns} emptyMessage="No accounts linked yet." />
                 </CardContent>
-            </Card>
+            </MotionCard>
         </Stack>
     );
 
     const renderLoansView = () => (
         <Stack spacing={3}>
-            <Card
+            <MotionCard
                 variant="outlined"
                 sx={{
                     ...contentCardSx,
@@ -940,10 +942,10 @@ export function MemberPortalPage() {
                         </Grid>
                     </Grid>
                 </CardContent>
-            </Card>
+            </MotionCard>
 
             {canApplyForLoan ? (
-                <Card variant="outlined" sx={contentCardSx}>
+                <MotionCard variant="outlined" sx={contentCardSx}>
                     <CardContent>
                         <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" spacing={2} sx={{ mb: 2 }}>
                             <Box>
@@ -1010,7 +1012,7 @@ export function MemberPortalPage() {
                         </Grid>
                         <DataTable rows={loanApplications} columns={loanApplicationColumns} emptyMessage="No loan applications submitted yet." />
                     </CardContent>
-                </Card>
+                </MotionCard>
             ) : (
                 <Alert severity="info" variant="outlined">
                     Loan applications are disabled on your current subscription plan.
@@ -1072,14 +1074,14 @@ export function MemberPortalPage() {
                     />
                 </Grid>
                 <Grid size={{ xs: 12, lg: 8 }}>
-                    <Card variant="outlined" sx={contentCardSx}>
+                    <MotionCard variant="outlined" sx={contentCardSx}>
                         <CardContent>
                             <Typography variant="h6" sx={{ mb: 2 }}>
                                 My Loans
                             </Typography>
                             <DataTable rows={loans} columns={loanColumns} emptyMessage="No loan records found." />
                         </CardContent>
-                    </Card>
+                    </MotionCard>
                 </Grid>
             </Grid>
         </Stack>
@@ -1087,7 +1089,7 @@ export function MemberPortalPage() {
 
     const renderTransactionsView = () => (
         <Stack spacing={3}>
-            <Card variant="outlined" sx={contentCardSx}>
+            <MotionCard variant="outlined" sx={contentCardSx}>
                 <CardContent sx={{ p: { xs: 2.5, md: 3 } }}>
                     <Typography variant="overline" color="text.secondary">
                         Transactions
@@ -1099,7 +1101,7 @@ export function MemberPortalPage() {
                         Review recent transactions that affect your savings, contributions, dividend allocations, and running balances.
                     </Typography>
                 </CardContent>
-            </Card>
+            </MotionCard>
 
             <Grid container spacing={2}>
                 <Grid size={{ xs: 12, sm: 6, lg: 4 }}>
@@ -1154,20 +1156,20 @@ export function MemberPortalPage() {
                 }}
             />
 
-            <Card variant="outlined" sx={contentCardSx}>
+            <MotionCard variant="outlined" sx={contentCardSx}>
                 <CardContent>
                     <Typography variant="h6" sx={{ mb: 2 }}>
                         Recent Transactions
                     </Typography>
                     <DataTable rows={statements.slice(0, 20)} columns={statementColumns} emptyMessage="No transactions yet." />
                 </CardContent>
-            </Card>
+            </MotionCard>
         </Stack>
     );
 
     const renderContributionsView = () => (
         <Stack spacing={3}>
-            <Card variant="outlined" sx={contentCardSx}>
+            <MotionCard variant="outlined" sx={contentCardSx}>
                 <CardContent sx={{ p: { xs: 2.5, md: 3 } }}>
                     <Typography variant="overline" color="text.secondary">
                         Contributions
@@ -1179,7 +1181,7 @@ export function MemberPortalPage() {
                         Follow the contributions posted to your share account and the dividend allocations credited to your membership.
                     </Typography>
                 </CardContent>
-            </Card>
+            </MotionCard>
 
             <Grid container spacing={2}>
                 <Grid size={{ xs: 12, sm: 6, lg: 4 }}>
@@ -1211,7 +1213,7 @@ export function MemberPortalPage() {
                 </Grid>
             </Grid>
 
-            <Card variant="outlined" sx={contentCardSx}>
+            <MotionCard variant="outlined" sx={contentCardSx}>
                 <CardContent>
                     <Typography variant="h6" sx={{ mb: 2 }}>
                         Share Contributions & Dividends
@@ -1222,7 +1224,7 @@ export function MemberPortalPage() {
                         emptyMessage="No share contributions or dividends posted yet."
                     />
                 </CardContent>
-            </Card>
+            </MotionCard>
         </Stack>
     );
 
@@ -1379,7 +1381,7 @@ export function MemberPortalPage() {
             </Box>
 
             <Box sx={{ mt: "auto", px: collapsed ? 1 : 2, pb: 2 }}>
-                <Card variant="outlined" sx={{ ...contentCardSx, borderRadius: 2 }}>
+                <MotionCard variant="outlined" sx={{ ...contentCardSx, borderRadius: 2 }}>
                     <CardContent sx={{ p: collapsed ? 1.25 : 2 }}>
                         <Stack spacing={1.5}>
                             <Stack direction={collapsed ? "column" : "row"} alignItems="center" spacing={1.25}>
@@ -1448,17 +1450,13 @@ export function MemberPortalPage() {
                             </Stack>
                         </Stack>
                     </CardContent>
-                </Card>
+                </MotionCard>
             </Box>
         </Box>
     );
 
     if (loading) {
-        return (
-            <Box sx={{ minHeight: "100vh", display: "grid", placeItems: "center" }}>
-                <Typography color="text.secondary">Loading member portal...</Typography>
-            </Box>
-        );
+        return <AppLoader message="Loading member portal..." />;
     }
 
     if (error) {
@@ -1613,7 +1611,7 @@ export function MemberPortalPage() {
                 </Box>
             </Box>
 
-            <Dialog open={showApplyDialog} onClose={submittingApplication ? undefined : () => setShowApplyDialog(false)} maxWidth="md" fullWidth>
+            <MotionModal open={showApplyDialog} onClose={submittingApplication ? undefined : () => setShowApplyDialog(false)} maxWidth="md" fullWidth>
                 <DialogTitle>Apply for Loan</DialogTitle>
                 <DialogContent dividers>
                     <Stack spacing={2} sx={{ pt: 0.5 }}>
@@ -1709,7 +1707,7 @@ export function MemberPortalPage() {
                         {submittingApplication ? "Submitting..." : "Submit Application"}
                     </Button>
                 </DialogActions>
-            </Dialog>
+            </MotionModal>
 
             <Paper
                 sx={{

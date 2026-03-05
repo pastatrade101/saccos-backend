@@ -10,10 +10,8 @@ import {
     Alert,
     Box,
     Button,
-    Card,
     CardContent,
     Chip,
-    Dialog,
     DialogActions,
     DialogContent,
     DialogTitle,
@@ -54,6 +52,7 @@ import {
     type RejectLoanApplicationRequest
 } from "../lib/endpoints";
 import type { Loan, LoanApplication, LoanProduct, LoanSchedule, LoanTransaction, Member } from "../types/api";
+import { MotionCard, MotionModal } from "../ui/motion";
 import { formatCurrency, formatDate } from "../utils/format";
 
 const createApplicationSchema = z.object({
@@ -121,7 +120,7 @@ function MetricCard({
     icon: React.ReactNode;
 }) {
     return (
-        <Card variant="outlined" sx={{ height: "100%" }}>
+        <MotionCard variant="outlined" sx={{ height: "100%" }}>
             <CardContent>
                 <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={2}>
                     <Box>
@@ -150,7 +149,7 @@ function MetricCard({
                     </Box>
                 </Stack>
             </CardContent>
-        </Card>
+        </MotionCard>
     );
 }
 
@@ -779,7 +778,7 @@ export function LoansPage() {
 
     return (
         <Stack spacing={3}>
-            <Card
+            <MotionCard
                 variant="outlined"
                 sx={{
                     background: `linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.08)}, ${alpha(theme.palette.background.paper, 0.92)})`
@@ -839,7 +838,7 @@ export function LoansPage() {
                         </Stack>
                     </Stack>
                 </CardContent>
-            </Card>
+            </MotionCard>
 
             {subscriptionInactive ? (
                 <Alert severity="warning" variant="outlined">
@@ -884,7 +883,7 @@ export function LoansPage() {
 
             <Grid container spacing={2}>
                 <Grid size={{ xs: 12, lg: 8 }}>
-                    <Card variant="outlined">
+                    <MotionCard variant="outlined">
                         <CardContent>
                             <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" spacing={2} sx={{ mb: 2 }}>
                                 <Box>
@@ -912,10 +911,10 @@ export function LoansPage() {
                                 />
                             </Stack>
                         </CardContent>
-                    </Card>
+                    </MotionCard>
                 </Grid>
                 <Grid size={{ xs: 12, lg: 4 }}>
-                    <Card variant="outlined" sx={{ height: "100%" }}>
+                    <MotionCard variant="outlined" sx={{ height: "100%" }}>
                         <CardContent>
                             <Typography variant="h6">Workflow Guardrails</Typography>
                             <Stack spacing={1.5} sx={{ mt: 2 }}>
@@ -930,13 +929,13 @@ export function LoansPage() {
                                 </Alert>
                             </Stack>
                         </CardContent>
-                    </Card>
+                    </MotionCard>
                 </Grid>
             </Grid>
 
             <Grid container spacing={2}>
                 <Grid size={{ xs: 12, lg: 8 }}>
-                    <Card variant="outlined">
+                    <MotionCard variant="outlined">
                         <CardContent>
                             <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" spacing={2} sx={{ mb: 2 }}>
                                 <Box>
@@ -960,10 +959,10 @@ export function LoansPage() {
                                 />
                             </Stack>
                         </CardContent>
-                    </Card>
+                    </MotionCard>
                 </Grid>
                 <Grid size={{ xs: 12, lg: 4 }}>
-                    <Card variant="outlined" sx={{ height: "100%" }}>
+                    <MotionCard variant="outlined" sx={{ height: "100%" }}>
                         <CardContent>
                             <Typography variant="h6">Loan Activity</Typography>
                             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75, mb: 2 }}>
@@ -975,11 +974,11 @@ export function LoansPage() {
                                 emptyMessage={loading ? "Loading activity..." : "No loan activity found."}
                             />
                         </CardContent>
-                    </Card>
+                    </MotionCard>
                 </Grid>
             </Grid>
 
-            <Dialog open={showCreateModal} onClose={processing ? undefined : () => setShowCreateModal(false)} maxWidth="md" fullWidth>
+            <MotionModal open={showCreateModal} onClose={processing ? undefined : () => setShowCreateModal(false)} maxWidth="md" fullWidth>
                 <DialogTitle>Create Loan Application</DialogTitle>
                 <DialogContent dividers>
                     <Stack spacing={2} sx={{ pt: 0.5 }}>
@@ -1085,9 +1084,9 @@ export function LoansPage() {
                         {processing ? "Submitting..." : "Create & Submit"}
                     </Button>
                 </DialogActions>
-            </Dialog>
+            </MotionModal>
 
-            <Dialog open={Boolean(reviewTarget)} onClose={() => setReviewTarget(null)} maxWidth="md" fullWidth>
+            <MotionModal open={Boolean(reviewTarget)} onClose={() => setReviewTarget(null)} maxWidth="md" fullWidth>
                 <DialogTitle>Loan Application Details</DialogTitle>
                 <DialogContent dividers>
                     {reviewTarget ? (
@@ -1213,9 +1212,9 @@ export function LoansPage() {
                         </Button>
                     ) : null}
                 </DialogActions>
-            </Dialog>
+            </MotionModal>
 
-            <Dialog open={Boolean(appraisalTarget)} onClose={processing ? undefined : () => setAppraisalTarget(null)} maxWidth="md" fullWidth>
+            <MotionModal open={Boolean(appraisalTarget)} onClose={processing ? undefined : () => setAppraisalTarget(null)} maxWidth="md" fullWidth>
                 <DialogTitle>Appraise Loan Application</DialogTitle>
                 <DialogContent dividers>
                     <Box component="form" id="loan-appraisal-form" onSubmit={saveAppraisal} sx={{ display: "grid", gap: 2, pt: 0.5 }}>
@@ -1294,9 +1293,9 @@ export function LoansPage() {
                         {processing ? "Saving..." : "Save Appraisal"}
                     </Button>
                 </DialogActions>
-            </Dialog>
+            </MotionModal>
 
-            <Dialog open={Boolean(approvalTarget)} onClose={processing ? undefined : () => setApprovalTarget(null)} maxWidth="sm" fullWidth>
+            <MotionModal open={Boolean(approvalTarget)} onClose={processing ? undefined : () => setApprovalTarget(null)} maxWidth="sm" fullWidth>
                 <DialogTitle>Approve Loan Application</DialogTitle>
                 <DialogContent dividers>
                     <Box component="form" id="loan-approve-form" onSubmit={saveApproval} sx={{ display: "grid", gap: 2, pt: 0.5 }}>
@@ -1312,9 +1311,9 @@ export function LoansPage() {
                         {processing ? "Approving..." : "Approve Application"}
                     </Button>
                 </DialogActions>
-            </Dialog>
+            </MotionModal>
 
-            <Dialog open={Boolean(rejectionTarget)} onClose={processing ? undefined : () => setRejectionTarget(null)} maxWidth="sm" fullWidth>
+            <MotionModal open={Boolean(rejectionTarget)} onClose={processing ? undefined : () => setRejectionTarget(null)} maxWidth="sm" fullWidth>
                 <DialogTitle>Reject Loan Application</DialogTitle>
                 <DialogContent dividers>
                     <Box component="form" id="loan-reject-form" onSubmit={saveRejection} sx={{ display: "grid", gap: 2, pt: 0.5 }}>
@@ -1336,9 +1335,9 @@ export function LoansPage() {
                         {processing ? "Rejecting..." : "Reject Application"}
                     </Button>
                 </DialogActions>
-            </Dialog>
+            </MotionModal>
 
-            <Dialog open={Boolean(disbursementTarget)} onClose={processing ? undefined : () => setDisbursementTarget(null)} maxWidth="sm" fullWidth>
+            <MotionModal open={Boolean(disbursementTarget)} onClose={processing ? undefined : () => setDisbursementTarget(null)} maxWidth="sm" fullWidth>
                 <DialogTitle>Disburse Approved Application</DialogTitle>
                 <DialogContent dividers>
                     <Stack spacing={2} sx={{ pt: 0.5 }}>
@@ -1357,9 +1356,9 @@ export function LoansPage() {
                         Review Disbursement
                     </Button>
                 </DialogActions>
-            </Dialog>
+            </MotionModal>
 
-            <Dialog open={showRepayModal} onClose={processing ? undefined : () => setShowRepayModal(false)} maxWidth="sm" fullWidth>
+            <MotionModal open={showRepayModal} onClose={processing ? undefined : () => setShowRepayModal(false)} maxWidth="sm" fullWidth>
                 <DialogTitle>Loan Repayment</DialogTitle>
                 <DialogContent dividers>
                     <Box component="form" id="loan-repay-form" onSubmit={launchRepayment} sx={{ display: "grid", gap: 2, pt: 0.5 }}>
@@ -1397,7 +1396,7 @@ export function LoansPage() {
                         Review Repayment
                     </Button>
                 </DialogActions>
-            </Dialog>
+            </MotionModal>
 
             <ConfirmModal
                 open={Boolean(pendingMoneyAction)}

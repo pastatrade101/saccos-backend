@@ -1,3 +1,4 @@
+import { MotionCard, MotionModal } from "../ui/motion";
 import ArrowBackRoundedIcon from "@mui/icons-material/ArrowBackRounded";
 import FilterAltRoundedIcon from "@mui/icons-material/FilterAltRounded";
 import {
@@ -18,6 +19,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { useAuth } from "../auth/AuthProvider";
+import { AppLoader } from "../components/AppLoader";
 import { DataTable, type Column } from "../components/DataTable";
 import { useToast } from "../components/Toast";
 import { api, getApiErrorMessage } from "../lib/api";
@@ -194,7 +196,7 @@ export function FollowUpsPage() {
 
     return (
         <Stack spacing={3}>
-            <Card variant="outlined">
+            <MotionCard variant="outlined">
                 <CardContent>
                     <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" spacing={2}>
                         <Box>
@@ -219,9 +221,9 @@ export function FollowUpsPage() {
                         </Stack>
                     </Stack>
                 </CardContent>
-            </Card>
+            </MotionCard>
 
-            <Card variant="outlined">
+            <MotionCard variant="outlined">
                 <CardContent>
                     <Stack spacing={2}>
                         <Stack direction="row" spacing={1} alignItems="center">
@@ -276,12 +278,12 @@ export function FollowUpsPage() {
                         </Grid>
                     </Stack>
                 </CardContent>
-            </Card>
+            </MotionCard>
 
             {loading ? (
-                <Box className="empty-state">Loading follow-up items...</Box>
+                <AppLoader fullscreen={false} minHeight={280} message="Loading follow-up items..." />
             ) : (
-                <Card variant="outlined">
+                <MotionCard variant="outlined">
                     <CardContent>
                         {filteredRows.length ? null : (
                             <Alert severity="info" variant="outlined" sx={{ mb: 2 }}>
@@ -312,7 +314,7 @@ export function FollowUpsPage() {
                             ) : null}
                         </Stack>
                     </CardContent>
-                </Card>
+                </MotionCard>
             )}
         </Stack>
     );

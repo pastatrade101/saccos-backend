@@ -1,6 +1,8 @@
+import { MotionCard, MotionModal } from "../ui/motion";
 import { Alert, Card, CardContent, Grid, Pagination, Stack, TextField, Typography } from "@mui/material";
 import { useEffect, useState } from "react";
 
+import { AppLoader } from "../components/AppLoader";
 import { DataTable, type Column } from "../components/DataTable";
 import { useToast } from "../components/Toast";
 import { api, getApiErrorMessage } from "../lib/api";
@@ -75,16 +77,16 @@ export function AuditorAuditLogsPage() {
 
     return (
         <Stack spacing={3}>
-            <Card variant="outlined">
+            <MotionCard variant="outlined">
                 <CardContent>
                     <Typography variant="h5">Audit Logs</Typography>
                     <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>
                         Immutable change trail for sensitive actions, user role changes, financial posting, and export activity.
                     </Typography>
                 </CardContent>
-            </Card>
+            </MotionCard>
 
-            <Card variant="outlined">
+            <MotionCard variant="outlined">
                 <CardContent>
                     <Grid container spacing={2}>
                         <Grid size={{ xs: 12, md: 3 }}>
@@ -104,12 +106,12 @@ export function AuditorAuditLogsPage() {
                         </Grid>
                     </Grid>
                 </CardContent>
-            </Card>
+            </MotionCard>
 
             {loading ? (
-                <div className="empty-state">Loading audit logs...</div>
+                <AppLoader fullscreen={false} minHeight={280} message="Loading audit logs..." />
             ) : (
-                <Card variant="outlined">
+                <MotionCard variant="outlined">
                     <CardContent>
                         {!rows.length ? <Alert severity="info" variant="outlined" sx={{ mb: 2 }}>No audit logs match the current filters.</Alert> : null}
                         <Stack spacing={2}>
@@ -124,7 +126,7 @@ export function AuditorAuditLogsPage() {
                             ) : null}
                         </Stack>
                     </CardContent>
-                </Card>
+                </MotionCard>
             )}
         </Stack>
     );

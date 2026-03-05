@@ -1,12 +1,13 @@
 import AccountBalanceWalletRoundedIcon from "@mui/icons-material/AccountBalanceWalletRounded";
 import SouthWestRoundedIcon from "@mui/icons-material/SouthWestRounded";
 import NorthEastRoundedIcon from "@mui/icons-material/NorthEastRounded";
-import { Avatar, Box, Card, CardContent, Chip, Stack, Typography } from "@mui/material";
+import { Avatar, Box, CardContent, Chip, Stack, Typography } from "@mui/material";
 import { alpha, useTheme } from "@mui/material/styles";
 import type { ChartData, ChartOptions, TooltipItem } from "chart.js";
 import { Bar } from "react-chartjs-2";
 
 import { registerCharts } from "../../lib/charts";
+import { MotionCard } from "../../ui/motion";
 import { formatCurrency } from "../../utils/format";
 
 registerCharts();
@@ -92,7 +93,7 @@ export function WaterfallCard({
     };
 
     return (
-        <Card variant="outlined" sx={{ height: "100%" }}>
+        <MotionCard variant="outlined" inView sx={{ height: "100%" }}>
             <CardContent sx={{ height: "100%" }}>
                 <Stack spacing={2.5} sx={{ height: "100%" }}>
                     <Stack direction="row" justifyContent="space-between" spacing={2}>
@@ -173,6 +174,6 @@ export function WaterfallCard({
                     </Box>
                 </Stack>
             </CardContent>
-        </Card>
+        </MotionCard>
     );
 }

@@ -2,9 +2,10 @@ import ErrorOutlineRoundedIcon from "@mui/icons-material/ErrorOutlineRounded";
 import FactCheckRoundedIcon from "@mui/icons-material/FactCheckRounded";
 import VerifiedRoundedIcon from "@mui/icons-material/VerifiedRounded";
 import WarningAmberRoundedIcon from "@mui/icons-material/WarningAmberRounded";
-import { Button, Card, CardContent, Chip, Divider, Stack, Typography } from "@mui/material";
+import { CardContent, Chip, Divider, Stack, Typography } from "@mui/material";
 
 import type { StaffConflict, StaffRoleCounts } from "../types/api";
+import { MotionButton, MotionCard } from "../ui/motion";
 import { minimumCoverageMet } from "../utils/roleRules";
 
 interface AccessHealthPanelProps {
@@ -18,7 +19,7 @@ export function AccessHealthPanel({ roleCounts, conflicts, onViewConflicts }: Ac
     const tooManySuperAdmins = roleCounts.super_admin > 3;
 
     return (
-        <Card variant="outlined" sx={{ height: "100%" }}>
+        <MotionCard variant="outlined" inView sx={{ height: "100%" }}>
             <CardContent>
                 <Stack spacing={2}>
                     <Stack spacing={0.5}>
@@ -60,12 +61,12 @@ export function AccessHealthPanel({ roleCounts, conflicts, onViewConflicts }: Ac
                         />
                     </Stack>
 
-                    <Button variant="outlined" onClick={onViewConflicts}>
+                    <MotionButton variant="outlined" onClick={onViewConflicts}>
                         View conflicts
-                    </Button>
+                    </MotionButton>
                 </Stack>
             </CardContent>
-        </Card>
+        </MotionCard>
     );
 }
 

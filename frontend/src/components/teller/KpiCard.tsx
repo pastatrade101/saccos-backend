@@ -1,12 +1,13 @@
 import TrendingDownRoundedIcon from "@mui/icons-material/TrendingDownRounded";
 import TrendingFlatRoundedIcon from "@mui/icons-material/TrendingFlatRounded";
 import TrendingUpRoundedIcon from "@mui/icons-material/TrendingUpRounded";
-import { Box, Card, CardContent, Chip, Stack, Typography } from "@mui/material";
+import { Box, CardContent, Chip, Stack, Typography } from "@mui/material";
 import { alpha, type Theme, useTheme } from "@mui/material/styles";
 import type { ChartData, ChartOptions } from "chart.js";
 import { Line } from "react-chartjs-2";
 
 import { registerCharts } from "../../lib/charts";
+import { MotionCard } from "../../ui/motion";
 import { formatCurrency } from "../../utils/format";
 
 registerCharts();
@@ -95,8 +96,10 @@ export function KpiCard({
     };
 
     return (
-        <Card
+        <MotionCard
             variant="outlined"
+            inView
+            interactive
             sx={{
                 height: "100%",
                 borderColor: alpha(colors.main, 0.24),
@@ -138,6 +141,6 @@ export function KpiCard({
                     </Box>
                 </Stack>
             </CardContent>
-        </Card>
+        </MotionCard>
     );
 }

@@ -1,3 +1,4 @@
+import { MotionCard, MotionModal } from "../ui/motion";
 import AccountBalanceWalletRoundedIcon from "@mui/icons-material/AccountBalanceWalletRounded";
 import CallMadeRoundedIcon from "@mui/icons-material/CallMadeRounded";
 import CallReceivedRoundedIcon from "@mui/icons-material/CallReceivedRounded";
@@ -29,6 +30,7 @@ import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 
 import { useAuth } from "../auth/AuthProvider";
+import { AppLoader } from "../components/AppLoader";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { DataTable, type Column } from "../components/DataTable";
 import { SearchableSelect } from "../components/SearchableSelect";
@@ -76,7 +78,7 @@ function MetricCard({
     icon: React.ReactNode;
 }) {
     return (
-        <Card
+        <MotionCard
             variant="outlined"
             sx={{
                 height: "100%",
@@ -113,7 +115,7 @@ function MetricCard({
                     </Box>
                 </Stack>
             </CardContent>
-        </Card>
+        </MotionCard>
     );
 }
 
@@ -475,7 +477,7 @@ export function CashPage() {
 
     return (
         <Stack spacing={3}>
-            <Card
+            <MotionCard
                 variant="outlined"
                 sx={{
                     borderRadius: 2,
@@ -497,7 +499,7 @@ export function CashPage() {
                         </Stack>
                     </Stack>
                 </CardContent>
-            </Card>
+            </MotionCard>
 
             <Grid container spacing={2}>
                 <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
@@ -536,7 +538,7 @@ export function CashPage() {
 
             <Grid container spacing={2}>
                 <Grid size={{ xs: 12, xl: 7 }}>
-                    <Card variant="outlined">
+                    <MotionCard variant="outlined">
                         <CardContent>
                             <Stack spacing={2}>
                                 <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" spacing={2}>
@@ -587,10 +589,10 @@ export function CashPage() {
                                 )}
                             </Stack>
                         </CardContent>
-                    </Card>
+                    </MotionCard>
                 </Grid>
                 <Grid size={{ xs: 12, xl: 5 }}>
-                    <Card variant="outlined">
+                    <MotionCard variant="outlined">
                         <CardContent>
                             <Stack spacing={2}>
                                 <Typography variant="h6">Receipt Control</Typography>
@@ -620,7 +622,7 @@ export function CashPage() {
                                 ) : null}
                             </Stack>
                         </CardContent>
-                    </Card>
+                    </MotionCard>
                 </Grid>
             </Grid>
 
@@ -632,7 +634,7 @@ export function CashPage() {
 
             <Grid container spacing={2}>
                 <Grid size={{ xs: 12, xl: 7 }}>
-                    <Card
+                    <MotionCard
                         variant="outlined"
                         sx={{
                             height: "100%",
@@ -651,7 +653,7 @@ export function CashPage() {
 
                                 <Grid container spacing={2}>
                                     <Grid size={{ xs: 12, md: 4 }}>
-                                        <Card variant="outlined" sx={{ borderRadius: 2, height: "100%" }}>
+                                        <MotionCard variant="outlined" sx={{ borderRadius: 2, height: "100%" }}>
                                             <CardContent>
                                                 <Stack spacing={2}>
                                                     <Box>
@@ -674,10 +676,10 @@ export function CashPage() {
                                                     </Button>
                                                 </Stack>
                                             </CardContent>
-                                        </Card>
+                                        </MotionCard>
                                     </Grid>
                                     <Grid size={{ xs: 12, md: 4 }}>
-                                        <Card variant="outlined" sx={{ borderRadius: 2, height: "100%" }}>
+                                        <MotionCard variant="outlined" sx={{ borderRadius: 2, height: "100%" }}>
                                             <CardContent>
                                                 <Stack spacing={2}>
                                                     <Box>
@@ -701,10 +703,10 @@ export function CashPage() {
                                                     </Button>
                                                 </Stack>
                                             </CardContent>
-                                        </Card>
+                                        </MotionCard>
                                     </Grid>
                                     <Grid size={{ xs: 12, md: 4 }}>
-                                        <Card variant="outlined" sx={{ borderRadius: 2, height: "100%" }}>
+                                        <MotionCard variant="outlined" sx={{ borderRadius: 2, height: "100%" }}>
                                             <CardContent>
                                                 <Stack spacing={2}>
                                                     <Box>
@@ -727,16 +729,16 @@ export function CashPage() {
                                                     </Button>
                                                 </Stack>
                                             </CardContent>
-                                        </Card>
+                                        </MotionCard>
                                     </Grid>
                                 </Grid>
                             </Stack>
                         </CardContent>
-                    </Card>
+                    </MotionCard>
                 </Grid>
 
                 <Grid size={{ xs: 12, xl: 5 }}>
-                    <Card
+                    <MotionCard
                         variant="outlined"
                         sx={{
                             height: "100%",
@@ -782,11 +784,11 @@ export function CashPage() {
                                 </Grid>
                             </Stack>
                         </CardContent>
-                    </Card>
+                    </MotionCard>
                 </Grid>
             </Grid>
 
-            <Card
+            <MotionCard
                 variant="outlined"
                 sx={{
                     borderRadius: 2,
@@ -810,7 +812,7 @@ export function CashPage() {
                     </Stack>
 
                     {loading ? (
-                        <Box className="empty-state">Loading cash movements...</Box>
+                        <AppLoader fullscreen={false} minHeight={260} message="Loading cash movements..." />
                     ) : (
                         <Stack spacing={2}>
                             <DataTable rows={paginatedTransactions} columns={transactionColumns} emptyMessage="No cash transactions yet." />
@@ -827,9 +829,9 @@ export function CashPage() {
                         </Stack>
                     )}
                 </CardContent>
-            </Card>
+            </MotionCard>
 
-            <Dialog
+            <MotionModal
                 open={Boolean(actionDialog)}
                 onClose={processing ? undefined : () => {
                     setActionDialog(null);
@@ -1006,9 +1008,9 @@ export function CashPage() {
                         Review
                     </Button>
                 </DialogActions>
-            </Dialog>
+            </MotionModal>
 
-            <Dialog open={openSessionDialog} onClose={openingSession ? undefined : () => setOpenSessionDialog(false)} maxWidth="sm" fullWidth>
+            <MotionModal open={openSessionDialog} onClose={openingSession ? undefined : () => setOpenSessionDialog(false)} maxWidth="sm" fullWidth>
                 <DialogTitle>Open teller session</DialogTitle>
                 <DialogContent dividers>
                     <Stack spacing={2} sx={{ pt: 0.5 }}>
@@ -1032,9 +1034,9 @@ export function CashPage() {
                         {openingSession ? "Opening..." : "Open session"}
                     </Button>
                 </DialogActions>
-            </Dialog>
+            </MotionModal>
 
-            <Dialog open={closeSessionDialog} onClose={closingSession ? undefined : () => setCloseSessionDialog(false)} maxWidth="sm" fullWidth>
+            <MotionModal open={closeSessionDialog} onClose={closingSession ? undefined : () => setCloseSessionDialog(false)} maxWidth="sm" fullWidth>
                 <DialogTitle>Close teller session</DialogTitle>
                 <DialogContent dividers>
                     <Stack spacing={2} sx={{ pt: 0.5 }}>
@@ -1061,7 +1063,7 @@ export function CashPage() {
                         {closingSession ? "Closing..." : "Close session"}
                     </Button>
                 </DialogActions>
-            </Dialog>
+            </MotionModal>
 
             <ConfirmModal
                 open={Boolean(pendingAction)}

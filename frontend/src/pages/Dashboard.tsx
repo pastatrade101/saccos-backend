@@ -1,12 +1,10 @@
 import {
     Alert,
     Box,
-    Card,
     CardContent,
     Chip,
     Divider,
     Grid,
-    Skeleton,
     Stack,
     Typography
 } from "@mui/material";
@@ -20,6 +18,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { useAuth } from "../auth/AuthProvider";
+import { AppLoader } from "../components/AppLoader";
 import { ChartPanel } from "../components/ChartPanel";
 import { AlertsPanel } from "../components/teller/AlertsPanel";
 import { CashFlowChart } from "../components/teller/CashFlowChart";
@@ -31,6 +30,7 @@ import { api, getApiErrorMessage } from "../lib/api";
 import { endpoints, type BranchesListResponse, type LoanSchedulesResponse, type LoansResponse, type MembersResponse, type StatementsResponse, type TenantsListResponse } from "../lib/endpoints";
 import { buildTellerDashboardData } from "../lib/tellerDashboard";
 import type { Branch, Loan, LoanSchedule, Member, StatementRow, Tenant } from "../types/api";
+import { MotionCard, MotionListItem, MotionSection } from "../ui/motion";
 import { formatCurrency, formatDate, formatRole } from "../utils/format";
 
 interface DashboardState {
@@ -118,7 +118,7 @@ function groupSchedulesByBucket(schedules: LoanSchedule[]) {
 
 function MetricCard({ label, value, helper }: { label: string; value: string; helper?: string }) {
     return (
-        <Card variant="outlined" sx={{ height: "100%" }}>
+        <MotionCard variant="outlined" inView sx={{ height: "100%" }}>
             <CardContent>
                 <Typography variant="overline" color="text.secondary">
                     {label}
@@ -132,7 +132,7 @@ function MetricCard({ label, value, helper }: { label: string; value: string; he
                     </Typography>
                 ) : null}
             </CardContent>
-        </Card>
+        </MotionCard>
     );
 }
 
@@ -172,8 +172,9 @@ function BranchManagerTopCard({
     }[tone];
 
     return (
-        <Card
+        <MotionCard
             variant="outlined"
+            inView
             sx={{
                 height: "100%",
                 borderColor: alpha(toneMap.main, featured ? 0.28 : 0.18),
@@ -236,7 +237,7 @@ function BranchManagerTopCard({
                     ) : null}
                 </Stack>
             </CardContent>
-        </Card>
+        </MotionCard>
     );
 }
 
@@ -283,7 +284,7 @@ function FollowUpPanel({
     const totalExposure = items.reduce((sum, item) => sum + item.principalDue + item.interestDue, 0);
 
     return (
-        <Card variant="outlined" sx={{ height: "100%" }}>
+        <MotionCard variant="outlined" inView sx={{ height: "100%" }}>
             <CardContent sx={{ height: "100%" }}>
                 <Stack spacing={2.5} sx={{ height: "100%" }}>
                     <Box>
@@ -310,42 +311,52 @@ function FollowUpPanel({
 
                     {items.length ? (
                         <Stack spacing={1.25} divider={<Divider flexItem />}>
-                            {items.map((item) => (
-                                <Stack
+                            {items.map((item, index) => (
+                                <MotionListItem
                                     key={item.id}
-                                    direction={{ xs: "column", sm: "row" }}
-                                    justifyContent="space-between"
-                                    spacing={1.5}
+                                    index={index}
+                                    interactive
+                                    variant="outlined"
+                                    sx={{
+                                        p: 1.25,
+                                        borderColor: "divider"
+                                    }}
                                 >
-                                    <Stack spacing={0.5}>
-                                        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-                                            <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
-                                                {item.loanId}
+                                    <Stack
+                                        direction={{ xs: "column", sm: "row" }}
+                                        justifyContent="space-between"
+                                        spacing={1.5}
+                                    >
+                                        <Stack spacing={0.5}>
+                                            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                                                <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                                                    {item.loanId}
+                                                </Typography>
+                                                <Chip
+                                                    size="small"
+                                                    label={item.statusLabel}
+                                                    color={
+                                                        item.severity === "critical"
+                                                            ? "error"
+                                                            : item.severity === "warning"
+                                                                ? "warning"
+                                                                : "success"
+                                                    }
+                                                    variant={item.severity === "normal" ? "outlined" : "filled"}
+                                                />
+                                            </Stack>
+                                            <Typography variant="body2" color="text.secondary">
+                                                Due {formatDate(item.dueDate)} with principal {formatCurrency(item.principalDue)} and interest {formatCurrency(item.interestDue)} pending.
                                             </Typography>
-                                            <Chip
-                                                size="small"
-                                                label={item.statusLabel}
-                                                color={
-                                                    item.severity === "critical"
-                                                        ? "error"
-                                                        : item.severity === "warning"
-                                                            ? "warning"
-                                                            : "success"
-                                                }
-                                                variant={item.severity === "normal" ? "outlined" : "filled"}
-                                            />
                                         </Stack>
-                                        <Typography variant="body2" color="text.secondary">
-                                            Due {formatDate(item.dueDate)} with principal {formatCurrency(item.principalDue)} and interest {formatCurrency(item.interestDue)} pending.
-                                        </Typography>
+                                        <Stack spacing={0.35} alignItems={{ xs: "flex-start", sm: "flex-end" }}>
+                                            <Typography variant="subtitle2">{formatCurrency(item.principalDue + item.interestDue)}</Typography>
+                                            <Typography variant="caption" color="text.secondary">
+                                                Total outstanding
+                                            </Typography>
+                                        </Stack>
                                     </Stack>
-                                    <Stack spacing={0.35} alignItems={{ xs: "flex-start", sm: "flex-end" }}>
-                                        <Typography variant="subtitle2">{formatCurrency(item.principalDue + item.interestDue)}</Typography>
-                                        <Typography variant="caption" color="text.secondary">
-                                            Total outstanding
-                                        </Typography>
-                                    </Stack>
-                                </Stack>
+                                </MotionListItem>
                             ))}
                         </Stack>
                     ) : (
@@ -370,31 +381,12 @@ function FollowUpPanel({
                     )}
                 </Stack>
             </CardContent>
-        </Card>
+        </MotionCard>
     );
 }
 
 function DashboardLoadingState() {
-    return (
-        <Stack spacing={3}>
-            <Skeleton variant="rounded" height={104} />
-            <Grid container spacing={2}>
-                {[1, 2, 3, 4].map((item) => (
-                    <Grid key={item} size={{ xs: 12, sm: 6, lg: 3 }}>
-                        <Skeleton variant="rounded" height={188} />
-                    </Grid>
-                ))}
-            </Grid>
-            <Grid container spacing={2}>
-                <Grid size={{ xs: 12, lg: 8 }}>
-                    <Skeleton variant="rounded" height={360} />
-                </Grid>
-                <Grid size={{ xs: 12, lg: 4 }}>
-                    <Skeleton variant="rounded" height={360} />
-                </Grid>
-            </Grid>
-        </Stack>
-    );
+    return <AppLoader fullscreen={false} minHeight="72vh" message="Loading dashboard..." />;
 }
 
 function buildDeltaLabel(current: number, baseline: number, prefix = "vs baseline") {
@@ -798,7 +790,7 @@ export function DashboardPage() {
 
     return (
         <Stack spacing={3}>
-            <Card variant="outlined">
+            <MotionCard variant="outlined" inView>
                 <CardContent>
                     <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" spacing={2}>
                         <div>
@@ -814,10 +806,11 @@ export function DashboardPage() {
                         <Chip label={showPlatformDashboard ? "Platform Owner" : role ? formatRole(role) : "Internal Ops"} color="primary" variant="outlined" />
                     </Stack>
                 </CardContent>
-            </Card>
+            </MotionCard>
 
             {showPlatformDashboard ? (
                 <>
+                    <MotionSection inView>
                     <Grid container spacing={2}>
                         <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
                             <MetricCard label="Total Tenants" value={String(platformMetrics.totalTenants)} helper="All SACCOS tenants on the platform." />
@@ -832,7 +825,9 @@ export function DashboardPage() {
                             <MetricCard label="Network Branches" value={String(platformMetrics.totalBranches)} helper="Operational branches across the full platform." />
                         </Grid>
                     </Grid>
+                    </MotionSection>
 
+                    <MotionSection inView>
                     <Grid container spacing={2}>
                         <Grid size={{ xs: 12, lg: 7 }}>
                             <ChartPanel
@@ -870,8 +865,9 @@ export function DashboardPage() {
                             />
                         </Grid>
                     </Grid>
+                    </MotionSection>
 
-                    <Card variant="outlined">
+                    <MotionCard variant="outlined" inView>
                         <CardContent>
                             <Typography variant="h6" gutterBottom>Tenant Inventory</Typography>
                             <DataTable
@@ -880,11 +876,12 @@ export function DashboardPage() {
                                 emptyMessage="No tenants available on the platform."
                             />
                         </CardContent>
-                    </Card>
+                    </MotionCard>
                 </>
             ) : null}
 
             {!showPlatformDashboard && role === "teller" ? (
+                <MotionSection inView>
                 <Grid container spacing={2}>
                     <Grid size={{ xs: 12, sm: 6, xl: 3 }}>
                         <KpiCard
@@ -947,7 +944,9 @@ export function DashboardPage() {
                         />
                     </Grid>
                 </Grid>
+                </MotionSection>
             ) : role === "branch_manager" ? (
+                <MotionSection inView>
                 <Grid container spacing={2}>
                     <Grid size={{ xs: 12, xl: 5 }}>
                         <BranchManagerTopCard
@@ -1011,7 +1010,9 @@ export function DashboardPage() {
                         </Grid>
                     </Grid>
                 </Grid>
+                </MotionSection>
             ) : (
+                <MotionSection inView>
                 <Grid container spacing={2}>
                     {roleMetrics.map((metric) => (
                         <Grid key={metric.label} size={{ xs: 12, sm: 6, md: 3 }}>
@@ -1019,9 +1020,11 @@ export function DashboardPage() {
                         </Grid>
                     ))}
                 </Grid>
+                </MotionSection>
             )}
 
             {!showPlatformDashboard ? (
+            <MotionSection inView>
             <Grid container spacing={2}>
                 {role === "teller" ? (
                     <>
@@ -1161,7 +1164,7 @@ export function DashboardPage() {
                             />
                         </Grid>
                         <Grid size={{ xs: 12, lg: 7 }}>
-                            <Card variant="outlined" sx={{ height: "100%" }}>
+                            <MotionCard variant="outlined" inView sx={{ height: "100%" }}>
                                 <CardContent>
                                     <Typography variant="h6" gutterBottom>
                                         Branch Manager Signals
@@ -1175,7 +1178,7 @@ export function DashboardPage() {
                                         ))}
                                     </Stack>
                                 </CardContent>
-                            </Card>
+                            </MotionCard>
                         </Grid>
                     </>
                 ) : role === "auditor" ? (
@@ -1285,6 +1288,7 @@ export function DashboardPage() {
                     </>
                 )}
             </Grid>
+            </MotionSection>
             ) : null}
 
             {!showPlatformDashboard ? (role === "teller" ? (
@@ -1294,6 +1298,7 @@ export function DashboardPage() {
                     </Alert>
                 )
             ) : role === "branch_manager" ? (
+                <MotionSection inView>
                 <Grid container spacing={2}>
                     <Grid size={{ xs: 12, lg: 7 }}>
                         <ChartPanel
@@ -1333,7 +1338,9 @@ export function DashboardPage() {
                         />
                     </Grid>
                 </Grid>
+                </MotionSection>
             ) : (
+                <MotionSection inView>
                 <Grid container spacing={2}>
                     <Grid size={{ xs: 12, lg: 7 }}>
                         <ChartPanel
@@ -1369,6 +1376,7 @@ export function DashboardPage() {
                         />
                     </Grid>
                 </Grid>
+                </MotionSection>
             )) : null}
         </Stack>
     );

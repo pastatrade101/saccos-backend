@@ -1,12 +1,13 @@
 import ScheduleRoundedIcon from "@mui/icons-material/ScheduleRounded";
 import WarningAmberRoundedIcon from "@mui/icons-material/WarningAmberRounded";
-import { Alert, Box, Card, CardContent, Divider, Stack, Typography } from "@mui/material";
+import { Alert, Box, CardContent, Divider, Stack, Typography } from "@mui/material";
 import { alpha, useTheme } from "@mui/material/styles";
 import type { ChartData, ChartOptions } from "chart.js";
 import { Bar } from "react-chartjs-2";
 
 import { registerCharts } from "../../lib/charts";
 import type { TellerAlert, TellerHourlyPoint } from "../../lib/tellerDashboard";
+import { MotionCard } from "../../ui/motion";
 
 registerCharts();
 
@@ -63,7 +64,7 @@ export function AlertsPanel({ alerts, hourlyActivity }: AlertsPanelProps) {
     };
 
     return (
-        <Card variant="outlined" sx={{ height: "100%" }}>
+        <MotionCard variant="outlined" inView sx={{ height: "100%" }}>
             <CardContent sx={{ height: "100%" }}>
                 <Stack spacing={2.5} sx={{ height: "100%" }}>
                     <Box>
@@ -128,6 +129,6 @@ export function AlertsPanel({ alerts, hourlyActivity }: AlertsPanelProps) {
                     </Box>
                 </Stack>
             </CardContent>
-        </Card>
+        </MotionCard>
     );
 }

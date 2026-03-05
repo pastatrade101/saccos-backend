@@ -1,3 +1,4 @@
+import { MotionCard, MotionModal } from "../ui/motion";
 import LockResetRoundedIcon from "@mui/icons-material/LockResetRounded";
 import ShieldRoundedIcon from "@mui/icons-material/ShieldRounded";
 import {
@@ -95,7 +96,7 @@ export function ChangePasswordPage() {
                 p: 3
             }}
         >
-            <Card sx={{ width: "100%", maxWidth: 520, borderRadius: 3 }}>
+            <MotionCard sx={{ width: "100%", maxWidth: 520, borderRadius: 3 }}>
                 <CardContent sx={{ p: 4 }}>
                     <Stack spacing={3}>
                         <Stack direction="row" spacing={1.5} alignItems="center">
@@ -130,7 +131,7 @@ export function ChangePasswordPage() {
                         </Stack>
                     </Stack>
                 </CardContent>
-            </Card>
+            </MotionCard>
         </Box>
     );
 }
