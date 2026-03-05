@@ -3,6 +3,7 @@ const { z } = require("zod");
 const envSchema = z.object({
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
     PORT: z.coerce.number().int().positive().default(5000),
+    HOST: z.string().default("127.0.0.1"),
     API_PREFIX: z.string().default("/api"),
     BODY_LIMIT: z.string().default("1mb"),
     CORS_ORIGINS: z.string().optional(),
@@ -38,6 +39,7 @@ const env = parsedEnv.data;
 module.exports = {
     nodeEnv: env.NODE_ENV,
     port: env.PORT,
+    host: env.HOST,
     apiPrefix: env.API_PREFIX,
     bodyLimit: env.BODY_LIMIT,
     corsOrigins: env.CORS_ORIGINS

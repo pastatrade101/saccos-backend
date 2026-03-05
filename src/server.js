@@ -7,8 +7,20 @@ const env = require("./config/env");
 
 const server = http.createServer(app);
 
-server.listen(env.port, () => {
-    console.log(`SACCOS backend listening on port ${env.port}`);
+server.on("error", (error) => {
+    if (error.code === "EADDRINUSE") {
+        console.error(`Port ${env.port} is already in use. Stop the existing process or change PORT.`);
+    } else if (error.code === "EACCES" || error.code === "EPERM") {
+        console.error(`Cannot bind to ${env.host}:${env.port}. Check HOST/PORT permissions or use another port.`);
+    } else {
+        console.error("HTTP server failed to start:", error);
+    }
+
+    process.exit(1);
+});
+
+server.listen(env.port, env.host, () => {
+    console.log(`SACCOS backend listening on http://${env.host}:${env.port}`);
 });
 
 function shutdown(signal) {
