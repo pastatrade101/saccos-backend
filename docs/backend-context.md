@@ -36,6 +36,8 @@ Core middleware:
 - `src/modules/auth/*`
 - Endpoints:
   - `POST /api/auth/signin`
+  - `POST /api/auth/otp/send`
+  - `POST /api/auth/otp/verify`
   - `POST /api/auth/signup`
 
 ### Me
@@ -172,6 +174,7 @@ Latest major additive migrations:
 - `021_loan_workflow.sql`
 - `022_loan_workflow_rls.sql`
 - `023_performance_reliability.sql`
+- `025_auth_otp_challenges.sql`
 
 ## Operational Scripts
 

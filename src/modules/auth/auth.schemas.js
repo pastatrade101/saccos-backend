@@ -2,7 +2,27 @@ const { z } = require("zod");
 
 const signInSchema = z.object({
     email: z.string().email(),
-    password: z.string().min(8)
+    password: z.string().min(8),
+    challenge_id: z.string().uuid().optional().nullable(),
+    otp_code: z
+        .string()
+        .trim()
+        .regex(/^\d{6}$/)
+        .optional()
+        .nullable()
+});
+
+const sendOtpSchema = z.object({
+    email: z.string().email(),
+    password: z.string().min(8),
+    challenge_id: z.string().uuid().optional().nullable()
+});
+
+const verifyOtpSchema = z.object({
+    email: z.string().email(),
+    password: z.string().min(8),
+    challenge_id: z.string().uuid(),
+    otp_code: z.string().trim().regex(/^\d{6}$/)
 });
 
 const inviteUserSchema = z.object({
@@ -33,5 +53,7 @@ const inviteUserSchema = z.object({
 
 module.exports = {
     signInSchema,
+    sendOtpSchema,
+    verifyOtpSchema,
     inviteUserSchema
 };

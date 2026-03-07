@@ -18,6 +18,21 @@ const envSchema = z.object({
     HIGH_VALUE_THRESHOLD_TZS: z.coerce.number().positive().default(2000000),
     OUT_OF_HOURS_START: z.string().default("18:00"),
     OUT_OF_HOURS_END: z.string().default("07:00"),
+    OTP_REQUIRED_ON_SIGNIN: z
+        .string()
+        .optional()
+        .transform((value) => value === "true"),
+    OTP_CODE_TTL_SECONDS: z.coerce.number().int().positive().default(300),
+    OTP_MAX_VERIFY_ATTEMPTS: z.coerce.number().int().positive().default(5),
+    OTP_SEND_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(5),
+    OTP_SEND_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(900000),
+    OTP_RESEND_MAX: z.coerce.number().int().nonnegative().default(3),
+    OTP_SMS_URL: z.string().url().default("https://messaging-service.co.tz/api/sms/v1/text/single"),
+    OTP_SMS_FROM: z.string().min(1).max(20).default("N-SMS"),
+    OTP_SMS_AUTHORIZATION: z.string().min(1).optional(),
+    OTP_SMS_BASIC_USERNAME: z.string().min(1).optional(),
+    OTP_SMS_BASIC_PASSWORD: z.string().min(1).optional(),
+    OTP_HASH_SECRET: z.string().min(16).optional(),
     SSL_ENABLED: z
         .string()
         .optional()
@@ -56,6 +71,18 @@ module.exports = {
     highValueThresholdTzs: env.HIGH_VALUE_THRESHOLD_TZS,
     outOfHoursStart: env.OUT_OF_HOURS_START,
     outOfHoursEnd: env.OUT_OF_HOURS_END,
+    otpRequiredOnSignIn: env.OTP_REQUIRED_ON_SIGNIN,
+    otpCodeTtlSeconds: env.OTP_CODE_TTL_SECONDS,
+    otpMaxVerifyAttempts: env.OTP_MAX_VERIFY_ATTEMPTS,
+    otpSendRateLimitMax: env.OTP_SEND_RATE_LIMIT_MAX,
+    otpSendRateLimitWindowMs: env.OTP_SEND_RATE_LIMIT_WINDOW_MS,
+    otpResendMax: env.OTP_RESEND_MAX,
+    otpSmsUrl: env.OTP_SMS_URL,
+    otpSmsFrom: env.OTP_SMS_FROM,
+    otpSmsAuthorization: env.OTP_SMS_AUTHORIZATION || "",
+    otpSmsBasicUsername: env.OTP_SMS_BASIC_USERNAME || "",
+    otpSmsBasicPassword: env.OTP_SMS_BASIC_PASSWORD || "",
+    otpHashSecret: env.OTP_HASH_SECRET || env.SUPABASE_SERVICE_ROLE_KEY,
     sslEnabled: env.SSL_ENABLED,
     logLevel: env.LOG_LEVEL
 };

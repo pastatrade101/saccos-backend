@@ -6,6 +6,16 @@ exports.signIn = asyncHandler(async (req, res) => {
     res.json(result);
 });
 
+exports.sendOtp = asyncHandler(async (req, res) => {
+    const result = await authService.sendSignInOtp(req.validated.body);
+    res.json(result);
+});
+
+exports.verifyOtp = asyncHandler(async (req, res) => {
+    const result = await authService.verifySignInOtp(req.validated.body);
+    res.json(result);
+});
+
 exports.signUp = asyncHandler(async (req, res) => {
     const result = await authService.inviteUser({
         actor: req.auth,

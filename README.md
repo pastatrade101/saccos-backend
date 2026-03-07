@@ -115,6 +115,7 @@ Run in this sequence:
 23. `021_loan_workflow.sql`
 24. `022_loan_workflow_rls.sql`
 25. `023_performance_reliability.sql`
+26. `025_auth_otp_challenges.sql`
 
 Important:
 

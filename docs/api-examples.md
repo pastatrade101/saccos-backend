@@ -11,7 +11,48 @@ All protected endpoints require:
 ```json
 {
   "email": "owner.demo@saccos.local",
-  "password": "StrongPassword123!"
+  "password": "StrongPassword123!",
+  "challenge_id": "optional-otp-challenge-id",
+  "otp_code": "optional-6-digit-code"
+}
+```
+
+When OTP is enabled and `challenge_id` / `otp_code` are missing, API returns:
+
+```json
+{
+  "error": {
+    "code": "OTP_REQUIRED",
+    "message": "One-time verification code required.",
+    "details": {
+      "challenge_id": "2f9f3f13-3f74-4af5-ae75-08cbd4b4748f",
+      "expires_at": "2026-03-07T12:30:00.000Z",
+      "destination_hint": "2557******45",
+      "resend_count": 0,
+      "resend_remaining": 3
+    }
+  }
+}
+```
+
+### `POST /api/auth/otp/send`
+
+```json
+{
+  "email": "owner.demo@saccos.local",
+  "password": "StrongPassword123!",
+  "challenge_id": "optional-existing-challenge-id"
+}
+```
+
+### `POST /api/auth/otp/verify`
+
+```json
+{
+  "email": "owner.demo@saccos.local",
+  "password": "StrongPassword123!",
+  "challenge_id": "2f9f3f13-3f74-4af5-ae75-08cbd4b4748f",
+  "otp_code": "123456"
 }
 ```
 

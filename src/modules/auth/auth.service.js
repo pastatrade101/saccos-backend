@@ -1,10 +1,12 @@
 const { adminSupabase, publicSupabase } = require("../../config/supabase");
+const env = require("../../config/env");
 const AppError = require("../../utils/app-error");
 const { getUserProfile } = require("../../services/user-context.service");
 const { logAudit } = require("../../services/audit.service");
 const { assertTenantAccess } = require("../../services/user-context.service");
 const { ensureBranchAssignments } = require("../../services/branch-assignment.service");
 const { saveCredentialHandoff } = require("../../services/credential-handoff.service");
+const { sendOtpChallenge, verifyOtpChallenge } = require("../../services/otp.service");
 
 function generateTemporaryPassword() {
     const lowers = "abcdefghjkmnpqrstuvwxyz";
@@ -27,6 +29,95 @@ function generateTemporaryPassword() {
 }
 
 async function signIn(payload) {
+    const auth = await authenticatePassword(payload);
+
+    if (env.otpRequiredOnSignIn) {
+        if (!auth.profile?.phone) {
+            throw new AppError(
+                400,
+                "OTP_PHONE_NOT_AVAILABLE",
+                "A verified phone number is required for OTP sign-in."
+            );
+        }
+
+        if (!payload.challenge_id || !payload.otp_code) {
+            throw new AppError(
+                401,
+                "OTP_REQUIRED",
+                "One-time verification code required.",
+                { otp_required: true }
+            );
+        }
+
+        await verifyOtpChallenge({
+            challengeId: payload.challenge_id,
+            userId: auth.user.id,
+            purpose: "signin",
+            otpCode: payload.otp_code
+        });
+    }
+
+    await adminSupabase
+        .from("user_profiles")
+        .update({
+            last_login_at: new Date().toISOString()
+        })
+        .eq("user_id", auth.user.id);
+
+    return {
+        session: auth.session,
+        user: auth.user,
+        profile: auth.profile
+    };
+}
+
+async function sendSignInOtp(payload) {
+    if (!env.otpRequiredOnSignIn) {
+        throw new AppError(
+            400,
+            "OTP_NOT_ENABLED",
+            "OTP sign-in is not enabled in this environment."
+        );
+    }
+
+    const auth = await authenticatePassword(payload);
+
+    if (!auth.profile?.phone) {
+        throw new AppError(
+            400,
+            "OTP_PHONE_NOT_AVAILABLE",
+            "A verified phone number is required for OTP sign-in."
+        );
+    }
+
+    return sendOtpChallenge({
+        userId: auth.user.id,
+        phone: auth.profile.phone,
+        purpose: "signin",
+        challengeId: payload.challenge_id || null
+    });
+}
+
+async function verifySignInOtp(payload) {
+    if (!env.otpRequiredOnSignIn) {
+        throw new AppError(
+            400,
+            "OTP_NOT_ENABLED",
+            "OTP sign-in is not enabled in this environment."
+        );
+    }
+
+    const auth = await authenticatePassword(payload);
+
+    return verifyOtpChallenge({
+        challengeId: payload.challenge_id,
+        userId: auth.user.id,
+        purpose: "signin",
+        otpCode: payload.otp_code
+    });
+}
+
+async function authenticatePassword(payload) {
     const { data, error } = await publicSupabase.auth.signInWithPassword({
         email: payload.email,
         password: payload.password
@@ -41,13 +132,6 @@ async function signIn(payload) {
     if (!profile) {
         throw new AppError(403, "PROFILE_NOT_FOUND", "User profile is not provisioned.");
     }
-
-    await adminSupabase
-        .from("user_profiles")
-        .update({
-            last_login_at: new Date().toISOString()
-        })
-        .eq("user_id", data.user.id);
 
     return {
         session: data.session,
@@ -158,5 +242,7 @@ async function inviteUser({ actor, payload }) {
 
 module.exports = {
     signIn,
+    sendSignInOtp,
+    verifySignInOtp,
     inviteUser
 };
