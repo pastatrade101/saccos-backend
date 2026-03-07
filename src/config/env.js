@@ -1,6 +1,8 @@
 const { z } = require("zod");
 const { normalizeOrigin } = require("../utils/cors");
 
+const isProductionEnv = String(process.env.NODE_ENV || "").trim().toLowerCase() === "production";
+
 function parseBooleanEnv(value, defaultValue = false) {
     if (typeof value === "undefined" || value === null) {
         return defaultValue;
@@ -47,7 +49,7 @@ const envSchema = z.object({
     OTP_REQUIRED_ON_SIGNIN: z
         .string()
         .optional()
-        .transform((value) => parseBooleanEnv(value, false)),
+        .transform((value) => parseBooleanEnv(value, isProductionEnv)),
     OTP_CODE_TTL_SECONDS: z.coerce.number().int().positive().default(300),
     OTP_MAX_VERIFY_ATTEMPTS: z.coerce.number().int().positive().default(5),
     OTP_SEND_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(5),
