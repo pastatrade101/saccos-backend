@@ -1,6 +1,32 @@
 const { z } = require("zod");
 const { normalizeOrigin } = require("../utils/cors");
 
+function parseBooleanEnv(value, defaultValue = false) {
+    if (typeof value === "undefined" || value === null) {
+        return defaultValue;
+    }
+
+    let normalized = String(value).trim();
+
+    if (!normalized) {
+        return defaultValue;
+    }
+
+    if (
+        (normalized.startsWith("\"") && normalized.endsWith("\""))
+        || (normalized.startsWith("'") && normalized.endsWith("'"))
+    ) {
+        normalized = normalized.slice(1, -1).trim();
+    }
+
+    const commentIndex = normalized.indexOf("#");
+    if (commentIndex >= 0) {
+        normalized = normalized.slice(0, commentIndex).trim();
+    }
+
+    return ["true", "1", "yes", "on"].includes(normalized.toLowerCase());
+}
+
 const envSchema = z.object({
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
     PORT: z.coerce.number().int().positive().default(5000),
@@ -21,7 +47,7 @@ const envSchema = z.object({
     OTP_REQUIRED_ON_SIGNIN: z
         .string()
         .optional()
-        .transform((value) => value === "true"),
+        .transform((value) => parseBooleanEnv(value, false)),
     OTP_CODE_TTL_SECONDS: z.coerce.number().int().positive().default(300),
     OTP_MAX_VERIFY_ATTEMPTS: z.coerce.number().int().positive().default(5),
     OTP_SEND_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(5),
@@ -36,7 +62,7 @@ const envSchema = z.object({
     SSL_ENABLED: z
         .string()
         .optional()
-        .transform((value) => value === "true"),
+        .transform((value) => parseBooleanEnv(value, false)),
     LOG_LEVEL: z.string().default("info")
 });
 

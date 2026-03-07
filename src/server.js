@@ -21,6 +21,7 @@ server.on("error", (error) => {
 
 server.listen(env.port, env.host, () => {
     console.log(`SACCOS backend listening on http://${env.host}:${env.port}`);
+    console.log(`OTP sign-in enforcement: ${env.otpRequiredOnSignIn ? "ENABLED" : "DISABLED"}`);
 });
 
 function shutdown(signal) {
