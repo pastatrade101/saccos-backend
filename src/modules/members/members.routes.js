@@ -12,6 +12,7 @@ const {
     updateMemberSchema,
     createMemberLoginSchema,
     resetMemberPasswordSchema,
+    bulkDeleteMembersSchema,
     listMembersQuerySchema,
     listMemberAccountsQuerySchema
 } = require("./members.schemas");
@@ -70,6 +71,12 @@ router.patch(
     authorize([ROLES.BRANCH_MANAGER], { allowInternalOps: false }),
     validate(updateMemberSchema),
     controller.updateMember
+);
+router.post(
+    "/bulk-delete",
+    authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER], { allowInternalOps: false }),
+    validate(bulkDeleteMembersSchema),
+    controller.bulkDeleteMembers
 );
 router.post(
     "/:id/create-login",

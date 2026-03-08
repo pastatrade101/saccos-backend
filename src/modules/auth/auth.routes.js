@@ -10,7 +10,8 @@ const {
     inviteUserSchema,
     signInSchema,
     sendOtpSchema,
-    verifyOtpSchema
+    verifyOtpSchema,
+    sendPasswordSetupLinkSchema
 } = require("./auth.schemas");
 
 const router = express.Router();
@@ -18,6 +19,7 @@ const router = express.Router();
 router.post("/signin", validate(signInSchema), controller.signIn);
 router.post("/otp/send", validate(sendOtpSchema), controller.sendOtp);
 router.post("/otp/verify", validate(verifyOtpSchema), controller.verifyOtp);
+router.post("/password-setup/link/send", validate(sendPasswordSetupLinkSchema), controller.sendPasswordSetupLink);
 router.post(
     "/signup",
     auth,

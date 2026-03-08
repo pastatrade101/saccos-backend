@@ -1088,6 +1088,36 @@ async function deleteMember(actor, memberId) {
     return updated;
 }
 
+async function bulkDeleteMembers(actor, payload) {
+    const memberIds = [...new Set(payload.member_ids || [])];
+    const deleted_members = [];
+    const failed_members = [];
+
+    for (const memberId of memberIds) {
+        try {
+            const deleted = await deleteMember(actor, memberId);
+            deleted_members.push({
+                id: deleted.id,
+                full_name: deleted.full_name
+            });
+        } catch (error) {
+            failed_members.push({
+                id: memberId,
+                code: error?.code || "MEMBER_DELETE_FAILED",
+                message: error?.message || "Unable to delete member."
+            });
+        }
+    }
+
+    return {
+        requested: memberIds.length,
+        deleted_count: deleted_members.length,
+        failed_count: failed_members.length,
+        deleted_members,
+        failed_members
+    };
+}
+
 async function createMemberLogin(actor, memberId, payload) {
     const member = await getMember(actor, memberId);
     const result = await provisionMemberLogin(actor, member, {
@@ -1245,6 +1275,7 @@ module.exports = {
     getMember,
     updateMember,
     deleteMember,
+    bulkDeleteMembers,
     createMemberLogin,
     resetMemberPassword,
     ensureMemberAccounts,

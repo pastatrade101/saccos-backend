@@ -61,6 +61,7 @@ const envSchema = z.object({
     OTP_SMS_BASIC_USERNAME: z.string().min(1).optional(),
     OTP_SMS_BASIC_PASSWORD: z.string().min(1).optional(),
     OTP_HASH_SECRET: z.string().min(16).optional(),
+    PASSWORD_SETUP_REDIRECT_URL: z.string().url().optional(),
     SSL_ENABLED: z
         .string()
         .optional()
@@ -111,6 +112,7 @@ module.exports = {
     otpSmsBasicUsername: env.OTP_SMS_BASIC_USERNAME || "",
     otpSmsBasicPassword: env.OTP_SMS_BASIC_PASSWORD || "",
     otpHashSecret: env.OTP_HASH_SECRET || env.SUPABASE_SERVICE_ROLE_KEY,
+    passwordSetupRedirectUrl: env.PASSWORD_SETUP_REDIRECT_URL || "",
     sslEnabled: env.SSL_ENABLED,
     logLevel: env.LOG_LEVEL
 };

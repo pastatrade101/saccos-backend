@@ -15,7 +15,8 @@ const signInSchema = z.object({
 const sendOtpSchema = z.object({
     email: z.string().email(),
     password: z.string().min(8),
-    challenge_id: z.string().uuid().optional().nullable()
+    challenge_id: z.string().uuid().optional().nullable(),
+    phone: z.string().trim().min(9).max(20).optional().nullable()
 });
 
 const verifyOtpSchema = z.object({
@@ -23,6 +24,10 @@ const verifyOtpSchema = z.object({
     password: z.string().min(8),
     challenge_id: z.string().uuid(),
     otp_code: z.string().trim().regex(/^\d{6}$/)
+});
+
+const sendPasswordSetupLinkSchema = z.object({
+    email: z.string().email()
 });
 
 const inviteUserSchema = z.object({
@@ -55,5 +60,6 @@ module.exports = {
     signInSchema,
     sendOtpSchema,
     verifyOtpSchema,
+    sendPasswordSetupLinkSchema,
     inviteUserSchema
 };

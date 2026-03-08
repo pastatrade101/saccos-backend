@@ -49,6 +49,11 @@ exports.deleteMember = asyncHandler(async (req, res) => {
     res.json({ data: member });
 });
 
+exports.bulkDeleteMembers = asyncHandler(async (req, res) => {
+    const result = await memberService.bulkDeleteMembers(req.auth, req.validated.body);
+    res.json({ data: result });
+});
+
 exports.createMemberLogin = asyncHandler(async (req, res) => {
     const result = await memberService.createMemberLogin(req.auth, req.params.id, req.validated.body);
     res.status(201).json({ data: result });

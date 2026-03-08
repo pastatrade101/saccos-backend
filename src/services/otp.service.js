@@ -332,6 +332,7 @@ async function verifyOtpChallenge({
 }
 
 module.exports = {
+    normalizePhone,
     sendOtpChallenge,
     verifyOtpChallenge
 };

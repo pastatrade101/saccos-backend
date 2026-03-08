@@ -51,6 +51,14 @@ function normalizeString(value) {
     return trimmed.length ? trimmed : null;
 }
 
+function isValidEmailFormat(value) {
+    if (!value) {
+        return false;
+    }
+
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value).trim().toLowerCase());
+}
+
 function parseMoney(value) {
     const normalized = normalizeString(value);
 
@@ -843,6 +851,10 @@ function validatePreviewRow(normalizedRow, options) {
         errors.push("email is required when create_portal_account is enabled.");
     }
 
+    if (options.create_portal_account && normalizedRow.email && !isValidEmailFormat(normalizedRow.email)) {
+        errors.push("email must be a valid email address when create_portal_account is enabled.");
+    }
+
     try {
         parseMoney(normalizedRow.opening_savings);
     } catch (error) {
@@ -988,6 +1000,10 @@ async function runMemberImportJob({ jobId, actor, fileBuffer, options, requestMe
                     throw new AppError(400, "EMAIL_REQUIRED", "email is required when create_portal_account is enabled.");
                 }
 
+                if (options.create_portal_account && !isValidEmailFormat(email)) {
+                    throw new AppError(400, "EMAIL_INVALID", "email must be a valid email address when create_portal_account is enabled.");
+                }
+
                 const branchId = await resolveBranch({
                     tenantId,
                     actor,
@@ -1004,6 +1020,73 @@ async function runMemberImportJob({ jobId, actor, fileBuffer, options, requestMe
                         full_name: fullName
                     }
                 });
+
+                let authUserId = upserted.member.user_id || null;
+
+                if (options.create_portal_account) {
+                    assertRateLimit({
+                        key: `member-import-auth:${actor.user.id}`,
+                        max: env.authUserCreateRateLimitMax,
+                        windowMs: env.authUserCreateRateLimitWindowMs,
+                        code: "AUTH_USER_CREATE_RATE_LIMIT",
+                        message: "Too many member portal accounts are being created. Try again later."
+                    });
+
+                    const tempPassword = generatePassword();
+
+                    try {
+                        const loginResult = await provisionMemberLogin(actor, upserted.member, {
+                            email,
+                            send_invite: false,
+                            password: tempPassword,
+                            branch_id: branchId,
+                            must_change_password: true
+                        });
+
+                        authUserId = loginResult.user.id;
+
+                        if (!loginResult.already_exists) {
+                            credentialsRows.push({
+                                full_name: upserted.member.full_name,
+                                email,
+                                member_no: upserted.member.member_no || "",
+                                temp_password: tempPassword
+                            });
+                        }
+
+                        await logAudit({
+                            tenantId,
+                            actorUserId: actor.user.id,
+                            table: "user_profiles",
+                            entityType: "user_profile",
+                            entityId: authUserId,
+                            action: "MEMBER_PORTAL_CREATED",
+                            ip: requestMeta.ip,
+                            userAgent: requestMeta.userAgent,
+                            afterData: {
+                                member_id: upserted.member.id,
+                                email
+                            }
+                        });
+                    } catch (error) {
+                        // For newly created members, rollback member shell records when login provisioning fails.
+                        if (upserted.created) {
+                            await adminSupabase
+                                .from("member_accounts")
+                                .delete()
+                                .eq("tenant_id", tenantId)
+                                .eq("member_id", upserted.member.id);
+
+                            await adminSupabase
+                                .from("members")
+                                .delete()
+                                .eq("tenant_id", tenantId)
+                                .eq("id", upserted.member.id);
+                        }
+
+                        throw error;
+                    }
+                }
 
                 const openingSavings = parseMoney(normalizedRow.opening_savings);
                 const openingShares = parseMoney(normalizedRow.opening_shares);
@@ -1043,53 +1126,6 @@ async function runMemberImportJob({ jobId, actor, fileBuffer, options, requestMe
                     row: normalizedRow,
                     loanId: importedLoan?.loan_id || null
                 });
-
-                let authUserId = upserted.member.user_id || null;
-
-                if (options.create_portal_account) {
-                    assertRateLimit({
-                        key: `member-import-auth:${actor.user.id}`,
-                        max: env.authUserCreateRateLimitMax,
-                        windowMs: env.authUserCreateRateLimitWindowMs,
-                        code: "AUTH_USER_CREATE_RATE_LIMIT",
-                        message: "Too many member portal accounts are being created. Try again later."
-                    });
-
-                    const tempPassword = generatePassword();
-                    const loginResult = await provisionMemberLogin(actor, upserted.member, {
-                        email,
-                        send_invite: false,
-                        password: tempPassword,
-                        branch_id: branchId,
-                        must_change_password: true
-                    });
-
-                    authUserId = loginResult.user.id;
-
-                    if (!loginResult.already_exists) {
-                        credentialsRows.push({
-                            full_name: upserted.member.full_name,
-                            email,
-                            member_no: upserted.member.member_no || "",
-                            temp_password: tempPassword
-                        });
-                    }
-
-                    await logAudit({
-                        tenantId,
-                        actorUserId: actor.user.id,
-                        table: "user_profiles",
-                        entityType: "user_profile",
-                        entityId: authUserId,
-                        action: "MEMBER_PORTAL_CREATED",
-                        ip: requestMeta.ip,
-                        userAgent: requestMeta.userAgent,
-                        afterData: {
-                            member_id: upserted.member.id,
-                            email
-                        }
-                    });
-                }
 
                 await insertJobRow({
                     job_id: jobId,

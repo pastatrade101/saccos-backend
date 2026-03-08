@@ -61,6 +61,10 @@ const resetMemberPasswordSchema = z.object({
     password: z.string().min(8).max(128).optional().nullable()
 });
 
+const bulkDeleteMembersSchema = z.object({
+    member_ids: z.array(z.string().uuid()).min(1).max(200)
+});
+
 const paginationSchema = {
     page: z.coerce.number().int().positive().optional(),
     limit: z.coerce.number().int().positive().max(500).optional()
@@ -89,6 +93,7 @@ module.exports = {
     updateMemberSchema,
     createMemberLoginSchema,
     resetMemberPasswordSchema,
+    bulkDeleteMembersSchema,
     listMembersQuerySchema,
     listMemberAccountsQuerySchema
 };
