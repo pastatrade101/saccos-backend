@@ -48,11 +48,38 @@ function buildPasswordSetupSms(linkUrl) {
     return `Complete your SMART SACCOS password setup: ${linkUrl}`;
 }
 
+function normalizePasswordSetupRedirectUrl(redirectTo) {
+    if (!redirectTo) {
+        return null;
+    }
+
+    let normalized = String(redirectTo).trim();
+
+    // Common operator mistake: duplicated scheme such as https://https://domain/path
+    normalized = normalized
+        .replace(/^https:\/\/https:\/\//i, "https://")
+        .replace(/^http:\/\/http:\/\//i, "http://");
+
+    try {
+        const parsed = new URL(normalized);
+        parsed.pathname = parsed.pathname.replace(/\/{2,}/g, "/");
+        return parsed.toString();
+    } catch {
+        return redirectTo;
+    }
+}
+
 function buildPasswordSetupUrl({ redirectTo, hashedToken, actionLink }) {
-    if (redirectTo && hashedToken) {
+    const normalizedRedirectUrl = normalizePasswordSetupRedirectUrl(redirectTo);
+
+    if (normalizedRedirectUrl && hashedToken) {
         try {
-            const url = new URL(redirectTo);
-            url.searchParams.set("token_hash", hashedToken);
+            const url = new URL(normalizedRedirectUrl);
+            // Avoid underscore in query key because some SMS clients/gateways
+            // may render "_" as a different symbol (for example "§").
+            url.searchParams.set("tokenhash", hashedToken);
+            // Keep a compact alias for extra resilience on some handsets.
+            url.searchParams.set("th", hashedToken);
             url.searchParams.set("type", "recovery");
             return url.toString();
         } catch {

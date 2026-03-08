@@ -13,22 +13,22 @@ function normalizePhone(phone) {
         .replace(/-/g, "")
         .replace(/^\+/, "");
 
-    if (/^0\d{9}$/.test(normalized)) {
+    if (/^0[67]\d{8}$/.test(normalized)) {
         return `255${normalized.slice(1)}`;
     }
 
-    if (/^7\d{8}$/.test(normalized)) {
+    if (/^[67]\d{8}$/.test(normalized)) {
         return `255${normalized}`;
     }
 
-    if (/^2557\d{8}$/.test(normalized)) {
+    if (/^255[67]\d{8}$/.test(normalized)) {
         return normalized;
     }
 
     throw new AppError(
         400,
         "OTP_PHONE_INVALID",
-        "Phone number must be a valid Tanzania mobile number in 2557XXXXXXXX format."
+        "Phone number must be a valid Tanzania mobile number (06/07 local or 2556/2557 international format)."
     );
 }
 
