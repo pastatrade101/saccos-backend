@@ -199,7 +199,8 @@ async function createUser(actor, payload) {
         actor,
         payload: {
             ...payload,
-            tenant_id: tenantId
+            tenant_id: tenantId,
+            invite_via_sms: Boolean(payload.send_invite)
         }
     });
 }

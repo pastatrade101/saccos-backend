@@ -1,5 +1,7 @@
 const { z } = require("zod");
 
+const tanzaniaPhoneRegex = /^(?:\+?255|0)?[67]\d{8}$/;
+
 const createUserSchema = z.object({
     tenant_id: z.string().uuid().optional(),
     email: z.string().email(),
@@ -10,6 +12,22 @@ const createUserSchema = z.object({
     send_invite: z.boolean().default(true),
     password: z.string().min(8).max(128).optional().nullable()
 }).superRefine((value, ctx) => {
+    if (value.send_invite && !value.phone) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Phone is required when invite mode is enabled (SMS setup link).",
+            path: ["phone"]
+        });
+    }
+
+    if (value.send_invite && value.phone && !tanzaniaPhoneRegex.test(value.phone.trim())) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Use a valid Tanzania phone (06/07 local or +2556/+2557).",
+            path: ["phone"]
+        });
+    }
+
     if (!value.send_invite && value.password && value.password.length < 8) {
         ctx.addIssue({
             code: z.ZodIssueCode.custom,

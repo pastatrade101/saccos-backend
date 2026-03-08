@@ -349,19 +349,36 @@ async function inviteUser({ actor, payload }) {
 
     assertTenantAccess({ auth: actor }, tenantId);
 
+    const useSmsSetupLink = Boolean(payload.send_invite && payload.invite_via_sms);
+
     const temporaryPassword = !payload.send_invite && !payload.password
         ? generateTemporaryPassword()
         : null;
+    const hiddenInvitePassword = useSmsSetupLink ? generateTemporaryPassword() : null;
 
     const authOperation = payload.send_invite
-        ? adminSupabase.auth.admin.inviteUserByEmail(payload.email, {
-            data: {
-                full_name: payload.full_name,
-                phone: payload.phone,
-                tenant_id: tenantId,
-                role: payload.role
-            }
-        })
+        ? useSmsSetupLink
+            ? adminSupabase.auth.admin.createUser({
+                email: payload.email,
+                password: hiddenInvitePassword,
+                email_confirm: true,
+                user_metadata: {
+                    full_name: payload.full_name,
+                    phone: payload.phone
+                },
+                app_metadata: {
+                    tenant_id: tenantId,
+                    role: payload.role
+                }
+            })
+            : adminSupabase.auth.admin.inviteUserByEmail(payload.email, {
+                data: {
+                    full_name: payload.full_name,
+                    phone: payload.phone,
+                    tenant_id: tenantId,
+                    role: payload.role
+                }
+            })
         : adminSupabase.auth.admin.createUser({
             email: payload.email,
             password: payload.password || temporaryPassword,
@@ -413,6 +430,12 @@ async function inviteUser({ actor, payload }) {
         });
     }
 
+    let destinationHint = null;
+    if (payload.send_invite && useSmsSetupLink) {
+        const smsResult = await sendPasswordSetupLink({ email: payload.email });
+        destinationHint = smsResult.destination_hint || null;
+    }
+
     if (!payload.send_invite && (temporaryPassword || payload.password)) {
         await saveCredentialHandoff({
             tenantId,
@@ -436,7 +459,11 @@ async function inviteUser({ actor, payload }) {
     return {
         user: data.user,
         profile,
-        temporary_password: temporaryPassword
+        temporary_password: temporaryPassword,
+        invite_delivery: payload.send_invite
+            ? (useSmsSetupLink ? "sms_link" : "email")
+            : "password",
+        destination_hint: destinationHint
     };
 }
 
