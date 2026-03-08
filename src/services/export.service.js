@@ -1,4 +1,5 @@
 const { adminSupabase } = require("../config/supabase");
+const env = require("../config/env");
 const AppError = require("../utils/app-error");
 const { toCsv } = require("../utils/csv");
 const { buildSimplePdf } = require("../utils/pdf");
@@ -31,20 +32,23 @@ async function assertExportQuota(subscription, tenantId) {
     }
 }
 
-function sendExport(res, { rows, format, filename, title }) {
+async function sendExport(res, { rows, format, filename, title, tenantName }) {
+    const safeRows = Array.isArray(rows) ? rows : [];
+
     if (format === "pdf") {
-        const lines = rows.map((row) =>
-            Object.entries(row)
-                .map(([key, value]) => `${key}: ${value ?? ""}`)
-                .join(" | ")
-        );
-        const buffer = buildSimplePdf(title, lines);
+        const buffer = await buildSimplePdf(title, safeRows, {
+            brandName: env.reportBrandName,
+            subtitle: env.reportBrandSubtitle,
+            generatedAt: new Date().toISOString(),
+            tenantName: tenantName || "N/A",
+            logoPath: env.reportBrandLogoPath || ""
+        });
         res.setHeader("Content-Type", "application/pdf");
         res.setHeader("Content-Disposition", `attachment; filename="${filename}.pdf"`);
         return res.send(buffer);
     }
 
-    const csv = toCsv(rows);
+    const csv = toCsv(safeRows);
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}.csv"`);
     return res.send(csv);

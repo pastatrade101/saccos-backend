@@ -1,26 +1,51 @@
 const asyncHandler = require("../../utils/async-handler");
+const { adminSupabase } = require("../../config/supabase");
 const { sendExport, assertExportQuota } = require("../../services/export.service");
 const { logAudit } = require("../../services/audit.service");
 const reportService = require("./reports.service");
 
+async function resolveTenantName(tenantId) {
+    if (!tenantId) {
+        return null;
+    }
+
+    const { data, error } = await adminSupabase
+        .from("tenants")
+        .select("name")
+        .eq("id", tenantId)
+        .is("deleted_at", null)
+        .single();
+
+    if (error || !data) {
+        return null;
+    }
+
+    return data.name || null;
+}
+
 async function runExport(req, res, loader, action) {
     const report = await loader(req.auth, req.validated.query);
-    await assertExportQuota(req.subscription, req.tenantId || req.auth.tenantId);
+    const rowCount = Array.isArray(report?.rows) ? report.rows.length : 0;
+    const tenantId = req.validated?.query?.tenant_id || req.tenantId || req.auth.tenantId;
+    const tenantName = await resolveTenantName(tenantId);
+
+    await assertExportQuota(req.subscription, tenantId);
     await logAudit({
-        tenantId: req.tenantId || req.auth.tenantId,
+        tenantId,
         userId: req.auth.user.id,
         table: "reports",
         action,
         afterData: {
             format: req.validated.query.format,
-            row_count: report.rows.length
+            row_count: rowCount
         }
     });
     return sendExport(res, {
         rows: report.rows,
         format: req.validated.query.format,
         filename: report.filename,
-        title: report.title
+        title: report.title,
+        tenantName
     });
 }
 

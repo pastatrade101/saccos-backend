@@ -21,7 +21,7 @@ router.get(
 );
 router.get(
     "/trial-balance/export",
-    authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER, ROLES.AUDITOR], { allowInternalOps: false }),
+    authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER, ROLES.LOAN_OFFICER, ROLES.AUDITOR], { allowInternalOps: false }),
     requireFeature("advanced_reports"),
     validate(exportSchema, "query"),
     controller.trialBalance

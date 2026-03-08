@@ -73,9 +73,40 @@ function escapeCsvValue(value) {
     return text;
 }
 
-function toCsv(headers, rows) {
+function inferHeaders(rows) {
+    const headers = [];
+    const seen = new Set();
+
+    rows.forEach((row) => {
+        if (!row || typeof row !== "object" || Array.isArray(row)) {
+            return;
+        }
+
+        Object.keys(row).forEach((key) => {
+            if (!seen.has(key)) {
+                seen.add(key);
+                headers.push(key);
+            }
+        });
+    });
+
+    return headers;
+}
+
+function toCsv(headersOrRows, maybeRows) {
+    const rows = Array.isArray(maybeRows)
+        ? maybeRows
+        : (Array.isArray(headersOrRows) ? headersOrRows : []);
+    const headers = Array.isArray(maybeRows)
+        ? (Array.isArray(headersOrRows) ? headersOrRows : [])
+        : inferHeaders(rows);
+
+    if (!headers.length) {
+        return "";
+    }
+
     const headerLine = headers.map(escapeCsvValue).join(",");
-    const dataLines = rows.map((row) => headers.map((header) => escapeCsvValue(row[header])).join(","));
+    const dataLines = rows.map((row) => headers.map((header) => escapeCsvValue(row?.[header])).join(","));
     return [headerLine, ...dataLines].join("\n");
 }
 

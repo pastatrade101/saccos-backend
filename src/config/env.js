@@ -62,6 +62,9 @@ const envSchema = z.object({
     OTP_SMS_BASIC_PASSWORD: z.string().min(1).optional(),
     OTP_HASH_SECRET: z.string().min(16).optional(),
     PASSWORD_SETUP_REDIRECT_URL: z.string().url().optional(),
+    REPORT_BRAND_NAME: z.string().min(1).default("SACCOS System"),
+    REPORT_BRAND_SUBTITLE: z.string().min(1).default("Official Financial Report"),
+    REPORT_BRAND_LOGO_PATH: z.string().optional(),
     SSL_ENABLED: z
         .string()
         .optional()
@@ -113,6 +116,9 @@ module.exports = {
     otpSmsBasicPassword: env.OTP_SMS_BASIC_PASSWORD || "",
     otpHashSecret: env.OTP_HASH_SECRET || env.SUPABASE_SERVICE_ROLE_KEY,
     passwordSetupRedirectUrl: env.PASSWORD_SETUP_REDIRECT_URL || "",
+    reportBrandName: env.REPORT_BRAND_NAME,
+    reportBrandSubtitle: env.REPORT_BRAND_SUBTITLE,
+    reportBrandLogoPath: env.REPORT_BRAND_LOGO_PATH || "",
     sslEnabled: env.SSL_ENABLED,
     logLevel: env.LOG_LEVEL
 };
