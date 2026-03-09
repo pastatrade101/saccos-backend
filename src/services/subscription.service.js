@@ -10,6 +10,7 @@ const FEATURE_LIMIT_MAP = {
 };
 const SUBSCRIPTION_CACHE_TTL_MS = Math.max(0, Number(process.env.SUBSCRIPTION_CACHE_TTL_MS || 15000));
 const subscriptionStatusCache = new Map();
+const subscriptionStatusInFlight = new Map();
 
 function getCachedSubscriptionStatus(tenantId) {
     if (!SUBSCRIPTION_CACHE_TTL_MS) {
@@ -43,10 +44,30 @@ function setCachedSubscriptionStatus(tenantId, value) {
 function clearSubscriptionStatusCache(tenantId) {
     if (tenantId) {
         subscriptionStatusCache.delete(tenantId);
+        subscriptionStatusInFlight.delete(tenantId);
         return;
     }
 
     subscriptionStatusCache.clear();
+    subscriptionStatusInFlight.clear();
+}
+
+function loadSubscriptionStatusOnce(tenantId, loader) {
+    const existing = subscriptionStatusInFlight.get(tenantId);
+    if (existing) {
+        return existing;
+    }
+
+    const task = (async () => {
+        try {
+            return await loader();
+        } finally {
+            subscriptionStatusInFlight.delete(tenantId);
+        }
+    })();
+
+    subscriptionStatusInFlight.set(tenantId, task);
+    return task;
 }
 
 function parseFeatureValue(feature) {
@@ -213,14 +234,7 @@ async function getTenantEntitlements(tenantId) {
     return buildEntitlements(subscription.plans?.code, features);
 }
 
-async function getSubscriptionStatus(tenantId, options = {}) {
-    if (!options.bypassCache) {
-        const cached = getCachedSubscriptionStatus(tenantId);
-        if (cached) {
-            return cached;
-        }
-    }
-
+async function resolveSubscriptionStatus(tenantId) {
     const subscription = await getLatestTenantSubscription(tenantId);
 
     if (!subscription) {
@@ -264,6 +278,19 @@ async function getSubscriptionStatus(tenantId, options = {}) {
     );
     setCachedSubscriptionStatus(tenantId, response);
     return response;
+}
+
+async function getSubscriptionStatus(tenantId, options = {}) {
+    if (!options.bypassCache) {
+        const cached = getCachedSubscriptionStatus(tenantId);
+        if (cached) {
+            return cached;
+        }
+
+        return loadSubscriptionStatusOnce(tenantId, () => resolveSubscriptionStatus(tenantId));
+    }
+
+    return resolveSubscriptionStatus(tenantId);
 }
 
 async function assertPlanLimit(tenantId, resource, tableName) {

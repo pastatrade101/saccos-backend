@@ -58,7 +58,7 @@ async function listMembers(actor, filters = {}) {
     const pagination = buildPagination(filters);
     let memberQuery = adminSupabase
         .from("members")
-        .select("*", pagination ? { count: "exact" } : undefined)
+        .select("*", pagination ? { count: "planned" } : undefined)
         .eq("tenant_id", tenantId)
         .is("deleted_at", null)
         .order("created_at", { ascending: false });

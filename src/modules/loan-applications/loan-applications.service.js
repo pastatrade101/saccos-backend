@@ -170,7 +170,7 @@ async function listLoanApplications(actor, query) {
             loan_approvals(id, approver_id, decision, created_at),
             loan_guarantors(id, member_id, guaranteed_amount, consent_status),
             collateral_items(id, collateral_type, valuation_amount)
-        `, hasPagination ? { count: "exact" } : undefined)
+        `, hasPagination ? { count: "planned" } : undefined)
         .eq("tenant_id", tenantId)
         .order("created_at", { ascending: false });
 

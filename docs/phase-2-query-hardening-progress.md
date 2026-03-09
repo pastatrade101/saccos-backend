@@ -47,6 +47,30 @@ Files:
 File:
 - `src/modules/loan-applications/loan-applications.service.js`
 
+### 6) Single-flight cache protection (stampede control)
+
+- Added in-flight request deduplication so concurrent cache misses for the same key execute one DB read only.
+- Applied to:
+  - subscription status cache
+  - user profile cache
+  - branch assignments cache
+- Prevents periodic TTL expiry from causing burst query spikes under concurrency.
+
+Files:
+- `src/services/subscription.service.js`
+- `src/services/user-context.service.js`
+
+### 7) Cheaper pagination counts on hot list endpoints
+
+- Switched paginated list counts from `exact` to `planned` for:
+  - members listing
+  - loan applications listing
+- Keeps pagination totals while reducing expensive full-count planning/execution overhead on large tables.
+
+Files:
+- `src/modules/members/members.service.js`
+- `src/modules/loan-applications/loan-applications.service.js`
+
 ## Validation
 
 - Syntax checks passed for edited modules.
