@@ -97,7 +97,7 @@ function isUserNotFoundError(error) {
 async function sendPasswordSetupLink(payload) {
     const email = payload.email.trim().toLowerCase();
 
-    assertRateLimit({
+    await assertRateLimit({
         key: `password-setup-link:${email}`,
         max: env.otpSendRateLimitMax,
         windowMs: env.otpSendRateLimitWindowMs,

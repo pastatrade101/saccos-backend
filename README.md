@@ -17,6 +17,8 @@ Enterprise multi-tenant SACCOS system for real-money operations.
 - [API request examples](docs/api-examples.md)
 - [Delivery/status matrix](docs/phase-audit-matrix.md)
 - [Sales and marketing guide](docs/product-sales-guide.md)
+- [Phase 3 async workloads progress](docs/phase-3-async-workloads-progress.md)
+- [Phase 4 scale progress](docs/phase-4-scale-progress.md)
 
 ## Repository Map
 
@@ -116,6 +118,12 @@ Run in this sequence:
 24. `022_loan_workflow_rls.sql`
 25. `023_performance_reliability.sql`
 26. `025_auth_otp_challenges.sql`
+27. `026_phase2_seek_indexes.sql`
+28. `027_phase3_report_export_jobs.sql`
+29. `028_phase3_report_export_worker.sql`
+30. `029_phase3_report_export_retries.sql`
+31. `030_phase3_report_export_cleanup_indexes.sql`
+32. `031_phase4_distributed_rate_limits.sql`
 
 Important:
 

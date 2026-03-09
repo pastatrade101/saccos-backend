@@ -1,6 +1,5 @@
 services:
   backend:
-    container_name: saccos-backend
     build:
       context: .
       dockerfile: Dockerfile

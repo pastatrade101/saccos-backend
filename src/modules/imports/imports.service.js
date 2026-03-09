@@ -1024,7 +1024,7 @@ async function runMemberImportJob({ jobId, actor, fileBuffer, options, requestMe
                 let authUserId = upserted.member.user_id || null;
 
                 if (options.create_portal_account) {
-                    assertRateLimit({
+                    await assertRateLimit({
                         key: `member-import-auth:${actor.user.id}`,
                         max: env.authUserCreateRateLimitMax,
                         windowMs: env.authUserCreateRateLimitWindowMs,

@@ -182,7 +182,7 @@ async function sendOtpChallenge({
     challengeId = null
 }) {
     const normalizedPhone = normalizePhone(phone);
-    assertRateLimit({
+    await assertRateLimit({
         key: `otp-send:${userId}:${purpose}`,
         max: env.otpSendRateLimitMax,
         windowMs: env.otpSendRateLimitWindowMs,
