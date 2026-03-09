@@ -10,6 +10,21 @@ const exceptionReasonEnum = z.enum([
     "CASH_VARIANCE",
     "MANUAL_JOURNAL"
 ]);
+const asyncExportSchema = z
+    .union([z.boolean(), z.string()])
+    .optional()
+    .transform((value) => {
+        if (typeof value === "undefined") {
+            return false;
+        }
+
+        if (typeof value === "boolean") {
+            return value;
+        }
+
+        const normalized = String(value).trim().toLowerCase();
+        return ["1", "true", "yes", "on"].includes(normalized);
+    });
 
 const exportSchema = z.object({
     tenant_id: z.string().uuid().optional(),
@@ -21,9 +36,15 @@ const exportSchema = z.object({
     as_of_date: z.string().date().optional(),
     from_date: z.string().date().optional(),
     to_date: z.string().date().optional(),
-    format: formatEnum
+    format: formatEnum,
+    async: asyncExportSchema
+});
+
+const exportJobParamSchema = z.object({
+    jobId: z.string().uuid()
 });
 
 module.exports = {
-    exportSchema
+    exportSchema,
+    exportJobParamSchema
 };

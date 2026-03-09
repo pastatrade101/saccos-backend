@@ -7,11 +7,24 @@ const requireSubscription = require("../../middleware/require-subscription");
 const validate = require("../../middleware/validate");
 const { ROLES } = require("../../constants/roles");
 const controller = require("./reports.controller");
-const { exportSchema } = require("./reports.schemas");
+const { exportSchema, exportJobParamSchema } = require("./reports.schemas");
 
 const router = express.Router();
 
 router.use(auth, requireSubscription());
+
+router.get(
+    "/export-jobs/:jobId",
+    authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER, ROLES.LOAN_OFFICER, ROLES.TELLER, ROLES.AUDITOR], { allowInternalOps: false }),
+    validate(exportJobParamSchema, "params"),
+    controller.getExportJob
+);
+router.get(
+    "/export-jobs/:jobId/download",
+    authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER, ROLES.LOAN_OFFICER, ROLES.TELLER, ROLES.AUDITOR], { allowInternalOps: false }),
+    validate(exportJobParamSchema, "params"),
+    controller.getExportJobDownload
+);
 
 router.get(
     "/member-statements/export",

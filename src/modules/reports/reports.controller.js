@@ -4,6 +4,7 @@ const { sendExport, assertExportQuota } = require("../../services/export.service
 const { logAudit } = require("../../services/audit.service");
 const { runObservedJob } = require("../../services/observability.service");
 const reportService = require("./reports.service");
+const reportExportJobsService = require("./report-export-jobs.service");
 
 async function resolveTenantName(tenantId) {
     if (!tenantId) {
@@ -26,8 +27,24 @@ async function resolveTenantName(tenantId) {
 
 async function runExport(req, res, loader, action) {
     const tenantId = req.validated?.query?.tenant_id || req.tenantId || req.auth.tenantId;
+    const requestQuery = { ...(req.validated?.query || {}) };
+    const useAsyncExport = Boolean(requestQuery.async);
+    delete requestQuery.async;
+
+    if (useAsyncExport) {
+        const job = await reportExportJobsService.queueReportExportJob({
+            actor: req.auth,
+            query: requestQuery,
+            loader,
+            action,
+            reportKey: action.replace(/^export_/, ""),
+            subscription: req.subscription
+        });
+        return res.status(202).json({ data: job });
+    }
+
     return runObservedJob(`report.export.${action}`, { tenantId }, async () => {
-        const report = await loader(req.auth, req.validated.query);
+        const report = await loader(req.auth, requestQuery);
         const rowCount = Array.isArray(report?.rows) ? report.rows.length : 0;
         const tenantName = await resolveTenantName(tenantId);
 
@@ -38,13 +55,13 @@ async function runExport(req, res, loader, action) {
             table: "reports",
             action,
             afterData: {
-                format: req.validated.query.format,
+                format: requestQuery.format,
                 row_count: rowCount
             }
         });
         return sendExport(res, {
             rows: report.rows,
-            format: req.validated.query.format,
+            format: requestQuery.format,
             filename: report.filename,
             title: report.title,
             tenantName
@@ -83,3 +100,13 @@ exports.memberBalancesSummary = asyncHandler(async (req, res) =>
 exports.auditExceptions = asyncHandler(async (req, res) =>
     runExport(req, res, reportService.auditExceptionsReport, "export_audit_exceptions")
 );
+
+exports.getExportJob = asyncHandler(async (req, res) => {
+    const job = await reportExportJobsService.getReportExportJob(req.auth, req.params.jobId);
+    res.json({ data: job });
+});
+
+exports.getExportJobDownload = asyncHandler(async (req, res) => {
+    const download = await reportExportJobsService.getReportExportJobDownload(req.auth, req.params.jobId);
+    res.json({ data: download });
+});

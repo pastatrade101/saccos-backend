@@ -33,9 +33,24 @@ async function assertExportQuota(subscription, tenantId) {
 }
 
 async function sendExport(res, { rows, format, filename, title, tenantName }) {
-    const safeRows = Array.isArray(rows) ? rows : [];
+    const artifact = await buildExportArtifact({
+        rows,
+        format,
+        filename,
+        title,
+        tenantName
+    });
 
-    if (format === "pdf") {
+    res.setHeader("Content-Type", artifact.contentType);
+    res.setHeader("Content-Disposition", `attachment; filename="${artifact.fileName}"`);
+    return res.send(artifact.buffer);
+}
+
+async function buildExportArtifact({ rows, format, filename, title, tenantName }) {
+    const safeRows = Array.isArray(rows) ? rows : [];
+    const normalizedFormat = String(format || "csv").toLowerCase();
+
+    if (normalizedFormat === "pdf") {
         const buffer = await buildSimplePdf(title, safeRows, {
             brandName: env.reportBrandName,
             subtitle: env.reportBrandSubtitle,
@@ -43,18 +58,25 @@ async function sendExport(res, { rows, format, filename, title, tenantName }) {
             tenantName: tenantName || "N/A",
             logoPath: env.reportBrandLogoPath || ""
         });
-        res.setHeader("Content-Type", "application/pdf");
-        res.setHeader("Content-Disposition", `attachment; filename="${filename}.pdf"`);
-        return res.send(buffer);
+        return {
+            buffer,
+            contentType: "application/pdf",
+            fileExtension: "pdf",
+            fileName: `${filename}.pdf`
+        };
     }
 
     const csv = toCsv(safeRows);
-    res.setHeader("Content-Type", "text/csv; charset=utf-8");
-    res.setHeader("Content-Disposition", `attachment; filename="${filename}.csv"`);
-    return res.send(csv);
+    return {
+        buffer: Buffer.from(csv, "utf8"),
+        contentType: "text/csv; charset=utf-8",
+        fileExtension: "csv",
+        fileName: `${filename}.csv`
+    };
 }
 
 module.exports = {
     assertExportQuota,
-    sendExport
+    sendExport,
+    buildExportArtifact
 };
