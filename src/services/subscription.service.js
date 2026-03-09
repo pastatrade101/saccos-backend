@@ -127,13 +127,7 @@ function toGracePeriod(expiresAt, explicitGracePeriod) {
 
 function buildSubscriptionResponse(subscriptionRow, entitlements) {
     if (!subscriptionRow) {
-        return {
-            isUsable: false,
-            status: "missing",
-            plan: null,
-            features: {},
-            limits: null
-        };
+        return buildMissingSubscriptionResponse();
     }
 
     const expiresAt = subscriptionRow.expires_at ? new Date(subscriptionRow.expires_at) : null;
@@ -154,6 +148,34 @@ function buildSubscriptionResponse(subscriptionRow, entitlements) {
         grace_period_until: gracePeriodUntil ? gracePeriodUntil.toISOString() : null,
         features: entitlements,
         limits: buildLimits(subscriptionRow.plan, entitlements)
+    };
+}
+
+function buildMissingSubscriptionResponse() {
+    return {
+        isUsable: false,
+        status: "missing",
+        plan: null,
+        features: {},
+        limits: null
+    };
+}
+
+function normalizeTenantSubscriptionRow(subscription) {
+    if (!subscription) {
+        return null;
+    }
+
+    return {
+        id: subscription.id,
+        tenant_id: subscription.tenant_id,
+        plan_id: subscription.plan_id,
+        plan: subscription.plans?.code || "starter",
+        plan_name: subscription.plans?.name || null,
+        status: subscription.status,
+        start_at: subscription.start_at,
+        expires_at: subscription.expires_at,
+        created_at: subscription.created_at
     };
 }
 
@@ -217,6 +239,79 @@ async function getFeaturesByPlanId(planId) {
     return data || [];
 }
 
+async function getFeaturesByPlanIds(planIds) {
+    if (!planIds.length) {
+        return {};
+    }
+
+    const { data, error } = await adminSupabase
+        .from("plan_features")
+        .select("plan_id, feature_key, feature_type, bool_value, int_value, string_value")
+        .in("plan_id", planIds);
+
+    if (error) {
+        throw new AppError(500, "PLAN_FEATURES_LOOKUP_FAILED", "Unable to load plan features.", error);
+    }
+
+    return (data || []).reduce((accumulator, feature) => {
+        if (!accumulator[feature.plan_id]) {
+            accumulator[feature.plan_id] = [];
+        }
+        accumulator[feature.plan_id].push(feature);
+        return accumulator;
+    }, {});
+}
+
+async function getLatestTenantSubscriptionsByTenantIds(tenantIds) {
+    if (!tenantIds.length) {
+        return {};
+    }
+
+    const { data, error } = await adminSupabase
+        .from("tenant_subscriptions")
+        .select("id, tenant_id, plan_id, status, start_at, expires_at, created_at, plans(id, code, name, description)")
+        .in("tenant_id", tenantIds)
+        .order("start_at", { ascending: false });
+
+    if (error) {
+        throw new AppError(500, "SUBSCRIPTION_LOOKUP_FAILED", "Unable to load tenant subscriptions.", error);
+    }
+
+    const latestByTenant = {};
+    for (const row of data || []) {
+        if (!latestByTenant[row.tenant_id]) {
+            latestByTenant[row.tenant_id] = row;
+        }
+    }
+
+    return latestByTenant;
+}
+
+async function getLegacySubscriptionsByTenantIds(tenantIds) {
+    if (!tenantIds.length) {
+        return {};
+    }
+
+    const { data, error } = await adminSupabase
+        .from("subscriptions")
+        .select("*")
+        .in("tenant_id", tenantIds)
+        .order("start_at", { ascending: false });
+
+    if (error) {
+        throw new AppError(500, "SUBSCRIPTION_LOOKUP_FAILED", "Unable to load tenant subscriptions.", error);
+    }
+
+    const latestByTenant = {};
+    for (const row of data || []) {
+        if (!latestByTenant[row.tenant_id]) {
+            latestByTenant[row.tenant_id] = row;
+        }
+    }
+
+    return latestByTenant;
+}
+
 async function getTenantEntitlements(tenantId) {
     const subscription = await getLatestTenantSubscription(tenantId);
 
@@ -235,49 +330,91 @@ async function getTenantEntitlements(tenantId) {
 }
 
 async function resolveSubscriptionStatus(tenantId) {
-    const subscription = await getLatestTenantSubscription(tenantId);
+    const statusMap = await resolveSubscriptionStatuses([tenantId]);
+    const status = statusMap[tenantId] || buildMissingSubscriptionResponse();
+    setCachedSubscriptionStatus(tenantId, status);
+    return status;
+}
 
-    if (!subscription) {
-        const legacy = await getLegacySubscription(tenantId);
-
-        if (!legacy) {
-            const missing = {
-                isUsable: false,
-                status: "missing",
-                plan: null,
-                features: {},
-                limits: null
-            };
-            setCachedSubscriptionStatus(tenantId, missing);
-            return missing;
-        }
-
-        const entitlements = buildEntitlements(legacy.plan, []);
-        const legacyResponse = buildSubscriptionResponse(legacy, entitlements);
-        setCachedSubscriptionStatus(tenantId, legacyResponse);
-        return legacyResponse;
+async function resolveSubscriptionStatuses(tenantIds = []) {
+    const uniqueTenantIds = Array.from(new Set((tenantIds || []).filter(Boolean)));
+    if (!uniqueTenantIds.length) {
+        return {};
     }
 
-    const entitlements = await getFeaturesByPlanId(subscription.plan_id).then((features) =>
-        buildEntitlements(subscription.plans?.code, features)
-    );
+    const latestSubscriptionsByTenant = await getLatestTenantSubscriptionsByTenantIds(uniqueTenantIds);
+    const latestSubscriptions = Object.values(latestSubscriptionsByTenant);
+    const planIds = Array.from(new Set(latestSubscriptions.map((row) => row.plan_id).filter(Boolean)));
+    const featuresByPlanId = await getFeaturesByPlanIds(planIds);
+    const responseByTenant = {};
+    const missingTenantIds = [];
 
-    const response = buildSubscriptionResponse(
-        {
-            id: subscription.id,
-            tenant_id: subscription.tenant_id,
-            plan_id: subscription.plan_id,
-            plan: subscription.plans?.code || "starter",
-            plan_name: subscription.plans?.name || null,
-            status: subscription.status,
-            start_at: subscription.start_at,
-            expires_at: subscription.expires_at,
-            created_at: subscription.created_at
-        },
-        entitlements
-    );
-    setCachedSubscriptionStatus(tenantId, response);
-    return response;
+    for (const tenantId of uniqueTenantIds) {
+        const subscription = latestSubscriptionsByTenant[tenantId];
+        if (!subscription) {
+            missingTenantIds.push(tenantId);
+            continue;
+        }
+
+        const planFeatures = featuresByPlanId[subscription.plan_id] || [];
+        const entitlements = buildEntitlements(subscription.plans?.code, planFeatures);
+        responseByTenant[tenantId] = buildSubscriptionResponse(
+            normalizeTenantSubscriptionRow(subscription),
+            entitlements
+        );
+    }
+
+    if (missingTenantIds.length) {
+        const legacyByTenant = await getLegacySubscriptionsByTenantIds(missingTenantIds);
+        for (const tenantId of missingTenantIds) {
+            const legacy = legacyByTenant[tenantId];
+            if (!legacy) {
+                responseByTenant[tenantId] = buildMissingSubscriptionResponse();
+                continue;
+            }
+
+            const entitlements = buildEntitlements(legacy.plan, []);
+            responseByTenant[tenantId] = buildSubscriptionResponse(legacy, entitlements);
+        }
+    }
+
+    return responseByTenant;
+}
+
+async function getSubscriptionStatusesForTenants(tenantIds = [], options = {}) {
+    const uniqueTenantIds = Array.from(new Set((tenantIds || []).filter(Boolean)));
+    if (!uniqueTenantIds.length) {
+        return {};
+    }
+
+    const responseByTenant = {};
+    const unresolvedTenantIds = [];
+
+    for (const tenantId of uniqueTenantIds) {
+        if (options.bypassCache) {
+            unresolvedTenantIds.push(tenantId);
+            continue;
+        }
+
+        const cached = getCachedSubscriptionStatus(tenantId);
+        if (cached) {
+            responseByTenant[tenantId] = cached;
+            continue;
+        }
+
+        unresolvedTenantIds.push(tenantId);
+    }
+
+    if (unresolvedTenantIds.length) {
+        const loaded = await resolveSubscriptionStatuses(unresolvedTenantIds);
+        for (const tenantId of unresolvedTenantIds) {
+            const value = loaded[tenantId] || buildMissingSubscriptionResponse();
+            responseByTenant[tenantId] = value;
+            setCachedSubscriptionStatus(tenantId, value);
+        }
+    }
+
+    return responseByTenant;
 }
 
 async function getSubscriptionStatus(tenantId, options = {}) {
@@ -395,6 +532,7 @@ module.exports = {
     assignTenantSubscription,
     getTenantEntitlements,
     getSubscriptionStatus,
+    getSubscriptionStatusesForTenants,
     clearSubscriptionStatusCache,
     assertPlanLimit
 };

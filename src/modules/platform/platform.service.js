@@ -2,9 +2,20 @@ const { adminSupabase } = require("../../config/supabase");
 const env = require("../../config/env");
 const AppError = require("../../utils/app-error");
 const { logAudit } = require("../../services/audit.service");
-const { assignTenantSubscription, getSubscriptionStatus } = require("../../services/subscription.service");
+const {
+    assignTenantSubscription,
+    getSubscriptionStatus,
+    getSubscriptionStatusesForTenants
+} = require("../../services/subscription.service");
 
 const EMPTY_UUID = "00000000-0000-0000-0000-000000000000";
+const MISSING_SUBSCRIPTION = {
+    isUsable: false,
+    status: "missing",
+    plan: null,
+    features: {},
+    limits: null
+};
 
 async function listPlans() {
     const { data, error } = await adminSupabase
@@ -64,11 +75,24 @@ async function listPlatformTenants(query = {}) {
     const limit = Math.min(Number(query.limit || 50), 100);
     const from = (page - 1) * limit;
     const to = from + limit - 1;
+    const statusFilter = typeof query.status === "string" ? query.status.trim() : "";
+    const rawSearch = typeof query.search === "string" ? query.search.trim() : "";
+    const search = rawSearch.replace(/[^a-zA-Z0-9._\s-]/g, "").trim();
 
-    const { data: tenants, error, count } = await adminSupabase
+    let tenantsQuery = adminSupabase
         .from("tenants")
         .select("*", { count: "exact" })
-        .is("deleted_at", null)
+        .is("deleted_at", null);
+
+    if (statusFilter) {
+        tenantsQuery = tenantsQuery.eq("status", statusFilter);
+    }
+
+    if (search) {
+        tenantsQuery = tenantsQuery.or(`name.ilike.%${search}%,registration_number.ilike.%${search}%`);
+    }
+
+    const { data: tenants, error, count } = await tenantsQuery
         .order("created_at", { ascending: false })
         .range(from, to);
 
@@ -93,11 +117,13 @@ async function listPlatformTenants(query = {}) {
         return accumulator;
     }, {});
 
-    const enriched = await Promise.all((tenants || []).map(async (tenant) => ({
+    const subscriptionsByTenant = await getSubscriptionStatusesForTenants(tenantIds);
+
+    const enriched = (tenants || []).map((tenant) => ({
         ...tenant,
         branch_count: branchCounts[tenant.id] || 0,
-        subscription: await getSubscriptionStatus(tenant.id)
-    })));
+        subscription: subscriptionsByTenant[tenant.id] || MISSING_SUBSCRIPTION
+    }));
 
     return {
         data: enriched,

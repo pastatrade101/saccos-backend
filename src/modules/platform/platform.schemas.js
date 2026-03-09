@@ -31,7 +31,9 @@ const deleteTenantSchema = z.object({
 
 const listPlatformTenantsQuerySchema = z.object({
     page: z.coerce.number().int().positive().default(1),
-    limit: z.coerce.number().int().positive().max(100).default(50)
+    limit: z.coerce.number().int().positive().max(100).default(50),
+    search: z.string().trim().min(1).max(120).optional(),
+    status: z.string().trim().min(1).max(60).optional()
 });
 
 module.exports = {
