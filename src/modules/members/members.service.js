@@ -7,6 +7,39 @@ const { logAudit } = require("../../services/audit.service");
 const { assertBranchAccess, assertTenantAccess } = require("../../services/user-context.service");
 const { ensureBranchAssignments } = require("../../services/branch-assignment.service");
 const { saveCredentialHandoff, getActiveCredentialByUser } = require("../../services/credential-handoff.service");
+const MEMBERS_COUNT_CACHE_TTL_MS = Math.max(0, Number(process.env.MEMBERS_COUNT_CACHE_TTL_MS || 15000));
+const membersCountCache = new Map();
+const membersCountInFlight = new Map();
+
+const MEMBER_LIST_COLUMNS = `
+    id,
+    tenant_id,
+    branch_id,
+    user_id,
+    full_name,
+    phone,
+    email,
+    member_no,
+    national_id,
+    status,
+    dob,
+    address_line1,
+    address_line2,
+    city,
+    state,
+    country,
+    postal_code,
+    nida_no,
+    tin_no,
+    next_of_kin_name,
+    next_of_kin_phone,
+    next_of_kin_relationship,
+    employer,
+    kyc_status,
+    kyc_reason,
+    notes,
+    created_at
+`;
 
 function generateTemporaryPassword() {
     const lowers = "abcdefghjkmnpqrstuvwxyz";
@@ -29,16 +62,26 @@ function generateTemporaryPassword() {
 }
 
 function buildPagination(query = {}) {
-    if (query.page === undefined && query.limit === undefined) {
+    if (query.page === undefined && query.limit === undefined && !query.cursor) {
         return null;
     }
 
-    const page = query.page ? Number(query.page) : 1;
     const limit = query.limit ? Number(query.limit) : 50;
+
+    if (query.cursor) {
+        return {
+            mode: "cursor",
+            cursor: String(query.cursor),
+            limit
+        };
+    }
+
+    const page = query.page ? Number(query.page) : 1;
     const from = (page - 1) * limit;
     const to = from + limit - 1;
 
     return {
+        mode: "offset",
         page,
         limit,
         from,
@@ -56,55 +99,149 @@ async function listMembers(actor, filters = {}) {
     assertTenantAccess({ auth: actor }, tenantId);
 
     const pagination = buildPagination(filters);
-    let memberQuery = adminSupabase
-        .from("members")
-        .select("*", pagination ? { count: "planned" } : undefined)
-        .eq("tenant_id", tenantId)
-        .is("deleted_at", null)
-        .order("created_at", { ascending: false });
+    let memberQuery = applyMemberListFilters(
+        adminSupabase.from("members").select(MEMBER_LIST_COLUMNS),
+        { actor, filters, tenantId }
+    )
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false });
 
-    if (actor.role === "member") {
-        memberQuery = memberQuery.eq("user_id", actor.user.id);
-    } else if (!actor.isInternalOps && !["super_admin", "auditor"].includes(actor.role) && actor.branchIds.length) {
-        memberQuery = memberQuery.in("branch_id", actor.branchIds);
-    }
-
-    if (filters.branch_id) {
-        assertBranchAccess({ auth: actor }, filters.branch_id);
-        memberQuery = memberQuery.eq("branch_id", filters.branch_id);
-    }
-
-    if (filters.status) {
-        memberQuery = memberQuery.eq("status", filters.status);
-    }
-
-    if (filters.search) {
-        const escaped = filters.search.replace(/[%_]/g, "\\$&");
-        memberQuery = memberQuery.or(
-            `full_name.ilike.%${escaped}%,phone.ilike.%${escaped}%,email.ilike.%${escaped}%,member_no.ilike.%${escaped}%`
-        );
-    }
-
-    if (pagination) {
+    if (pagination?.mode === "cursor") {
+        memberQuery = memberQuery.lt("created_at", pagination.cursor).limit(pagination.limit);
+    } else if (pagination) {
         memberQuery = memberQuery.range(pagination.from, pagination.to);
     }
 
-    const { data, error, count } = await memberQuery;
+    const { data, error } = await memberQuery;
 
     if (error) {
         throw new AppError(500, "MEMBERS_LIST_FAILED", "Unable to load members.", error);
     }
 
+    const rows = data || [];
+    if (pagination?.mode === "cursor") {
+        const lastRow = rows.length ? rows[rows.length - 1] : null;
+        return {
+            data: rows,
+            pagination: {
+                mode: "cursor",
+                limit: pagination.limit,
+                cursor: pagination.cursor,
+                next_cursor: rows.length === pagination.limit ? lastRow?.created_at || null : null,
+                total: null
+            }
+        };
+    }
+
+    const total = pagination
+        ? await getCachedMembersTotal({ actor, tenantId, filters })
+        : null;
+
     return {
-        data: data || [],
+        data: rows,
         pagination: pagination
             ? {
                 page: pagination.page,
                 limit: pagination.limit,
-                total: count || 0
+                total: total || 0
             }
             : null
     };
+}
+
+function applyMemberListFilters(builder, { actor, filters, tenantId }) {
+    let query = builder
+        .eq("tenant_id", tenantId)
+        .is("deleted_at", null);
+
+    if (actor.role === "member") {
+        query = query.eq("user_id", actor.user.id);
+    } else if (!actor.isInternalOps && !["super_admin", "auditor"].includes(actor.role) && actor.branchIds.length) {
+        query = query.in("branch_id", actor.branchIds);
+    }
+
+    if (filters.branch_id) {
+        assertBranchAccess({ auth: actor }, filters.branch_id);
+        query = query.eq("branch_id", filters.branch_id);
+    }
+
+    if (filters.status) {
+        query = query.eq("status", filters.status);
+    }
+
+    if (filters.search) {
+        const escaped = filters.search.replace(/[%_]/g, "\\$&");
+        query = query.or(
+            `full_name.ilike.%${escaped}%,phone.ilike.%${escaped}%,email.ilike.%${escaped}%,member_no.ilike.%${escaped}%`
+        );
+    }
+
+    return query;
+}
+
+function getMembersCountCacheKey({ actor, tenantId, filters }) {
+    const branchScope = Array.isArray(actor.branchIds) && actor.branchIds.length
+        ? actor.branchIds.slice().sort().join(",")
+        : "";
+    const search = String(filters.search || "").trim().toLowerCase();
+    const branchId = filters.branch_id || "";
+    const status = filters.status || "";
+
+    return [
+        tenantId,
+        actor.role || "",
+        actor.user?.id || "",
+        actor.isInternalOps ? "1" : "0",
+        branchScope,
+        branchId,
+        status,
+        search
+    ].join("|");
+}
+
+async function getCachedMembersTotal({ actor, tenantId, filters }) {
+    const cacheKey = getMembersCountCacheKey({ actor, tenantId, filters });
+    const now = Date.now();
+
+    if (MEMBERS_COUNT_CACHE_TTL_MS > 0) {
+        const cached = membersCountCache.get(cacheKey);
+        if (cached && cached.expiresAt > now) {
+            return cached.value;
+        }
+    }
+
+    const inFlight = membersCountInFlight.get(cacheKey);
+    if (inFlight) {
+        return inFlight;
+    }
+
+    const task = (async () => {
+        try {
+            const countQuery = applyMemberListFilters(
+                adminSupabase.from("members").select("id", { count: "planned", head: true }),
+                { actor, filters, tenantId }
+            );
+            const { count, error } = await countQuery;
+            if (error) {
+                throw new AppError(500, "MEMBERS_COUNT_FAILED", "Unable to count members.", error);
+            }
+
+            const total = count || 0;
+            if (MEMBERS_COUNT_CACHE_TTL_MS > 0) {
+                membersCountCache.set(cacheKey, {
+                    value: total,
+                    expiresAt: now + MEMBERS_COUNT_CACHE_TTL_MS
+                });
+            }
+
+            return total;
+        } finally {
+            membersCountInFlight.delete(cacheKey);
+        }
+    })();
+
+    membersCountInFlight.set(cacheKey, task);
+    return task;
 }
 
 async function listMemberAccounts(actor, query = {}) {

@@ -83,6 +83,28 @@ Files:
 File:
 - `src/modules/loan-applications/loan-applications.service.js`
 
+### 9) Cursor pagination + cheap total counts on hot lists
+
+- Added optional `cursor` query support (seek by `created_at`) for:
+  - members list
+  - loan applications list
+- Kept existing `page/limit` compatibility for current frontend clients.
+- Added short-TTL cached totals with single-flight for paginated list responses.
+  - avoids recalculating `count` on every repeated request burst.
+
+Files:
+- `src/modules/members/members.schemas.js`
+- `src/modules/members/members.service.js`
+- `src/modules/loan-applications/loan-applications.schemas.js`
+- `src/modules/loan-applications/loan-applications.service.js`
+
+### 10) Seek-support indexes
+
+- Added new database indexes to support stable seek ordering and filtered list paths.
+
+File:
+- `supabase/sql/026_phase2_seek_indexes.sql`
+
 ## Validation
 
 - Syntax checks passed for edited modules.

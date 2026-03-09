@@ -75,6 +75,7 @@ const listMembersQuerySchema = z.object({
     branch_id: z.string().uuid().optional(),
     status: z.enum(["active", "suspended", "exited"]).optional(),
     search: z.string().min(1).max(120).optional(),
+    cursor: z.string().datetime({ offset: true }).optional(),
     ...paginationSchema
 });
 

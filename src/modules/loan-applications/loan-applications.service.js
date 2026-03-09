@@ -5,6 +5,52 @@ const { assertBranchAccess, assertTenantAccess } = require("../../services/user-
 const { logAudit } = require("../../services/audit.service");
 const financeService = require("../finance/finance.service");
 const AppError = require("../../utils/app-error");
+const LOAN_APPLICATIONS_COUNT_CACHE_TTL_MS = Math.max(0, Number(process.env.LOAN_APPLICATIONS_COUNT_CACHE_TTL_MS || 15000));
+const loanApplicationsCountCache = new Map();
+const loanApplicationsCountInFlight = new Map();
+
+const LOAN_APPLICATION_LIST_COLUMNS = `
+    id,
+    tenant_id,
+    branch_id,
+    member_id,
+    product_id,
+    external_reference,
+    purpose,
+    requested_amount,
+    requested_term_count,
+    requested_repayment_frequency,
+    requested_interest_rate,
+    created_via,
+    status,
+    requested_by,
+    requested_on_behalf_by,
+    submitted_at,
+    appraised_by,
+    appraised_at,
+    appraisal_notes,
+    risk_rating,
+    recommended_amount,
+    recommended_term_count,
+    recommended_interest_rate,
+    recommended_repayment_frequency,
+    required_approval_count,
+    approval_count,
+    approval_notes,
+    approved_by,
+    approved_at,
+    disbursement_ready_at,
+    rejected_by,
+    rejected_at,
+    rejection_reason,
+    disbursed_by,
+    disbursed_at,
+    loan_id,
+    created_at,
+    updated_at,
+    members(id, full_name, member_no, branch_id, user_id),
+    loan_products(id, code, name)
+`;
 
 async function getActiveLoanProduct(tenantId, productId) {
     const { data, error } = await adminSupabase
@@ -155,54 +201,164 @@ async function listLoanApplications(actor, query) {
     const tenantId = query.tenant_id || actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
 
-    const hasPagination = query.page !== undefined || query.limit !== undefined;
+    const hasCursor = Boolean(query.cursor);
+    const hasPagination = query.page !== undefined || query.limit !== undefined || hasCursor;
     const page = query.page ? Number(query.page) : 1;
     const limit = query.limit ? Number(query.limit) : 50;
     const from = (page - 1) * limit;
     const to = from + limit - 1;
+    const cursor = hasCursor ? String(query.cursor) : null;
 
-    let builder = adminSupabase
-        .from("loan_applications")
-        .select(`
-            *,
-            members(id, full_name, member_no, branch_id, user_id),
-            loan_products(id, code, name)
-        `, hasPagination ? { count: "planned" } : undefined)
-        .eq("tenant_id", tenantId)
-        .order("created_at", { ascending: false });
+    const ownMemberId = actor.role === ROLES.MEMBER
+        ? (await getMemberByUser(tenantId, actor.user.id)).id
+        : null;
 
-    if (actor.role === ROLES.MEMBER) {
-        const ownMember = await getMemberByUser(tenantId, actor.user.id);
-        builder = builder.eq("member_id", ownMember.id);
-    } else if (!actor.isInternalOps && [ROLES.BRANCH_MANAGER, ROLES.LOAN_OFFICER, ROLES.TELLER].includes(actor.role) && actor.branchIds.length) {
-        builder = builder.in("branch_id", actor.branchIds);
+    let builder = applyLoanApplicationListFilters(
+        adminSupabase
+            .from("loan_applications")
+            .select(LOAN_APPLICATION_LIST_COLUMNS),
+        { actor, query, tenantId, ownMemberId }
+    )
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false });
+
+    if (hasCursor) {
+        builder = builder.lt("created_at", cursor).limit(limit);
+    } else if (hasPagination) {
+        builder = builder.range(from, to);
     }
 
-    if (query.status) builder = builder.eq("status", query.status);
-    if (query.member_id) builder = builder.eq("member_id", query.member_id);
-    if (query.branch_id) {
-        assertBranchAccess({ auth: actor }, query.branch_id);
-        builder = builder.eq("branch_id", query.branch_id);
-    }
-    if (query.product_id) builder = builder.eq("product_id", query.product_id);
-    if (hasPagination) builder = builder.range(from, to);
-
-    const { data, error, count } = await builder;
+    const { data, error } = await builder;
 
     if (error) {
         throw new AppError(500, "LOAN_APPLICATIONS_FETCH_FAILED", "Unable to load loan applications.", error);
     }
 
+    const rows = data || [];
+    if (hasCursor) {
+        const lastRow = rows.length ? rows[rows.length - 1] : null;
+        return {
+            data: rows,
+            pagination: {
+                mode: "cursor",
+                limit,
+                cursor,
+                next_cursor: rows.length === limit ? lastRow?.created_at || null : null,
+                total: null
+            }
+        };
+    }
+
+    const total = hasPagination
+        ? await getCachedLoanApplicationsTotal({ actor, query, tenantId, ownMemberId })
+        : null;
+
     return {
-        data: data || [],
+        data: rows,
         pagination: hasPagination
             ? {
                 page,
                 limit,
-                total: count || 0
+                total: total || 0
             }
             : null
     };
+}
+
+function applyLoanApplicationListFilters(builder, { actor, query, tenantId, ownMemberId }) {
+    let scoped = builder.eq("tenant_id", tenantId);
+
+    if (actor.role === ROLES.MEMBER && ownMemberId) {
+        scoped = scoped.eq("member_id", ownMemberId);
+    } else if (
+        !actor.isInternalOps
+        && [ROLES.BRANCH_MANAGER, ROLES.LOAN_OFFICER, ROLES.TELLER].includes(actor.role)
+        && actor.branchIds.length
+    ) {
+        scoped = scoped.in("branch_id", actor.branchIds);
+    }
+
+    if (query.status) scoped = scoped.eq("status", query.status);
+    if (query.member_id) scoped = scoped.eq("member_id", query.member_id);
+    if (query.branch_id) {
+        assertBranchAccess({ auth: actor }, query.branch_id);
+        scoped = scoped.eq("branch_id", query.branch_id);
+    }
+    if (query.product_id) scoped = scoped.eq("product_id", query.product_id);
+
+    return scoped;
+}
+
+function getLoanApplicationsCountCacheKey({ actor, query, tenantId, ownMemberId }) {
+    const branchScope = Array.isArray(actor.branchIds) && actor.branchIds.length
+        ? actor.branchIds.slice().sort().join(",")
+        : "";
+
+    return [
+        tenantId,
+        actor.role || "",
+        actor.user?.id || "",
+        ownMemberId || "",
+        actor.isInternalOps ? "1" : "0",
+        branchScope,
+        query.status || "",
+        query.member_id || "",
+        query.branch_id || "",
+        query.product_id || ""
+    ].join("|");
+}
+
+async function getCachedLoanApplicationsTotal({ actor, query, tenantId, ownMemberId }) {
+    const cacheKey = getLoanApplicationsCountCacheKey({ actor, query, tenantId, ownMemberId });
+    const now = Date.now();
+
+    if (LOAN_APPLICATIONS_COUNT_CACHE_TTL_MS > 0) {
+        const cached = loanApplicationsCountCache.get(cacheKey);
+        if (cached && cached.expiresAt > now) {
+            return cached.value;
+        }
+    }
+
+    const inFlight = loanApplicationsCountInFlight.get(cacheKey);
+    if (inFlight) {
+        return inFlight;
+    }
+
+    const task = (async () => {
+        try {
+            const countQuery = applyLoanApplicationListFilters(
+                adminSupabase
+                    .from("loan_applications")
+                    .select("id", { count: "planned", head: true }),
+                { actor, query, tenantId, ownMemberId }
+            );
+
+            const { count, error } = await countQuery;
+            if (error) {
+                throw new AppError(
+                    500,
+                    "LOAN_APPLICATIONS_COUNT_FAILED",
+                    "Unable to count loan applications.",
+                    error
+                );
+            }
+
+            const total = count || 0;
+            if (LOAN_APPLICATIONS_COUNT_CACHE_TTL_MS > 0) {
+                loanApplicationsCountCache.set(cacheKey, {
+                    value: total,
+                    expiresAt: now + LOAN_APPLICATIONS_COUNT_CACHE_TTL_MS
+                });
+            }
+
+            return total;
+        } finally {
+            loanApplicationsCountInFlight.delete(cacheKey);
+        }
+    })();
+
+    loanApplicationsCountInFlight.set(cacheKey, task);
+    return task;
 }
 
 async function createLoanApplication(actor, payload) {
