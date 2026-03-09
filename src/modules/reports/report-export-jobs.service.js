@@ -1,7 +1,8 @@
 const { adminSupabase } = require("../../config/supabase");
 const env = require("../../config/env");
 const AppError = require("../../utils/app-error");
-const { assertTenantAccess } = require("../../services/user-context.service");
+const reportService = require("./reports.service");
+const { assertTenantAccess, getBranchAssignments, getUserProfile } = require("../../services/user-context.service");
 const { assertExportQuota, buildExportArtifact } = require("../../services/export.service");
 const { logAudit } = require("../../services/audit.service");
 const { runObservedJob } = require("../../services/observability.service");
@@ -19,10 +20,54 @@ const REPORT_EXPORT_UPLOAD_TIMEOUT_MS = Math.max(
     5000,
     Number(process.env.REPORT_EXPORT_UPLOAD_TIMEOUT_MS || 45000)
 );
+const REPORT_EXPORT_WORKER_BACKOFF_MS = Math.max(
+    500,
+    Number(process.env.REPORT_EXPORT_WORKER_BACKOFF_MS || 1000)
+);
+
+const REPORT_REGISTRY = {
+    member_statement: {
+        loader: reportService.memberStatement,
+        action: "export_member_statement"
+    },
+    trial_balance: {
+        loader: reportService.trialBalance,
+        action: "export_trial_balance"
+    },
+    cash_position: {
+        loader: reportService.cashPosition,
+        action: "export_cash_position"
+    },
+    par: {
+        loader: reportService.parReport,
+        action: "export_par"
+    },
+    loan_aging: {
+        loader: reportService.loanAging,
+        action: "export_loan_aging"
+    },
+    loan_portfolio_summary: {
+        loader: reportService.loanPortfolioSummary,
+        action: "export_loan_portfolio_summary"
+    },
+    member_balances_summary: {
+        loader: reportService.memberBalancesSummary,
+        action: "export_member_balances_summary"
+    },
+    audit_exceptions: {
+        loader: reportService.auditExceptionsReport,
+        action: "export_audit_exceptions"
+    }
+};
 
 function isMissingReportExportJobsSchema(error) {
     const message = String(error?.message || "").toLowerCase();
     return error?.code === "42P01" || message.includes("report_export_jobs");
+}
+
+function isMissingReportExportJobClaimFunction(error) {
+    const message = String(error?.message || "").toLowerCase();
+    return error?.code === "42883" && message.includes("claim_report_export_job");
 }
 
 function toJobSchemaError(error) {
@@ -30,6 +75,15 @@ function toJobSchemaError(error) {
         500,
         "REPORT_EXPORT_JOBS_SCHEMA_MISSING",
         "Report export jobs schema is missing. Apply SQL migration 027_phase3_report_export_jobs.sql.",
+        error
+    );
+}
+
+function toClaimFunctionError(error) {
+    return new AppError(
+        500,
+        "REPORT_EXPORT_JOB_CLAIM_FUNCTION_MISSING",
+        "Report export claim function is missing. Apply SQL migration 028_phase3_report_export_worker.sql.",
         error
     );
 }
@@ -58,6 +112,12 @@ function normalizeError(error) {
 function buildResultPath(jobId, tenantId, extension) {
     const datePrefix = new Date().toISOString().slice(0, 10);
     return `tenant/${tenantId}/reports/${datePrefix}/${jobId}.${extension}`;
+}
+
+async function wait(ms) {
+    return new Promise((resolve) => {
+        setTimeout(resolve, ms);
+    });
 }
 
 function withTimeout(promise, timeoutMs, code, message) {
@@ -273,11 +333,155 @@ async function runReportExportJob({
     }
 }
 
+function toActorFromJob({ job, profile, branchIds }) {
+    return {
+        user: {
+            id: job.created_by
+        },
+        profile,
+        branchIds,
+        tenantId: profile?.tenant_id || null,
+        role: profile?.role || null,
+        isInternalOps: profile?.role === "platform_admin"
+    };
+}
+
+async function claimNextReportExportJob() {
+    const { data, error } = await adminSupabase.rpc("claim_report_export_job");
+
+    if (error) {
+        if (isMissingReportExportJobClaimFunction(error)) {
+            throw toClaimFunctionError(error);
+        }
+        if (isMissingReportExportJobsSchema(error)) {
+            throw toJobSchemaError(error);
+        }
+        throw new AppError(
+            500,
+            "REPORT_EXPORT_JOB_CLAIM_FAILED",
+            "Unable to claim next report export job.",
+            error
+        );
+    }
+
+    if (!data) {
+        return null;
+    }
+
+    if (Array.isArray(data)) {
+        return data[0] || null;
+    }
+
+    return data;
+}
+
+async function processClaimedReportExportJob(job) {
+    const registryItem = REPORT_REGISTRY[job.report_key];
+    if (!registryItem) {
+        await updateReportExportJob(job.id, {
+            status: "failed",
+            error_code: "REPORT_EXPORT_UNKNOWN_REPORT_KEY",
+            error_message: `Unknown report key: ${job.report_key}`,
+            completed_at: new Date().toISOString()
+        });
+        return;
+    }
+
+    const [profile, branchIds] = await Promise.all([
+        getUserProfile(job.created_by),
+        getBranchAssignments(job.created_by)
+    ]);
+
+    if (!profile || profile.tenant_id !== job.tenant_id || !profile.is_active) {
+        await updateReportExportJob(job.id, {
+            status: "failed",
+            error_code: "REPORT_EXPORT_ACTOR_INVALID",
+            error_message: "Export job creator profile is missing, inactive, or out of tenant scope.",
+            completed_at: new Date().toISOString()
+        });
+        return;
+    }
+
+    const actor = toActorFromJob({
+        job,
+        profile,
+        branchIds
+    });
+    const safeQuery = {
+        ...(job.query || {}),
+        tenant_id: job.tenant_id,
+        format: job.format
+    };
+
+    await runReportExportJob({
+        jobId: job.id,
+        tenantId: job.tenant_id,
+        actor,
+        loader: registryItem.loader,
+        query: safeQuery,
+        reportKey: job.report_key,
+        action: registryItem.action
+    });
+}
+
+async function processNextReportExportJob() {
+    const job = await claimNextReportExportJob();
+    if (!job) {
+        return false;
+    }
+
+    try {
+        await processClaimedReportExportJob(job);
+    } catch (error) {
+        const normalizedError = normalizeError(error);
+        console.error("[report-export-worker] processing failed", {
+            jobId: job.id,
+            reportKey: job.report_key,
+            code: normalizedError.code,
+            message: normalizedError.message
+        });
+
+        try {
+            await updateReportExportJob(job.id, {
+                status: "failed",
+                error_code: normalizedError.code,
+                error_message: normalizedError.message,
+                completed_at: new Date().toISOString()
+            });
+        } catch (updateError) {
+            console.error("[report-export-worker] failed to persist worker failure", {
+                jobId: job.id,
+                error: String(updateError?.message || updateError)
+            });
+        }
+    }
+
+    return true;
+}
+
+async function runReportExportWorkerLoop(options = {}) {
+    const shouldStop = typeof options.shouldStop === "function" ? options.shouldStop : () => false;
+
+    while (!shouldStop()) {
+        try {
+            const processed = await processNextReportExportJob();
+            if (!processed) {
+                await wait(REPORT_EXPORT_WORKER_BACKOFF_MS);
+            }
+        } catch (error) {
+            const normalizedError = normalizeError(error);
+            console.error("[report-export-worker] loop error", {
+                code: normalizedError.code,
+                message: normalizedError.message
+            });
+            await wait(REPORT_EXPORT_WORKER_BACKOFF_MS);
+        }
+    }
+}
+
 async function queueReportExportJob({
     actor,
     query,
-    loader,
-    action,
     reportKey,
     subscription
 }) {
@@ -292,25 +496,6 @@ async function queueReportExportJob({
         reportKey,
         format: query.format,
         query
-    });
-
-    setImmediate(() => {
-        void runReportExportJob({
-            jobId: job.id,
-            tenantId,
-            actor,
-            loader,
-            query,
-            reportKey,
-            action
-        }).catch((error) => {
-            console.error("[report-export-job] unhandled rejection", {
-                jobId: job.id,
-                tenantId,
-                reportKey,
-                error: String(error?.message || error)
-            });
-        });
     });
 
     return {
@@ -378,5 +563,7 @@ async function getReportExportJobDownload(actor, jobId) {
 module.exports = {
     queueReportExportJob,
     getReportExportJob,
-    getReportExportJobDownload
+    getReportExportJobDownload,
+    processNextReportExportJob,
+    runReportExportWorkerLoop
 };

@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "nodemon",
     "start": "node src/server.js",
+    "start:worker": "node src/worker.js",
     "check": "node --check src/server.js",
     "bootstrap:internal-ops": "node scripts/bootstrap-internal-ops.js",
     "seed:demo": "node scripts/seed-demo-data.js",

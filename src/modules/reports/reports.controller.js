@@ -35,8 +35,6 @@ async function runExport(req, res, loader, action) {
         const job = await reportExportJobsService.queueReportExportJob({
             actor: req.auth,
             query: requestQuery,
-            loader,
-            action,
             reportKey: action.replace(/^export_/, ""),
             subscription: req.subscription
         });
