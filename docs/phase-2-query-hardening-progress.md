@@ -71,6 +71,18 @@ Files:
 - `src/modules/members/members.service.js`
 - `src/modules/loan-applications/loan-applications.service.js`
 
+### 8) Loan list payload slimming
+
+- Removed heavy child collections from loan application list responses:
+  - `loan_approvals`
+  - `loan_guarantors`
+  - `collateral_items`
+- These remain available on detail responses used after create/update/workflow actions.
+- Reduces join amplification and payload size on the highest-volume loan list endpoint.
+
+File:
+- `src/modules/loan-applications/loan-applications.service.js`
+
 ## Validation
 
 - Syntax checks passed for edited modules.

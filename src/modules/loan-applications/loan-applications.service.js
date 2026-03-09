@@ -166,10 +166,7 @@ async function listLoanApplications(actor, query) {
         .select(`
             *,
             members(id, full_name, member_no, branch_id, user_id),
-            loan_products(id, code, name),
-            loan_approvals(id, approver_id, decision, created_at),
-            loan_guarantors(id, member_id, guaranteed_amount, consent_status),
-            collateral_items(id, collateral_type, valuation_amount)
+            loan_products(id, code, name)
         `, hasPagination ? { count: "planned" } : undefined)
         .eq("tenant_id", tenantId)
         .order("created_at", { ascending: false });
