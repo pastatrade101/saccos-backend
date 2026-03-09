@@ -25,6 +25,10 @@ begin
     where jobs.id = next_job.id
     returning jobs.* into claimed_job;
 
+    if claimed_job.id is null then
+        return null;
+    end if;
+
     return claimed_job;
 end;
 $$;

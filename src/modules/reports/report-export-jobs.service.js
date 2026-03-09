@@ -364,15 +364,18 @@ async function claimNextReportExportJob() {
         );
     }
 
-    if (!data) {
+    const job = Array.isArray(data) ? (data[0] || null) : data;
+    if (!job) {
         return null;
     }
 
-    if (Array.isArray(data)) {
-        return data[0] || null;
+    // Some Postgres client paths can deserialize an unassigned composite return
+    // as an object with all-null fields. Treat this as "no pending job".
+    if (!job.id || !job.report_key || !job.tenant_id || !job.created_by) {
+        return null;
     }
 
-    return data;
+    return job;
 }
 
 async function processClaimedReportExportJob(job) {
