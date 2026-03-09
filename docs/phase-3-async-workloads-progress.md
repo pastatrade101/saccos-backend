@@ -45,14 +45,30 @@ Date: 2026-03-09
 - Added npm script:
   - `npm run start:worker`
 
+### 7) Retry + dead-letter handling (v3)
+
+- Added retry metadata on export jobs:
+  - `retry_count`
+  - `max_retries`
+  - `next_attempt_at`
+  - `dead_lettered_at`
+- Worker now uses exponential backoff retries for transient failures.
+- When retries are exhausted, job is moved to dead-letter state as:
+  - `status = failed`
+  - `dead_lettered_at` set
+- Claim function now only picks jobs that are due:
+  - `status = pending`
+  - `next_attempt_at <= now()`
+
 ## Migration required
 
 Run these SQL files in Supabase SQL Editor:
 
 - `supabase/sql/027_phase3_report_export_jobs.sql`
 - `supabase/sql/028_phase3_report_export_worker.sql`
+- `supabase/sql/029_phase3_report_export_retries.sql`
 
 ## Notes
 
 - Async exports are now queue-based with separate worker execution.
-- Next Phase 3 step: add retry policy, dead-letter flow, and job retention/cleanup policy.
+- Next Phase 3 step: add retention/cleanup policy for completed/dead-letter jobs.
