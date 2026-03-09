@@ -12,6 +12,7 @@
     "seed:demo": "node scripts/seed-demo-data.js",
     "reset:tenants": "node scripts/reset-tenants.js",
     "reset:members": "node scripts/reset-members.js",
+    "cleanup:report-exports": "node scripts/cleanup-report-export-jobs.js",
     "load:baseline": "node scripts/load-baseline.js",
     "test": "jest",
     "test:watch": "jest --watch",

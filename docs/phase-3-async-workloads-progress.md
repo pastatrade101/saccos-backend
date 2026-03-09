@@ -60,6 +60,21 @@ Date: 2026-03-09
   - `status = pending`
   - `next_attempt_at <= now()`
 
+### 8) Retention + cleanup policy (v4)
+
+- Added worker-side periodic cleanup for old export jobs and stored artifacts.
+- Cleanup targets:
+  - old `completed` jobs
+  - old dead-lettered `failed` jobs
+- Added manual cleanup command:
+  - `npm run cleanup:report-exports`
+- Added retention env controls:
+  - `REPORT_EXPORT_CLEANUP_ENABLED`
+  - `REPORT_EXPORT_CLEANUP_INTERVAL_MS`
+  - `REPORT_EXPORT_CLEANUP_BATCH_SIZE`
+  - `REPORT_EXPORT_RETENTION_COMPLETED_DAYS`
+  - `REPORT_EXPORT_RETENTION_FAILED_DAYS`
+
 ## Migration required
 
 Run these SQL files in Supabase SQL Editor:
@@ -67,8 +82,9 @@ Run these SQL files in Supabase SQL Editor:
 - `supabase/sql/027_phase3_report_export_jobs.sql`
 - `supabase/sql/028_phase3_report_export_worker.sql`
 - `supabase/sql/029_phase3_report_export_retries.sql`
+- `supabase/sql/030_phase3_report_export_cleanup_indexes.sql`
 
 ## Notes
 
 - Async exports are now queue-based with separate worker execution.
-- Next Phase 3 step: add retention/cleanup policy for completed/dead-letter jobs.
+- Cleanup is safe to run repeatedly and can be triggered manually or by worker interval.

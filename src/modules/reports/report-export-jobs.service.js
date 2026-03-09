@@ -36,6 +36,26 @@ const REPORT_EXPORT_RETRY_MAX_MS = Math.max(
     REPORT_EXPORT_RETRY_BASE_MS,
     Number(process.env.REPORT_EXPORT_RETRY_MAX_MS || 300000)
 );
+const REPORT_EXPORT_RETENTION_COMPLETED_DAYS = Math.max(
+    1,
+    Number(process.env.REPORT_EXPORT_RETENTION_COMPLETED_DAYS || 14)
+);
+const REPORT_EXPORT_RETENTION_FAILED_DAYS = Math.max(
+    1,
+    Number(process.env.REPORT_EXPORT_RETENTION_FAILED_DAYS || 30)
+);
+const REPORT_EXPORT_CLEANUP_BATCH_SIZE = Math.max(
+    10,
+    Number(process.env.REPORT_EXPORT_CLEANUP_BATCH_SIZE || 200)
+);
+const REPORT_EXPORT_CLEANUP_INTERVAL_MS = Math.max(
+    60000,
+    Number(process.env.REPORT_EXPORT_CLEANUP_INTERVAL_MS || 3600000)
+);
+const REPORT_EXPORT_CLEANUP_ENABLED = parseBooleanEnv(
+    process.env.REPORT_EXPORT_CLEANUP_ENABLED,
+    true
+);
 
 const REPORT_REGISTRY = {
     member_statement: {
@@ -71,6 +91,19 @@ const REPORT_REGISTRY = {
         action: "export_audit_exceptions"
     }
 };
+
+function parseBooleanEnv(value, defaultValue = false) {
+    if (typeof value === "undefined" || value === null) {
+        return defaultValue;
+    }
+
+    const normalized = String(value).trim().toLowerCase();
+    if (!normalized) {
+        return defaultValue;
+    }
+
+    return ["true", "1", "yes", "on"].includes(normalized);
+}
 
 function isMissingReportExportJobsSchema(error) {
     const message = String(error?.message || "").toLowerCase();
@@ -146,6 +179,19 @@ function computeRetryDelayMs(nextRetryCount) {
     const safeRetryCount = Math.max(1, Number(nextRetryCount) || 1);
     const delay = REPORT_EXPORT_RETRY_BASE_MS * (2 ** (safeRetryCount - 1));
     return Math.min(REPORT_EXPORT_RETRY_MAX_MS, delay);
+}
+
+function toCutoffIso(days) {
+    const ms = Math.max(1, Number(days) || 1) * 24 * 60 * 60 * 1000;
+    return new Date(Date.now() - ms).toISOString();
+}
+
+function chunkArray(values, size) {
+    const chunks = [];
+    for (let index = 0; index < values.length; index += size) {
+        chunks.push(values.slice(index, index + size));
+    }
+    return chunks;
 }
 
 async function wait(ms) {
@@ -387,6 +433,156 @@ async function claimNextReportExportJob() {
     return job;
 }
 
+async function selectCleanupRows(limit) {
+    const completedCutoffIso = toCutoffIso(REPORT_EXPORT_RETENTION_COMPLETED_DAYS);
+    const failedCutoffIso = toCutoffIso(REPORT_EXPORT_RETENTION_FAILED_DAYS);
+    const perQueryLimit = Math.max(1, Math.ceil(limit / 2));
+
+    const [completedResult, failedResult, legacyFailedResult] = await Promise.all([
+        adminSupabase
+            .from("report_export_jobs")
+            .select("id,result_path,status,completed_at,dead_lettered_at,created_at")
+            .eq("status", "completed")
+            .lte("completed_at", completedCutoffIso)
+            .order("completed_at", { ascending: true })
+            .limit(perQueryLimit),
+        adminSupabase
+            .from("report_export_jobs")
+            .select("id,result_path,status,completed_at,dead_lettered_at,created_at")
+            .eq("status", "failed")
+            .not("dead_lettered_at", "is", null)
+            .lte("dead_lettered_at", failedCutoffIso)
+            .order("dead_lettered_at", { ascending: true })
+            .limit(perQueryLimit),
+        adminSupabase
+            .from("report_export_jobs")
+            .select("id,result_path,status,completed_at,dead_lettered_at,created_at")
+            .eq("status", "failed")
+            .is("dead_lettered_at", null)
+            .lte("completed_at", failedCutoffIso)
+            .order("completed_at", { ascending: true })
+            .limit(perQueryLimit)
+    ]);
+
+    const queryErrors = [
+        completedResult.error,
+        failedResult.error,
+        legacyFailedResult.error
+    ].filter(Boolean);
+
+    if (queryErrors.length > 0) {
+        const firstError = queryErrors[0];
+        if (isMissingReportExportJobsSchema(firstError)) {
+            throw toJobSchemaError(firstError);
+        }
+        throw new AppError(
+            500,
+            "REPORT_EXPORT_CLEANUP_SELECT_FAILED",
+            "Unable to select report export cleanup candidates.",
+            firstError
+        );
+    }
+
+    const byId = new Map();
+    for (const row of [
+        ...(completedResult.data || []),
+        ...(failedResult.data || []),
+        ...(legacyFailedResult.data || [])
+    ]) {
+        if (row?.id) {
+            byId.set(row.id, row);
+        }
+    }
+
+    return Array.from(byId.values())
+        .sort((a, b) => {
+            const aKey = a.dead_lettered_at || a.completed_at || a.created_at || "";
+            const bKey = b.dead_lettered_at || b.completed_at || b.created_at || "";
+            return String(aKey).localeCompare(String(bKey));
+        })
+        .slice(0, limit);
+}
+
+async function deleteStorageArtifacts(paths) {
+    if (!paths.length) {
+        return { attempted: 0, failed: 0 };
+    }
+
+    const bucket = adminSupabase.storage.from(env.importsBucket);
+    let attempted = 0;
+    let failed = 0;
+
+    for (const pathChunk of chunkArray(paths, 100)) {
+        attempted += pathChunk.length;
+        const { error } = await bucket.remove(pathChunk);
+        if (error) {
+            failed += pathChunk.length;
+            console.error("[report-export-cleanup] storage remove failed", {
+                count: pathChunk.length,
+                error: String(error?.message || error)
+            });
+        }
+    }
+
+    return { attempted, failed };
+}
+
+async function deleteReportExportJobs(ids) {
+    if (!ids.length) {
+        return 0;
+    }
+
+    let deleted = 0;
+    for (const idChunk of chunkArray(ids, REPORT_EXPORT_CLEANUP_BATCH_SIZE)) {
+        const { error, count } = await adminSupabase
+            .from("report_export_jobs")
+            .delete({ count: "exact" })
+            .in("id", idChunk);
+
+        if (error) {
+            if (isMissingReportExportJobsSchema(error)) {
+                throw toJobSchemaError(error);
+            }
+            throw new AppError(
+                500,
+                "REPORT_EXPORT_CLEANUP_DELETE_FAILED",
+                "Unable to delete report export jobs during cleanup.",
+                error
+            );
+        }
+
+        deleted += Number(count || 0);
+    }
+
+    return deleted;
+}
+
+async function runReportExportCleanupOnce(options = {}) {
+    const cleanupLimit = Math.max(
+        1,
+        Number(options.batchSize || REPORT_EXPORT_CLEANUP_BATCH_SIZE)
+    );
+
+    const candidates = await selectCleanupRows(cleanupLimit);
+    const ids = candidates.map((row) => row.id).filter(Boolean);
+    const paths = candidates
+        .map((row) => row.result_path)
+        .filter((path) => typeof path === "string" && path.trim().length > 0);
+
+    const storage = await deleteStorageArtifacts(paths);
+    const deletedCount = await deleteReportExportJobs(ids);
+
+    return {
+        cleanup_enabled: REPORT_EXPORT_CLEANUP_ENABLED,
+        selected_count: candidates.length,
+        deleted_count: deletedCount,
+        storage_files_attempted: storage.attempted,
+        storage_files_failed: storage.failed,
+        retention_completed_days: REPORT_EXPORT_RETENTION_COMPLETED_DAYS,
+        retention_failed_days: REPORT_EXPORT_RETENTION_FAILED_DAYS
+    };
+}
+
 async function processClaimedReportExportJob(job) {
     const registryItem = REPORT_REGISTRY[job.report_key];
     if (!registryItem) {
@@ -514,12 +710,30 @@ async function processNextReportExportJob() {
 
 async function runReportExportWorkerLoop(options = {}) {
     const shouldStop = typeof options.shouldStop === "function" ? options.shouldStop : () => false;
+    let nextCleanupAt = Date.now() + REPORT_EXPORT_CLEANUP_INTERVAL_MS;
 
     while (!shouldStop()) {
         try {
             const processed = await processNextReportExportJob();
             if (!processed) {
                 await wait(REPORT_EXPORT_WORKER_BACKOFF_MS);
+            }
+
+            if (REPORT_EXPORT_CLEANUP_ENABLED && Date.now() >= nextCleanupAt) {
+                try {
+                    const cleanupSummary = await runReportExportCleanupOnce();
+                    if (cleanupSummary.deleted_count > 0 || cleanupSummary.storage_files_failed > 0) {
+                        console.log("[report-export-cleanup] completed", cleanupSummary);
+                    }
+                } catch (cleanupError) {
+                    const normalizedError = normalizeError(cleanupError);
+                    console.error("[report-export-cleanup] failed", {
+                        code: normalizedError.code,
+                        message: normalizedError.message
+                    });
+                } finally {
+                    nextCleanupAt = Date.now() + REPORT_EXPORT_CLEANUP_INTERVAL_MS;
+                }
             }
         } catch (error) {
             const normalizedError = normalizeError(error);
@@ -618,5 +832,6 @@ module.exports = {
     getReportExportJob,
     getReportExportJobDownload,
     processNextReportExportJob,
-    runReportExportWorkerLoop
+    runReportExportWorkerLoop,
+    runReportExportCleanupOnce
 };
