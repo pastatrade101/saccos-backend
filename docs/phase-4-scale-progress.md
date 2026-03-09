@@ -94,6 +94,19 @@ export SCALE_LOAD_OUTPUT_FILE=docs/phase-4-scale-stages-latest.md
 npm run load:scale
 ```
 
+### 8) Transient upstream retry hardening
+
+- Added centralized retry for Supabase fetch calls in client config:
+  - `src/config/supabase.js`
+- Retries are applied for safe read methods (`GET`, `HEAD`, `OPTIONS`) on transient failures:
+  - status: `408`, `429`, `5xx`/Cloudflare edge variants (`520-527`)
+  - network transport failures
+- Backoff is exponential with jitter.
+- Tuning env vars:
+  - `SUPABASE_FETCH_RETRY_MAX_ATTEMPTS`
+  - `SUPABASE_FETCH_RETRY_BASE_MS`
+  - `SUPABASE_FETCH_RETRY_MAX_MS`
+
 ## Migration required
 
 Run this SQL file in Supabase SQL Editor:
