@@ -8,6 +8,46 @@ const FEATURE_LIMIT_MAP = {
     staffUsers: "max_users",
     members: "max_members"
 };
+const SUBSCRIPTION_CACHE_TTL_MS = Math.max(0, Number(process.env.SUBSCRIPTION_CACHE_TTL_MS || 15000));
+const subscriptionStatusCache = new Map();
+
+function getCachedSubscriptionStatus(tenantId) {
+    if (!SUBSCRIPTION_CACHE_TTL_MS) {
+        return null;
+    }
+
+    const cached = subscriptionStatusCache.get(tenantId);
+    if (!cached) {
+        return null;
+    }
+
+    if (cached.expiresAt <= Date.now()) {
+        subscriptionStatusCache.delete(tenantId);
+        return null;
+    }
+
+    return cached.value;
+}
+
+function setCachedSubscriptionStatus(tenantId, value) {
+    if (!SUBSCRIPTION_CACHE_TTL_MS) {
+        return;
+    }
+
+    subscriptionStatusCache.set(tenantId, {
+        value,
+        expiresAt: Date.now() + SUBSCRIPTION_CACHE_TTL_MS
+    });
+}
+
+function clearSubscriptionStatusCache(tenantId) {
+    if (tenantId) {
+        subscriptionStatusCache.delete(tenantId);
+        return;
+    }
+
+    subscriptionStatusCache.clear();
+}
 
 function parseFeatureValue(feature) {
     if (feature.feature_type === "bool") {
@@ -173,31 +213,42 @@ async function getTenantEntitlements(tenantId) {
     return buildEntitlements(subscription.plans?.code, features);
 }
 
-async function getSubscriptionStatus(tenantId) {
+async function getSubscriptionStatus(tenantId, options = {}) {
+    if (!options.bypassCache) {
+        const cached = getCachedSubscriptionStatus(tenantId);
+        if (cached) {
+            return cached;
+        }
+    }
+
     const subscription = await getLatestTenantSubscription(tenantId);
 
     if (!subscription) {
         const legacy = await getLegacySubscription(tenantId);
 
         if (!legacy) {
-            return {
+            const missing = {
                 isUsable: false,
                 status: "missing",
                 plan: null,
                 features: {},
                 limits: null
             };
+            setCachedSubscriptionStatus(tenantId, missing);
+            return missing;
         }
 
         const entitlements = buildEntitlements(legacy.plan, []);
-        return buildSubscriptionResponse(legacy, entitlements);
+        const legacyResponse = buildSubscriptionResponse(legacy, entitlements);
+        setCachedSubscriptionStatus(tenantId, legacyResponse);
+        return legacyResponse;
     }
 
     const entitlements = await getFeaturesByPlanId(subscription.plan_id).then((features) =>
         buildEntitlements(subscription.plans?.code, features)
     );
 
-    return buildSubscriptionResponse(
+    const response = buildSubscriptionResponse(
         {
             id: subscription.id,
             tenant_id: subscription.tenant_id,
@@ -211,10 +262,12 @@ async function getSubscriptionStatus(tenantId) {
         },
         entitlements
     );
+    setCachedSubscriptionStatus(tenantId, response);
+    return response;
 }
 
 async function assertPlanLimit(tenantId, resource, tableName) {
-    const subscription = await getSubscriptionStatus(tenantId);
+    const subscription = await getSubscriptionStatus(tenantId, { bypassCache: true });
 
     if (!subscription.isUsable) {
         throw new AppError(402, "SUBSCRIPTION_INACTIVE", "Subscription inactive. Upgrade or renew.");
@@ -301,6 +354,8 @@ async function assignTenantSubscription({
         );
     }
 
+    clearSubscriptionStatusCache(tenantId);
+
     return {
         ...subscription,
         plan: plan.code,
@@ -313,5 +368,6 @@ module.exports = {
     assignTenantSubscription,
     getTenantEntitlements,
     getSubscriptionStatus,
+    clearSubscriptionStatusCache,
     assertPlanLimit
 };

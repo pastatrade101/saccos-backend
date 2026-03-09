@@ -18,12 +18,14 @@ module.exports = asyncHandler(async (req, res, next) => {
     }
 
     const authUser = data.user;
-    const profile = await getUserProfile(authUser.id);
-    const branchIds = profile ? await getBranchAssignments(authUser.id) : [];
-    const isInternalOps =
+    const [profile, branchIds] = await Promise.all([
+        getUserProfile(authUser.id),
+        getBranchAssignments(authUser.id)
+    ]);
+    const isInternalOpsByMetadata =
         authUser.app_metadata?.platform_role === "internal_ops" ||
-        authUser.app_metadata?.platform_role === "platform_admin" ||
-        profile?.role === "platform_admin";
+        authUser.app_metadata?.platform_role === "platform_admin";
+    const isInternalOps = isInternalOpsByMetadata || profile?.role === "platform_admin";
 
     if (!profile && !isInternalOps) {
         throw new AppError(403, "PROFILE_NOT_FOUND", "User profile is not provisioned.");

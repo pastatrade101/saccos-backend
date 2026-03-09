@@ -3,9 +3,8 @@ const crypto = require("crypto");
 const { adminSupabase, publicSupabase } = require("../../config/supabase");
 const env = require("../../config/env");
 const AppError = require("../../utils/app-error");
-const { getUserProfile } = require("../../services/user-context.service");
+const { getUserProfile, assertTenantAccess, invalidateUserContextCache } = require("../../services/user-context.service");
 const { logAudit } = require("../../services/audit.service");
-const { assertTenantAccess } = require("../../services/user-context.service");
 const { ensureBranchAssignments } = require("../../services/branch-assignment.service");
 const { saveCredentialHandoff } = require("../../services/credential-handoff.service");
 const { normalizePhone, sendOtpChallenge, verifyOtpChallenge } = require("../../services/otp.service");
@@ -337,6 +336,7 @@ async function persistOtpEnrollmentPhone(auth, phoneInput) {
         );
     }
 
+    invalidateUserContextCache(auth.user.id);
     return normalizedPhone;
 }
 
@@ -429,6 +429,8 @@ async function inviteUser({ actor, payload }) {
             branchIds: payload.branch_ids
         });
     }
+
+    invalidateUserContextCache(data.user.id);
 
     let destinationHint = null;
     if (payload.send_invite && useSmsSetupLink) {

@@ -2,7 +2,7 @@ const { adminSupabase } = require("../../config/supabase");
 const AppError = require("../../utils/app-error");
 const { assertPlanLimit } = require("../../services/subscription.service");
 const { logAudit } = require("../../services/audit.service");
-const { assertTenantAccess } = require("../../services/user-context.service");
+const { assertTenantAccess, invalidateUserContextCache } = require("../../services/user-context.service");
 const { inviteUser } = require("../auth/auth.service");
 const { ROLES } = require("../../constants/roles");
 const { getActiveCredentialByUser, clearCredentialByUser } = require("../../services/credential-handoff.service");
@@ -305,6 +305,7 @@ async function updateUser(actor, userId, payload) {
         afterData: updated
     });
 
+    invalidateUserContextCache(userId);
     return updated;
 }
 

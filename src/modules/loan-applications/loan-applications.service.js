@@ -174,6 +174,13 @@ async function listLoanApplications(actor, query) {
         .eq("tenant_id", tenantId)
         .order("created_at", { ascending: false });
 
+    if (actor.role === ROLES.MEMBER) {
+        const ownMember = await getMemberByUser(tenantId, actor.user.id);
+        builder = builder.eq("member_id", ownMember.id);
+    } else if (!actor.isInternalOps && [ROLES.BRANCH_MANAGER, ROLES.LOAN_OFFICER, ROLES.TELLER].includes(actor.role) && actor.branchIds.length) {
+        builder = builder.in("branch_id", actor.branchIds);
+    }
+
     if (query.status) builder = builder.eq("status", query.status);
     if (query.member_id) builder = builder.eq("member_id", query.member_id);
     if (query.branch_id) {
@@ -189,20 +196,8 @@ async function listLoanApplications(actor, query) {
         throw new AppError(500, "LOAN_APPLICATIONS_FETCH_FAILED", "Unable to load loan applications.", error);
     }
 
-    const applications = (data || []).filter((application) => {
-        if (actor.role === ROLES.MEMBER) {
-            return application.members?.user_id === actor.user.id;
-        }
-
-        if ([ROLES.BRANCH_MANAGER, ROLES.LOAN_OFFICER, ROLES.TELLER].includes(actor.role)) {
-            return !application.branch_id || actor.branchIds.includes(application.branch_id);
-        }
-
-        return true;
-    });
-
     return {
-        data: applications,
+        data: data || [],
         pagination: hasPagination
             ? {
                 page,

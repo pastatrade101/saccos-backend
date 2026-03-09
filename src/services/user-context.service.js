@@ -1,7 +1,55 @@
 const { adminSupabase } = require("../config/supabase");
 const AppError = require("../utils/app-error");
+const USER_CONTEXT_CACHE_TTL_MS = Math.max(0, Number(process.env.USER_CONTEXT_CACHE_TTL_MS || 15000));
+const userProfileCache = new Map();
+const branchAssignmentsCache = new Map();
+
+function getCached(cache, key) {
+    if (!USER_CONTEXT_CACHE_TTL_MS) {
+        return null;
+    }
+
+    const cached = cache.get(key);
+    if (!cached) {
+        return null;
+    }
+
+    if (cached.expiresAt <= Date.now()) {
+        cache.delete(key);
+        return null;
+    }
+
+    return cached.value;
+}
+
+function setCached(cache, key, value) {
+    if (!USER_CONTEXT_CACHE_TTL_MS) {
+        return;
+    }
+
+    cache.set(key, {
+        value,
+        expiresAt: Date.now() + USER_CONTEXT_CACHE_TTL_MS
+    });
+}
+
+function invalidateUserContextCache(userId) {
+    if (userId) {
+        userProfileCache.delete(userId);
+        branchAssignmentsCache.delete(userId);
+        return;
+    }
+
+    userProfileCache.clear();
+    branchAssignmentsCache.clear();
+}
 
 async function getUserProfile(userId) {
+    const cached = getCached(userProfileCache, userId);
+    if (cached !== null) {
+        return cached;
+    }
+
     const { data, error } = await adminSupabase
         .from("user_profiles")
         .select("*")
@@ -13,10 +61,16 @@ async function getUserProfile(userId) {
         throw new AppError(500, "USER_PROFILE_LOOKUP_FAILED", "Unable to load user profile.");
     }
 
+    setCached(userProfileCache, userId, data || null);
     return data;
 }
 
 async function getBranchAssignments(userId) {
+    const cached = getCached(branchAssignmentsCache, userId);
+    if (cached !== null) {
+        return cached;
+    }
+
     const { data, error } = await adminSupabase
         .from("branch_staff_assignments")
         .select("branch_id")
@@ -27,7 +81,9 @@ async function getBranchAssignments(userId) {
         throw new AppError(500, "BRANCH_ASSIGNMENTS_LOOKUP_FAILED", "Unable to load branch assignments.");
     }
 
-    return (data || []).map((row) => row.branch_id);
+    const branchIds = (data || []).map((row) => row.branch_id);
+    setCached(branchAssignmentsCache, userId, branchIds);
+    return branchIds;
 }
 
 function assertTenantAccess(req, tenantId) {
@@ -59,6 +115,7 @@ function assertBranchAccess(req, branchId) {
 module.exports = {
     getUserProfile,
     getBranchAssignments,
+    invalidateUserContextCache,
     assertTenantAccess,
     assertBranchAccess
 };
