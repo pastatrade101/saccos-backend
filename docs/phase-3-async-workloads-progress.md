@@ -28,6 +28,12 @@ Date: 2026-03-09
 
 - Async report files are uploaded to `IMPORTS_BUCKET` and downloaded via signed URL.
 
+### 5) Anti-stall safeguards
+
+- Added job-level timeout and upload timeout protections.
+- Async failures now log explicit error context to backend logs.
+- Jobs that hit timeout/failure are marked `failed` with `error_code` and `error_message`.
+
 ## Migration required
 
 Run this SQL file in Supabase SQL Editor:

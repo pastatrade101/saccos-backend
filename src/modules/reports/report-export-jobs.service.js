@@ -11,6 +11,14 @@ const REPORT_EXPORT_SIGNED_URL_TTL_SECONDS = Math.max(
     60,
     Number(process.env.REPORT_EXPORT_SIGNED_URL_TTL_SECONDS || 600)
 );
+const REPORT_EXPORT_JOB_TIMEOUT_MS = Math.max(
+    10000,
+    Number(process.env.REPORT_EXPORT_JOB_TIMEOUT_MS || 120000)
+);
+const REPORT_EXPORT_UPLOAD_TIMEOUT_MS = Math.max(
+    5000,
+    Number(process.env.REPORT_EXPORT_UPLOAD_TIMEOUT_MS || 45000)
+);
 
 function isMissingReportExportJobsSchema(error) {
     const message = String(error?.message || "").toLowerCase();
@@ -50,6 +58,19 @@ function normalizeError(error) {
 function buildResultPath(jobId, tenantId, extension) {
     const datePrefix = new Date().toISOString().slice(0, 10);
     return `tenant/${tenantId}/reports/${datePrefix}/${jobId}.${extension}`;
+}
+
+function withTimeout(promise, timeoutMs, code, message) {
+    let timeoutId;
+    const timeoutPromise = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => {
+            reject(new AppError(504, code, message));
+        }, timeoutMs);
+    });
+
+    return Promise.race([promise, timeoutPromise]).finally(() => {
+        clearTimeout(timeoutId);
+    });
 }
 
 async function resolveTenantName(tenantId) {
@@ -171,57 +192,84 @@ async function runReportExportJob({
     });
 
     try {
-        await runObservedJob(`report.export.async.${action}`, { tenantId }, async () => {
-            const report = await loader(actor, query);
-            const rows = Array.isArray(report?.rows) ? report.rows : [];
-            const rowCount = rows.length;
-            const tenantName = await resolveTenantName(tenantId);
-            const subscription = await getSubscriptionStatus(tenantId);
+        await withTimeout(
+            runObservedJob(`report.export.async.${action}`, { tenantId }, async () => {
+                const report = await loader(actor, query);
+                const rows = Array.isArray(report?.rows) ? report.rows : [];
+                const rowCount = rows.length;
+                const tenantName = await resolveTenantName(tenantId);
+                const subscription = await getSubscriptionStatus(tenantId);
 
-            await assertExportQuota(subscription, tenantId);
+                await assertExportQuota(subscription, tenantId);
 
-            const artifact = await buildExportArtifact({
-                rows,
-                format: query.format,
-                filename: report.filename,
-                title: report.title,
-                tenantName
-            });
-            const resultPath = buildResultPath(jobId, tenantId, artifact.fileExtension);
-
-            await uploadReportArtifact(resultPath, artifact);
-
-            await logAudit({
-                tenantId,
-                userId: actor.user.id,
-                table: "reports",
-                action,
-                afterData: {
-                    mode: "async",
-                    report_key: reportKey,
+                const artifact = await buildExportArtifact({
+                    rows,
                     format: query.format,
-                    row_count: rowCount
-                }
-            });
+                    filename: report.filename,
+                    title: report.title,
+                    tenantName
+                });
+                const resultPath = buildResultPath(jobId, tenantId, artifact.fileExtension);
 
-            await updateReportExportJob(jobId, {
-                status: "completed",
-                filename: report.filename,
-                title: report.title,
-                row_count: rowCount,
-                result_path: resultPath,
-                content_type: artifact.contentType,
-                completed_at: new Date().toISOString()
-            });
-        });
+                await withTimeout(
+                    uploadReportArtifact(resultPath, artifact),
+                    REPORT_EXPORT_UPLOAD_TIMEOUT_MS,
+                    "REPORT_EXPORT_UPLOAD_TIMEOUT",
+                    "Report export upload timed out."
+                );
+
+                await logAudit({
+                    tenantId,
+                    userId: actor.user.id,
+                    table: "reports",
+                    action,
+                    afterData: {
+                        mode: "async",
+                        report_key: reportKey,
+                        format: query.format,
+                        row_count: rowCount
+                    }
+                });
+
+                await updateReportExportJob(jobId, {
+                    status: "completed",
+                    filename: report.filename,
+                    title: report.title,
+                    row_count: rowCount,
+                    result_path: resultPath,
+                    content_type: artifact.contentType,
+                    completed_at: new Date().toISOString()
+                });
+            }),
+            REPORT_EXPORT_JOB_TIMEOUT_MS,
+            "REPORT_EXPORT_JOB_TIMEOUT",
+            "Report export job timed out."
+        );
     } catch (error) {
         const normalizedError = normalizeError(error);
-        await updateReportExportJob(jobId, {
-            status: "failed",
-            error_code: normalizedError.code,
-            error_message: normalizedError.message,
-            completed_at: new Date().toISOString()
+        console.error("[report-export-job] failed", {
+            jobId,
+            tenantId,
+            reportKey,
+            code: normalizedError.code,
+            message: normalizedError.message
         });
+
+        try {
+            await updateReportExportJob(jobId, {
+                status: "failed",
+                error_code: normalizedError.code,
+                error_message: normalizedError.message,
+                completed_at: new Date().toISOString()
+            });
+        } catch (updateError) {
+            console.error("[report-export-job] failed to persist failure state", {
+                jobId,
+                tenantId,
+                reportKey,
+                error: String(updateError?.message || updateError)
+            });
+        }
     }
 }
 
@@ -255,7 +303,14 @@ async function queueReportExportJob({
             query,
             reportKey,
             action
-        }).catch(() => {});
+        }).catch((error) => {
+            console.error("[report-export-job] unhandled rejection", {
+                jobId: job.id,
+                tenantId,
+                reportKey,
+                error: String(error?.message || error)
+            });
+        });
     });
 
     return {
