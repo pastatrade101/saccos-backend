@@ -8,6 +8,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: 5000
+      HOST: "${HOST:-0.0.0.0}"
       OTP_REQUIRED_ON_SIGNIN: "${OTP_REQUIRED_ON_SIGNIN:-true}"
     ports:
       - "${PORT:-5000}:5000"

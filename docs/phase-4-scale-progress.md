@@ -20,6 +20,31 @@ Date: 2026-03-09
 - Removed fixed backend `container_name` to avoid scaling conflicts in Docker Compose.
 - Backend service can now be replicated in environments with a proper reverse proxy/load balancer strategy.
 
+### 4) Simple 2-replica deployment path (Compose)
+
+- Added a scale override compose file:
+  - `docker-compose.scale.yml`
+- Added internal API load balancer config:
+  - `deploy/nginx/api-lb.conf`
+- This enables:
+  - two backend replicas (`--scale backend=2`)
+  - one `api-lb` service exposed on `PORT`
+  - one `report-worker` service
+
+#### Start scaled stack
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.scale.yml up -d --build --scale backend=2 backend api-lb report-worker
+```
+
+#### Verify
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.scale.yml ps
+docker compose -f docker-compose.yml -f docker-compose.scale.yml logs -f api-lb backend report-worker
+curl -sS http://127.0.0.1:${PORT:-5000}/health
+```
+
 ### 3) Env hardening for import/auth creation limits
 
 - Added explicit env parsing/exports for:
