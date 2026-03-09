@@ -16,7 +16,11 @@ const MEMBER_LIST_COLUMNS = `
     tenant_id,
     branch_id,
     user_id,
+    first_name,
+    middle_name,
+    last_name,
     full_name,
+    gender,
     phone,
     email,
     member_no,
@@ -40,6 +44,235 @@ const MEMBER_LIST_COLUMNS = `
     notes,
     created_at
 `;
+const PRIVILEGED_IDENTITY_ROLES = new Set(["super_admin", "branch_manager", "auditor"]);
+const TANZANIA_PHONE_PATTERN = /^(\+?255|0)?[67]\d{8}$/;
+const IDENTITY_CODE_PATTERN = /^[A-Za-z0-9-]{5,50}$/;
+
+function normalizeNullableString(value) {
+    if (value === undefined || value === null) {
+        return null;
+    }
+
+    const normalized = String(value).trim();
+    return normalized.length ? normalized : null;
+}
+
+function normalizeEmail(value) {
+    const normalized = normalizeNullableString(value);
+    return normalized ? normalized.toLowerCase() : null;
+}
+
+function normalizePhone(value) {
+    const normalized = normalizeNullableString(value);
+    if (!normalized) {
+        return null;
+    }
+
+    const compact = normalized.replace(/\s+/g, "").replace(/-/g, "");
+    if (!TANZANIA_PHONE_PATTERN.test(compact)) {
+        throw new AppError(
+            400,
+            "MEMBER_PHONE_INVALID",
+            "Phone number must be a valid Tanzania mobile number (06/07 local or 2556/2557 international format)."
+        );
+    }
+
+    const noPlus = compact.replace(/^\+/, "");
+    if (noPlus.startsWith("255")) {
+        return noPlus;
+    }
+    if (noPlus.startsWith("0")) {
+        return `255${noPlus.slice(1)}`;
+    }
+    return `255${noPlus}`;
+}
+
+function normalizeIdentityCode(value, label) {
+    const normalized = normalizeNullableString(value);
+    if (!normalized) {
+        return null;
+    }
+
+    if (!IDENTITY_CODE_PATTERN.test(normalized)) {
+        throw new AppError(
+            400,
+            "MEMBER_IDENTITY_INVALID",
+            `${label} must be 5-50 characters and can include letters, numbers, and hyphens only.`
+        );
+    }
+
+    return normalized.toUpperCase();
+}
+
+function splitFullName(fullName) {
+    const normalized = normalizeNullableString(fullName);
+    if (!normalized) {
+        return {
+            firstName: null,
+            middleName: null,
+            lastName: null
+        };
+    }
+
+    const parts = normalized.split(/\s+/).filter(Boolean);
+    if (parts.length === 1) {
+        return {
+            firstName: parts[0],
+            middleName: null,
+            lastName: null
+        };
+    }
+
+    if (parts.length === 2) {
+        return {
+            firstName: parts[0],
+            middleName: null,
+            lastName: parts[1]
+        };
+    }
+
+    return {
+        firstName: parts[0],
+        middleName: parts.slice(1, -1).join(" "),
+        lastName: parts[parts.length - 1]
+    };
+}
+
+function composeFullName(firstName, middleName, lastName) {
+    return [firstName, middleName, lastName]
+        .map((entry) => normalizeNullableString(entry))
+        .filter(Boolean)
+        .join(" ") || null;
+}
+
+function maskSensitiveIdentity(value) {
+    const normalized = normalizeNullableString(value);
+    if (!normalized) {
+        return null;
+    }
+
+    if (normalized.length <= 4) {
+        return `${normalized.slice(0, 1)}***`;
+    }
+
+    return `${normalized.slice(0, 2)}${"*".repeat(Math.max(normalized.length - 4, 2))}${normalized.slice(-2)}`;
+}
+
+function shouldViewSensitiveIdentity(actor) {
+    return actor.isInternalOps || PRIVILEGED_IDENTITY_ROLES.has(actor.role);
+}
+
+function projectMemberForRead(row, actor) {
+    const firstName = normalizeNullableString(row.first_name);
+    const middleName = normalizeNullableString(row.middle_name);
+    const lastName = normalizeNullableString(row.last_name);
+    const split = splitFullName(row.full_name);
+    const resolvedFirstName = firstName || split.firstName;
+    const resolvedMiddleName = middleName || split.middleName;
+    const resolvedLastName = lastName || split.lastName;
+    const canViewSensitiveIdentity = shouldViewSensitiveIdentity(actor);
+    const tinNo = normalizeNullableString(row.tin_no);
+    const nidaNo = normalizeNullableString(row.nida_no);
+
+    return {
+        ...row,
+        first_name: resolvedFirstName,
+        middle_name: resolvedMiddleName,
+        last_name: resolvedLastName,
+        full_name: normalizeNullableString(row.full_name) || composeFullName(resolvedFirstName, resolvedMiddleName, resolvedLastName),
+        phone_number: row.phone || null,
+        date_of_birth: row.dob || null,
+        address: row.address_line1 || null,
+        tin_number: canViewSensitiveIdentity ? tinNo : maskSensitiveIdentity(tinNo),
+        nin: canViewSensitiveIdentity ? nidaNo : maskSensitiveIdentity(nidaNo),
+        tin_no: canViewSensitiveIdentity ? tinNo : maskSensitiveIdentity(tinNo),
+        nida_no: canViewSensitiveIdentity ? nidaNo : maskSensitiveIdentity(nidaNo)
+    };
+}
+
+function buildMemberWritePatch(payload, existing = null) {
+    const patch = {};
+    const has = (field) => Object.prototype.hasOwnProperty.call(payload, field);
+    const hasAny = (...fields) => fields.some((field) => has(field));
+    const touchesName = hasAny("first_name", "middle_name", "last_name", "full_name") || !existing;
+
+    const firstNameInput = has("first_name")
+        ? payload.first_name
+        : existing?.first_name ?? null;
+    const middleNameInput = has("middle_name")
+        ? payload.middle_name
+        : existing?.middle_name ?? null;
+    const lastNameInput = has("last_name")
+        ? payload.last_name
+        : existing?.last_name ?? null;
+
+    let firstName = normalizeNullableString(firstNameInput);
+    let middleName = normalizeNullableString(middleNameInput);
+    let lastName = normalizeNullableString(lastNameInput);
+    let fullName = has("full_name")
+        ? normalizeNullableString(payload.full_name)
+        : normalizeNullableString(existing?.full_name);
+
+    if (fullName && (!firstName || !lastName)) {
+        const split = splitFullName(fullName);
+        firstName = firstName || split.firstName;
+        middleName = middleName || split.middleName;
+        lastName = lastName || split.lastName;
+    }
+
+    if (!fullName && (firstName || lastName)) {
+        fullName = composeFullName(firstName, middleName, lastName);
+    }
+
+    if (touchesName) {
+        if (!fullName) {
+            throw new AppError(400, "MEMBER_FULL_NAME_REQUIRED", "Provide full_name or both first_name and last_name.");
+        }
+
+        if (!firstName || !lastName) {
+            throw new AppError(400, "MEMBER_NAME_PARTS_REQUIRED", "first_name and last_name are required.");
+        }
+
+        patch.first_name = firstName;
+        patch.middle_name = middleName;
+        patch.last_name = lastName;
+        patch.full_name = fullName;
+    }
+
+    if (hasAny("phone_number", "phone") || !existing) {
+        patch.phone = normalizePhone(has("phone_number") ? payload.phone_number : payload.phone);
+    }
+
+    if (has("email") || !existing) {
+        patch.email = normalizeEmail(payload.email);
+    }
+
+    if (hasAny("date_of_birth", "dob") || !existing) {
+        patch.dob = has("date_of_birth") ? (payload.date_of_birth || null) : (payload.dob || null);
+    }
+
+    if (hasAny("address", "address_line1") || !existing) {
+        patch.address_line1 = has("address") ? normalizeNullableString(payload.address) : normalizeNullableString(payload.address_line1);
+    }
+
+    if (has("gender") || !existing) {
+        patch.gender = normalizeNullableString(payload.gender)?.toLowerCase() || null;
+    }
+
+    if (hasAny("tin_number", "tin_no") || !existing) {
+        patch.tin_no = normalizeIdentityCode(has("tin_number") ? payload.tin_number : payload.tin_no, "TIN");
+    }
+
+    if (hasAny("nin", "nida_no") || !existing) {
+        patch.nida_no = normalizeIdentityCode(has("nin") ? payload.nin : payload.nida_no, "NIN");
+    }
+
+    if (has("national_id") || !existing) {
+        patch.national_id = normalizeNullableString(payload.national_id);
+    }
+
+    return patch;
+}
 
 function generateTemporaryPassword() {
     const lowers = "abcdefghjkmnpqrstuvwxyz";
@@ -118,7 +351,7 @@ async function listMembers(actor, filters = {}) {
         throw new AppError(500, "MEMBERS_LIST_FAILED", "Unable to load members.", error);
     }
 
-    const rows = data || [];
+    const rows = (data || []).map((row) => projectMemberForRead(row, actor));
     if (pagination?.mode === "cursor") {
         const lastRow = rows.length ? rows[rows.length - 1] : null;
         return {
@@ -242,6 +475,57 @@ async function getCachedMembersTotal({ actor, tenantId, filters }) {
 
     membersCountInFlight.set(cacheKey, task);
     return task;
+}
+
+async function assertUniqueMemberIdentityFields({
+    tenantId,
+    memberId = null,
+    email = null,
+    tinNo = null,
+    nidaNo = null
+}) {
+    const checks = [
+        {
+            value: email,
+            field: "email",
+            code: "MEMBER_EMAIL_ALREADY_EXISTS",
+            message: "Email already exists for another member."
+        },
+        {
+            value: tinNo,
+            field: "tin_no",
+            code: "MEMBER_TIN_ALREADY_EXISTS",
+            message: "TIN already exists for another member."
+        },
+        {
+            value: nidaNo,
+            field: "nida_no",
+            code: "MEMBER_NIN_ALREADY_EXISTS",
+            message: "NIN already exists for another member."
+        }
+    ].filter((entry) => entry.value);
+
+    await Promise.all(checks.map(async (entry) => {
+        let query = adminSupabase
+            .from("members")
+            .select("id", { head: true, count: "exact" })
+            .eq("tenant_id", tenantId)
+            .eq(entry.field, entry.value)
+            .is("deleted_at", null);
+
+        if (memberId) {
+            query = query.neq("id", memberId);
+        }
+
+        const { count, error } = await query;
+        if (error) {
+            throw new AppError(500, "MEMBER_IDENTITY_LOOKUP_FAILED", "Unable to validate member identity fields.", error);
+        }
+
+        if ((count || 0) > 0) {
+            throw new AppError(409, entry.code, entry.message);
+        }
+    }));
 }
 
 async function listMemberAccounts(actor, query = {}) {
@@ -921,26 +1205,38 @@ async function createMember(actor, payload) {
     assertTenantAccess({ auth: actor }, tenantId);
     assertBranchAccess({ auth: actor }, payload.branch_id);
     await assertPlanLimit(tenantId, "members", "members");
+    const normalizedPatch = buildMemberWritePatch(payload);
+
+    await assertUniqueMemberIdentityFields({
+        tenantId,
+        email: normalizedPatch.email || null,
+        tinNo: normalizedPatch.tin_no || null,
+        nidaNo: normalizedPatch.nida_no || null
+    });
 
     const { data: member, error } = await adminSupabase
         .from("members")
         .insert({
             tenant_id: tenantId,
             branch_id: payload.branch_id,
-            full_name: payload.full_name,
-            dob: payload.dob || null,
-            phone: payload.phone || null,
-            email: payload.email || null,
+            first_name: normalizedPatch.first_name,
+            middle_name: normalizedPatch.middle_name,
+            last_name: normalizedPatch.last_name,
+            full_name: normalizedPatch.full_name,
+            gender: normalizedPatch.gender || null,
+            dob: normalizedPatch.dob || null,
+            phone: normalizedPatch.phone || null,
+            email: normalizedPatch.email || null,
             member_no: payload.member_no || null,
-            national_id: payload.national_id || null,
-            address_line1: payload.address_line1 || null,
+            national_id: normalizedPatch.national_id || null,
+            address_line1: normalizedPatch.address_line1 || null,
             address_line2: payload.address_line2 || null,
             city: payload.city || null,
             state: payload.state || null,
             country: payload.country || null,
             postal_code: payload.postal_code || null,
-            nida_no: payload.nida_no || null,
-            tin_no: payload.tin_no || null,
+            nida_no: normalizedPatch.nida_no || null,
+            tin_no: normalizedPatch.tin_no || null,
             next_of_kin_name: payload.next_of_kin_name || null,
             next_of_kin_phone: payload.next_of_kin_phone || null,
             next_of_kin_relationship: payload.next_of_kin_relationship || null,
@@ -977,7 +1273,7 @@ async function createMember(actor, payload) {
     try {
         if (payload.login?.create_login) {
             loginResult = await provisionMemberLogin(actor, member, {
-                email: payload.email || null,
+                email: normalizedPatch.email || null,
                 send_invite: payload.login.send_invite,
                 password: payload.login.send_invite ? null : payload.login.password,
                 branch_id: payload.branch_id,
@@ -1004,11 +1300,11 @@ async function createMember(actor, payload) {
         userId: actor.user.id,
         table: "members",
         action: payload.login?.create_login ? "create_member_with_login" : "create_member",
-        afterData: createdMember
+        afterData: projectMemberForRead(createdMember, actor)
     });
 
     return {
-        member: createdMember,
+        member: projectMemberForRead(createdMember, actor),
         login: loginResult
     };
 }
@@ -1032,19 +1328,55 @@ async function getMember(actor, memberId) {
     }
 
     assertBranchAccess({ auth: actor }, data.branch_id);
-    return data;
+    return projectMemberForRead(data, actor);
 }
 
 async function updateMember(actor, memberId, payload) {
     const before = await getMember(actor, memberId);
+    const normalizedPayload = buildMemberWritePatch(payload, before);
+    const rawUpdates = {};
+    const rawMutableColumns = [
+        "branch_id",
+        "member_no",
+        "address_line2",
+        "city",
+        "state",
+        "country",
+        "postal_code",
+        "next_of_kin_name",
+        "next_of_kin_phone",
+        "next_of_kin_relationship",
+        "employer",
+        "kyc_status",
+        "kyc_reason",
+        "notes",
+        "status"
+    ];
 
-    if (payload.branch_id) {
-        assertBranchAccess({ auth: actor }, payload.branch_id);
+    for (const column of rawMutableColumns) {
+        if (Object.prototype.hasOwnProperty.call(payload, column)) {
+            rawUpdates[column] = payload[column];
+        }
     }
+
+    if (normalizedPayload.branch_id || payload.branch_id) {
+        assertBranchAccess({ auth: actor }, normalizedPayload.branch_id || payload.branch_id);
+    }
+
+    await assertUniqueMemberIdentityFields({
+        tenantId: before.tenant_id,
+        memberId,
+        email: Object.prototype.hasOwnProperty.call(normalizedPayload, "email") ? normalizedPayload.email : null,
+        tinNo: Object.prototype.hasOwnProperty.call(normalizedPayload, "tin_no") ? normalizedPayload.tin_no : null,
+        nidaNo: Object.prototype.hasOwnProperty.call(normalizedPayload, "nida_no") ? normalizedPayload.nida_no : null
+    });
 
     const { data: updated, error } = await adminSupabase
         .from("members")
-        .update(payload)
+        .update({
+            ...rawUpdates,
+            ...normalizedPayload
+        })
         .eq("id", memberId)
         .select("*")
         .single();
@@ -1107,11 +1439,11 @@ async function updateMember(actor, memberId, payload) {
         userId: actor.user.id,
         table: "members",
         action: "update_member",
-        beforeData: before,
-        afterData: updated
+        beforeData: projectMemberForRead(before, actor),
+        afterData: projectMemberForRead(updated, actor)
     });
 
-    return updated;
+    return projectMemberForRead(updated, actor);
 }
 
 async function deleteMember(actor, memberId) {

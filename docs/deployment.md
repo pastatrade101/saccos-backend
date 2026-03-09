@@ -72,6 +72,7 @@ Apply in this exact sequence on a fresh environment:
 32. `supabase/sql/031_phase4_distributed_rate_limits.sql`
 33. `supabase/sql/032_phase4_otp_atomic_verify.sql`
 34. `supabase/sql/033_phase5_platform_tenant_indexes.sql`
+35. `supabase/sql/034_member_profile_identity_fields.sql`
 
 For existing environments, run only new additive migrations and validate policy collisions before execution.
 

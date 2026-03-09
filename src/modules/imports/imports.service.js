@@ -11,9 +11,18 @@ const { ensureMemberAccounts, provisionMemberLogin } = require("../members/membe
 const { parseCsvBuffer, toCsv } = require("../../utils/csv");
 
 const SUPPORTED_HEADERS = [
+    "first_name",
+    "middle_name",
+    "last_name",
     "full_name",
     "email",
+    "phone_number",
     "phone",
+    "gender",
+    "date_of_birth",
+    "address",
+    "tin_number",
+    "nin",
     "member_no",
     "member_id",
     "national_id",
@@ -49,6 +58,89 @@ function normalizeString(value) {
 
     const trimmed = String(value).trim();
     return trimmed.length ? trimmed : null;
+}
+
+const TANZANIA_PHONE_PATTERN = /^(\+?255|0)?[67]\d{8}$/;
+const IDENTITY_CODE_PATTERN = /^[A-Za-z0-9-]{5,50}$/;
+
+function normalizePhone(value) {
+    const normalized = normalizeString(value);
+    if (!normalized) {
+        return null;
+    }
+
+    const compact = normalized.replace(/\s+/g, "").replace(/-/g, "");
+    if (!TANZANIA_PHONE_PATTERN.test(compact)) {
+        throw new AppError(
+            400,
+            "INVALID_IMPORT_PHONE",
+            "phone_number must be a valid Tanzania mobile number (06/07 local or 2556/2557 international format)."
+        );
+    }
+
+    const noPlus = compact.replace(/^\+/, "");
+    if (noPlus.startsWith("255")) {
+        return noPlus;
+    }
+    if (noPlus.startsWith("0")) {
+        return `255${noPlus.slice(1)}`;
+    }
+    return `255${noPlus}`;
+}
+
+function normalizeIdentityCode(value, fieldName) {
+    const normalized = normalizeString(value);
+    if (!normalized) {
+        return null;
+    }
+
+    if (!IDENTITY_CODE_PATTERN.test(normalized)) {
+        throw new AppError(
+            400,
+            "INVALID_IMPORT_IDENTITY",
+            `${fieldName} must be 5-50 characters and can include letters, numbers, and hyphens only.`
+        );
+    }
+
+    return normalized.toUpperCase();
+}
+
+function composeFullName(firstName, middleName, lastName) {
+    return [firstName, middleName, lastName].filter(Boolean).join(" ").trim() || null;
+}
+
+function splitFullName(fullName) {
+    const normalized = normalizeString(fullName);
+    if (!normalized) {
+        return {
+            firstName: null,
+            middleName: null,
+            lastName: null
+        };
+    }
+
+    const parts = normalized.split(/\s+/).filter(Boolean);
+    if (parts.length === 1) {
+        return {
+            firstName: parts[0],
+            middleName: null,
+            lastName: null
+        };
+    }
+
+    if (parts.length === 2) {
+        return {
+            firstName: parts[0],
+            middleName: null,
+            lastName: parts[1]
+        };
+    }
+
+    return {
+        firstName: parts[0],
+        middleName: parts.slice(1, -1).join(" "),
+        lastName: parts[parts.length - 1]
+    };
 }
 
 function isValidEmailFormat(value) {
@@ -108,10 +200,23 @@ function parseOptionalTimestamp(value, fieldName) {
 }
 
 function normalizeImportRow(raw) {
+    const firstName = normalizeString(raw.first_name);
+    const middleName = normalizeString(raw.middle_name);
+    const lastName = normalizeString(raw.last_name);
+    const fullName = normalizeString(raw.full_name) || composeFullName(firstName, middleName, lastName);
+
     return {
-        full_name: normalizeString(raw.full_name),
+        first_name: firstName,
+        middle_name: middleName,
+        last_name: lastName,
+        full_name: fullName,
         email: normalizeString(raw.email)?.toLowerCase() || null,
-        phone: normalizeString(raw.phone),
+        phone_number: normalizeString(raw.phone_number) || normalizeString(raw.phone),
+        gender: normalizeString(raw.gender)?.toLowerCase() || null,
+        date_of_birth: normalizeString(raw.date_of_birth),
+        address: normalizeString(raw.address),
+        tin_number: normalizeString(raw.tin_number),
+        nin: normalizeString(raw.nin),
         member_no: normalizeString(raw.member_no) || normalizeString(raw.member_id),
         national_id: normalizeString(raw.national_id),
         branch_code: normalizeString(raw.branch_code),
@@ -214,7 +319,7 @@ async function resolveImportJobBranchId({ tenantId, actor, defaultBranchId }) {
     return data.id;
 }
 
-async function findExistingMember({ tenantId, memberNo, email, phone }) {
+async function findExistingMember({ tenantId, memberNo, email, phoneNumber, tinNumber, nin }) {
     if (memberNo) {
         const { data, error } = await adminSupabase
             .from("members")
@@ -251,17 +356,53 @@ async function findExistingMember({ tenantId, memberNo, email, phone }) {
         }
     }
 
-    if (phone) {
+    if (phoneNumber) {
         const { data, error } = await adminSupabase
             .from("members")
             .select("*")
             .eq("tenant_id", tenantId)
-            .eq("phone", phone)
+            .eq("phone", phoneNumber)
             .is("deleted_at", null)
             .maybeSingle();
 
         if (error) {
             throw new AppError(500, "MEMBER_LOOKUP_FAILED", "Unable to look up member by phone.", error);
+        }
+
+        if (data) {
+            return data;
+        }
+    }
+
+    if (tinNumber) {
+        const { data, error } = await adminSupabase
+            .from("members")
+            .select("*")
+            .eq("tenant_id", tenantId)
+            .eq("tin_no", tinNumber)
+            .is("deleted_at", null)
+            .maybeSingle();
+
+        if (error) {
+            throw new AppError(500, "MEMBER_LOOKUP_FAILED", "Unable to look up member by tin_number.", error);
+        }
+
+        if (data) {
+            return data;
+        }
+    }
+
+    if (nin) {
+        const { data, error } = await adminSupabase
+            .from("members")
+            .select("*")
+            .eq("tenant_id", tenantId)
+            .eq("nida_no", nin)
+            .is("deleted_at", null)
+            .maybeSingle();
+
+        if (error) {
+            throw new AppError(500, "MEMBER_LOOKUP_FAILED", "Unable to look up member by nin.", error);
         }
 
         if (data) {
@@ -275,16 +416,51 @@ async function findExistingMember({ tenantId, memberNo, email, phone }) {
 async function upsertMember({ actor, tenantId, branchId, row }) {
     const memberNo = normalizeString(row.member_no);
     const email = normalizeString(row.email)?.toLowerCase() || null;
-    const phone = normalizeString(row.phone);
+    const phoneNumber = normalizePhone(row.phone_number);
     const nationalId = normalizeString(row.national_id);
+    const firstName = normalizeString(row.first_name);
+    const middleName = normalizeString(row.middle_name);
+    const lastName = normalizeString(row.last_name);
+    const fullName = normalizeString(row.full_name) || composeFullName(firstName, middleName, lastName);
+    const splitName = splitFullName(fullName);
+    const resolvedFirstName = firstName || splitName.firstName;
+    const resolvedMiddleName = middleName || splitName.middleName;
+    const resolvedLastName = lastName || splitName.lastName;
+    const gender = normalizeString(row.gender)?.toLowerCase() || null;
+    const dateOfBirthInput = normalizeString(row.date_of_birth);
+    let dateOfBirth = null;
+    if (dateOfBirthInput) {
+        const parsedDob = new Date(dateOfBirthInput);
+        if (Number.isNaN(parsedDob.getTime())) {
+            throw new AppError(400, "DATE_OF_BIRTH_INVALID", "date_of_birth must be a valid date.");
+        }
+        dateOfBirth = parsedDob.toISOString().slice(0, 10);
+    }
+    const address = normalizeString(row.address) || null;
+    const tinNumber = normalizeIdentityCode(row.tin_number, "tin_number");
+    const nin = normalizeIdentityCode(row.nin, "nin");
     const notes = normalizeString(row.notes);
     const status = normalizeString(row.status) || "active";
+
+    if (!fullName) {
+        throw new AppError(400, "FULL_NAME_REQUIRED", "Provide full_name or first_name + last_name.");
+    }
+
+    if (!resolvedFirstName || !resolvedLastName) {
+        throw new AppError(400, "NAME_PARTS_REQUIRED", "Unable to derive first_name and last_name.");
+    }
+
+    if (gender && !["male", "female", "other"].includes(gender)) {
+        throw new AppError(400, "GENDER_INVALID", "gender must be one of: male, female, other.");
+    }
 
     const existing = await findExistingMember({
         tenantId,
         memberNo,
         email,
-        phone
+        phoneNumber,
+        tinNumber,
+        nin
     });
 
     if (existing) {
@@ -292,11 +468,19 @@ async function upsertMember({ actor, tenantId, branchId, row }) {
             .from("members")
             .update({
                 branch_id: branchId,
-                full_name: row.full_name,
+                first_name: resolvedFirstName,
+                middle_name: resolvedMiddleName,
+                last_name: resolvedLastName,
+                full_name: fullName,
                 email,
-                phone,
+                phone: phoneNumber,
+                gender,
+                dob: dateOfBirth,
+                address_line1: address,
                 member_no: memberNo,
                 national_id: nationalId,
+                tin_no: tinNumber,
+                nida_no: nin,
                 notes,
                 status
             })
@@ -333,11 +517,19 @@ async function upsertMember({ actor, tenantId, branchId, row }) {
         .insert({
             tenant_id: tenantId,
             branch_id: branchId,
-            full_name: row.full_name,
+            first_name: resolvedFirstName,
+            middle_name: resolvedMiddleName,
+            last_name: resolvedLastName,
+            full_name: fullName,
             email,
-            phone,
+            phone: phoneNumber,
+            gender,
+            dob: dateOfBirth,
+            address_line1: address,
             member_no: memberNo,
             national_id: nationalId,
+            tin_no: tinNumber,
+            nida_no: nin,
             notes,
             status
         })
@@ -823,10 +1015,15 @@ async function createSignedUrl(path) {
 }
 
 function ensureCsvHeaders(headers) {
-    const missingCore = ["full_name"].filter((header) => !headers.includes(header));
+    const hasFullName = headers.includes("full_name");
+    const hasSplitName = headers.includes("first_name") && headers.includes("last_name");
 
-    if (missingCore.length) {
-        throw new AppError(400, "IMPORT_HEADERS_INVALID", `CSV is missing required columns: ${missingCore.join(", ")}`);
+    if (!hasFullName && !hasSplitName) {
+        throw new AppError(
+            400,
+            "IMPORT_HEADERS_INVALID",
+            "CSV must include full_name or both first_name and last_name columns."
+        );
     }
 
     const unsupportedHeaders = headers.filter((header) => !SUPPORTED_HEADERS.includes(header));
@@ -844,7 +1041,12 @@ function validatePreviewRow(normalizedRow, options) {
     const errors = [];
 
     if (!normalizedRow.full_name) {
-        errors.push("full_name is required.");
+        errors.push("Provide full_name or first_name + last_name.");
+    }
+
+    const split = splitFullName(normalizedRow.full_name);
+    if (!(normalizedRow.first_name || split.firstName) || !(normalizedRow.last_name || split.lastName)) {
+        errors.push("Unable to derive first_name and last_name from row.");
     }
 
     if (options.create_portal_account && !normalizedRow.email) {
@@ -853,6 +1055,35 @@ function validatePreviewRow(normalizedRow, options) {
 
     if (options.create_portal_account && normalizedRow.email && !isValidEmailFormat(normalizedRow.email)) {
         errors.push("email must be a valid email address when create_portal_account is enabled.");
+    }
+
+    try {
+        normalizePhone(normalizedRow.phone_number);
+    } catch (error) {
+        errors.push(error.message);
+    }
+
+    if (normalizedRow.gender && !["male", "female", "other"].includes(normalizedRow.gender)) {
+        errors.push("gender must be one of: male, female, other.");
+    }
+
+    if (normalizedRow.date_of_birth) {
+        const dateValue = new Date(normalizedRow.date_of_birth);
+        if (Number.isNaN(dateValue.getTime())) {
+            errors.push("date_of_birth must be a valid date.");
+        }
+    }
+
+    try {
+        normalizeIdentityCode(normalizedRow.tin_number, "tin_number");
+    } catch (error) {
+        errors.push(error.message);
+    }
+
+    try {
+        normalizeIdentityCode(normalizedRow.nin, "nin");
+    } catch (error) {
+        errors.push(error.message);
     }
 
     try {
@@ -910,6 +1141,8 @@ async function previewMemberImport({ actor, fileBuffer, options }) {
     const memberNoSeen = new Set();
     const emailSeen = new Set();
     const phoneSeen = new Set();
+    const tinSeen = new Set();
+    const ninSeen = new Set();
 
     const previewRows = rows.map((rowEntry) => {
         const normalized = normalizeImportRow(rowEntry.raw);
@@ -933,12 +1166,42 @@ async function previewMemberImport({ actor, fileBuffer, options }) {
             }
         }
 
-        if (normalized.phone) {
-            const key = normalized.phone;
-            if (phoneSeen.has(key)) {
-                errors.push("Duplicate phone in uploaded CSV.");
-            } else {
-                phoneSeen.add(key);
+        try {
+            const normalizedPhone = normalizePhone(normalized.phone_number);
+            if (normalizedPhone) {
+                if (phoneSeen.has(normalizedPhone)) {
+                    errors.push("Duplicate phone_number in uploaded CSV.");
+                } else {
+                    phoneSeen.add(normalizedPhone);
+                }
+            }
+        } catch (error) {
+            // Validation message already added by validatePreviewRow.
+        }
+
+        if (normalized.tin_number) {
+            try {
+                const key = normalizeIdentityCode(normalized.tin_number, "tin_number");
+                if (tinSeen.has(key)) {
+                    errors.push("Duplicate tin_number in uploaded CSV.");
+                } else {
+                    tinSeen.add(key);
+                }
+            } catch (error) {
+                // Validation message already added by validatePreviewRow.
+            }
+        }
+
+        if (normalized.nin) {
+            try {
+                const key = normalizeIdentityCode(normalized.nin, "nin");
+                if (ninSeen.has(key)) {
+                    errors.push("Duplicate nin in uploaded CSV.");
+                } else {
+                    ninSeen.add(key);
+                }
+            } catch (error) {
+                // Validation message already added by validatePreviewRow.
             }
         }
 
@@ -993,7 +1256,12 @@ async function runMemberImportJob({ jobId, actor, fileBuffer, options, requestMe
                 const email = normalizedRow.email;
 
                 if (!fullName) {
-                    throw new AppError(400, "FULL_NAME_REQUIRED", "full_name is required.");
+                    throw new AppError(400, "FULL_NAME_REQUIRED", "Provide full_name or first_name + last_name.");
+                }
+
+                const splitName = splitFullName(fullName);
+                if (!(normalizedRow.first_name || splitName.firstName) || !(normalizedRow.last_name || splitName.lastName)) {
+                    throw new AppError(400, "NAME_PARTS_REQUIRED", "Unable to derive first_name and last_name.");
                 }
 
                 if (options.create_portal_account && !email) {
