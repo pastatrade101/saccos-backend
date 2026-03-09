@@ -373,13 +373,15 @@ async function getOptions(actor) {
             .select("id, name, code")
             .eq("tenant_id", tenantId)
             .is("deleted_at", null)
-            .order("name", { ascending: true }),
+            .order("name", { ascending: true })
+            .limit(200),
         adminSupabase
             .from("chart_of_accounts")
             .select("id, account_code, account_name, account_type, system_tag")
             .eq("tenant_id", tenantId)
             .is("deleted_at", null)
             .order("account_code", { ascending: true })
+            .limit(200)
     ]);
 
     return {
@@ -392,23 +394,36 @@ async function listCycles(actor, query) {
     const tenantId = query.tenant_id || actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
 
+    const page = Number(query.page || 1);
+    const limit = Math.min(Number(query.limit || 50), 100);
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
+
     let request = adminSupabase
         .from("dividend_cycles")
-        .select("*")
+        .select("*", { count: "exact" })
         .eq("tenant_id", tenantId)
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: false })
+        .range(from, to);
 
     if (query.status) {
         request = request.eq("status", query.status);
     }
 
-    const { data, error } = await request;
+    const { data, error, count } = await request;
 
     if (error) {
         throw new AppError(500, "DIVIDEND_CYCLES_FETCH_FAILED", "Unable to load dividend cycles.", error);
     }
 
-    return data || [];
+    return {
+        data: data || [],
+        pagination: {
+            page,
+            limit,
+            total: count || 0
+        }
+    };
 }
 
 async function getCycle(actor, cycleId) {

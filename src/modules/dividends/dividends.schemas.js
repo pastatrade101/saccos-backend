@@ -57,7 +57,9 @@ const updateCycleSchema = createCycleSchema.omit({
 
 const cycleQuerySchema = z.object({
     tenant_id: z.string().uuid().optional(),
-    status: z.enum(["draft", "frozen", "allocated", "approved", "paid", "closed"]).optional()
+    status: z.enum(["draft", "frozen", "allocated", "approved", "paid", "closed"]).optional(),
+    page: z.coerce.number().int().positive().default(1),
+    limit: z.coerce.number().int().positive().max(100).default(50)
 });
 
 const cycleParamSchema = z.object({

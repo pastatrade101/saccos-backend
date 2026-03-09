@@ -8,6 +8,8 @@ const routes = require("./routes");
 const errorHandler = require("./middleware/error-handler");
 const notFoundHandler = require("./middleware/not-found");
 const requestContext = require("./middleware/request-context");
+const observabilityMiddleware = require("./middleware/observability");
+const { getPrometheusMetrics } = require("./services/observability.service");
 const { isOriginAllowed } = require("./utils/cors");
 
 const app = express();
@@ -16,6 +18,7 @@ app.disable("x-powered-by");
 app.set("trust proxy", 1);
 
 app.use(requestContext);
+app.use(observabilityMiddleware);
 app.use(
     helmet({
         crossOriginResourcePolicy: false
@@ -47,6 +50,27 @@ app.get("/health", (req, res) => {
         timestamp: new Date().toISOString(),
         version: process.env.npm_package_version || "1.0.0"
     });
+});
+
+app.get("/metrics", (req, res) => {
+    if (!env.observabilityEnabled) {
+        return res.status(404).send("Observability is disabled.");
+    }
+
+    if (env.metricsBearerToken) {
+        const authorization = req.get("authorization") || "";
+        if (authorization !== `Bearer ${env.metricsBearerToken}`) {
+            return res.status(401).json({
+                error: {
+                    code: "METRICS_UNAUTHORIZED",
+                    message: "Metrics endpoint requires a valid bearer token."
+                }
+            });
+        }
+    }
+
+    res.setHeader("Content-Type", "text/plain; version=0.0.4");
+    return res.send(getPrometheusMetrics());
 });
 
 app.use(env.apiPrefix, routes);

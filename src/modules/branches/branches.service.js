@@ -4,34 +4,51 @@ const { assertPlanLimit } = require("../../services/subscription.service");
 const { logAudit } = require("../../services/audit.service");
 const { assertTenantAccess } = require("../../services/user-context.service");
 
-async function listBranches(actor) {
-    const tenantId = actor.tenantId;
+async function listBranches(actor, query = {}) {
+    const tenantId = query.tenant_id || actor.tenantId;
 
     if (!tenantId && !actor.isInternalOps) {
         throw new AppError(403, "TENANT_ACCESS_DENIED", "Tenant context is missing.");
     }
 
-    let query = adminSupabase
+    if (query.tenant_id) {
+        assertTenantAccess({ auth: actor }, query.tenant_id);
+    }
+
+    const page = Number(query.page || 1);
+    const limit = Math.min(Number(query.limit || 50), 100);
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
+
+    let request = adminSupabase
         .from("branches")
-        .select("*")
+        .select("*", { count: "exact" })
         .is("deleted_at", null)
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: false })
+        .range(from, to);
 
     if (tenantId) {
-        query = query.eq("tenant_id", tenantId);
+        request = request.eq("tenant_id", tenantId);
     }
 
     if (!actor.isInternalOps && !["super_admin", "auditor"].includes(actor.role) && actor.branchIds.length) {
-        query = query.in("id", actor.branchIds);
+        request = request.in("id", actor.branchIds);
     }
 
-    const { data, error } = await query;
+    const { data, error, count } = await request;
 
     if (error) {
         throw new AppError(500, "BRANCHES_LIST_FAILED", "Unable to load branches.", error);
     }
 
-    return data || [];
+    return {
+        data: data || [],
+        pagination: {
+            page,
+            limit,
+            total: count || 0
+        }
+    };
 }
 
 async function createBranch(actor, payload) {

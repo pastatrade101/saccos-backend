@@ -169,28 +169,57 @@ async function getApplication(actor, applicationId) {
     return data;
 }
 
-async function listApplications(actor) {
+async function listApplications(actor, query = {}) {
     const tenantId = actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
 
-    let query = adminSupabase
+    const page = Number(query.page || 1);
+    const limit = Math.min(Number(query.limit || 50), 100);
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
+
+    let request = adminSupabase
         .from("member_applications")
-        .select("*")
+        .select("*", { count: "exact" })
         .eq("tenant_id", tenantId)
         .is("deleted_at", null)
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: false })
+        .range(from, to);
 
     if (!actor.isInternalOps && actor.branchIds.length && !["super_admin", "auditor"].includes(actor.role)) {
-        query = query.in("branch_id", actor.branchIds);
+        request = request.in("branch_id", actor.branchIds);
     }
 
-    const { data, error } = await query;
+    if (query.status) {
+        request = request.eq("status", query.status);
+    }
+
+    if (query.branch_id) {
+        assertBranchAccess({ auth: actor }, query.branch_id);
+        request = request.eq("branch_id", query.branch_id);
+    }
+
+    if (query.search) {
+        const escaped = query.search.replace(/[%_]/g, "\\$&");
+        request = request.or(
+            `application_no.ilike.%${escaped}%,full_name.ilike.%${escaped}%,phone.ilike.%${escaped}%,email.ilike.%${escaped}%,member_no.ilike.%${escaped}%`
+        );
+    }
+
+    const { data, error, count } = await request;
 
     if (error) {
         throw new AppError(500, "MEMBER_APPLICATIONS_LIST_FAILED", "Unable to load member applications.", error);
     }
 
-    return data || [];
+    return {
+        data: data || [],
+        pagination: {
+            page,
+            limit,
+            total: count || 0
+        }
+    };
 }
 
 async function createApplication(actor, payload) {

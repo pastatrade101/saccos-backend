@@ -21,7 +21,8 @@ async function listRows(actor, table, orderBy = "created_at") {
         .select("*")
         .eq("tenant_id", tenantId)
         .is("deleted_at", null)
-        .order(orderBy, { ascending: true });
+        .order(orderBy, { ascending: true })
+        .limit(200);
 
     if (error) {
         throw new AppError(500, "PRODUCTS_FETCH_FAILED", `Unable to load ${TABLE_LABELS[table].toLowerCase()}s.`, error);
@@ -127,6 +128,7 @@ async function getBootstrap(actor) {
             .eq("tenant_id", tenantId)
             .is("deleted_at", null)
             .order("account_code", { ascending: true })
+            .limit(200)
             .then(({ data, error }) => {
                 if (error) {
                     throw new AppError(500, "COA_FETCH_FAILED", "Unable to load chart of accounts.", error);

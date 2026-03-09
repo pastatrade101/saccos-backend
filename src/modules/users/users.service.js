@@ -39,16 +39,22 @@ function assertUserProvisioningPermission(actor, targetRole) {
     throw new AppError(403, "FORBIDDEN", "You are not authorized to provision staff users.");
 }
 
-async function listUsers(actor) {
+async function listUsers(actor, query = {}) {
     const tenantId = actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
 
-    let query = adminSupabase
+    const page = Number(query.page || 1);
+    const limit = Math.min(Number(query.limit || 50), 100);
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
+
+    let request = adminSupabase
         .from("user_profiles")
-        .select("*")
+        .select("*", { count: "exact" })
         .eq("tenant_id", tenantId)
         .is("deleted_at", null)
-        .order("full_name", { ascending: true });
+        .order("full_name", { ascending: true })
+        .range(from, to);
 
     if (!actor.isInternalOps && !["super_admin", "auditor"].includes(actor.role) && actor.branchIds.length) {
         const { data: assignmentRows, error: assignmentsError } = await adminSupabase
@@ -62,10 +68,10 @@ async function listUsers(actor) {
         }
 
         const userIds = [...new Set((assignmentRows || []).map((row) => row.user_id))];
-        query = userIds.length ? query.in("user_id", userIds) : query.eq("user_id", actor.user.id);
+        request = userIds.length ? request.in("user_id", userIds) : request.eq("user_id", actor.user.id);
     }
 
-    const { data, error } = await query;
+    const { data, error, count } = await request;
 
     if (error) {
         throw new AppError(500, "USERS_LIST_FAILED", "Unable to load users.", error);
@@ -185,7 +191,12 @@ async function listUsers(actor) {
         totals,
         roleCounts,
         users: enrichedUsers,
-        conflicts
+        conflicts,
+        pagination: {
+            page,
+            limit,
+            total: count || 0
+        }
     };
 }
 

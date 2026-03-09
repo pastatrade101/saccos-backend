@@ -22,9 +22,12 @@ exports.updatePlanFeatures = asyncHandler(async (req, res) => {
 });
 
 exports.listTenants = asyncHandler(async (req, res) => {
-    const data = await platformService.listPlatformTenants();
+    const result = await platformService.listPlatformTenants(req.validated.query);
     applyNoStore(res);
-    res.json({ data });
+    res.json({
+        data: result.data,
+        pagination: result.pagination
+    });
 });
 
 exports.assignSubscription = asyncHandler(async (req, res) => {

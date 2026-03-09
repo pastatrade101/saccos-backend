@@ -66,8 +66,8 @@ const loanApplicationQuerySchema = z.object({
     member_id: uuid.optional(),
     branch_id: uuid.optional(),
     product_id: uuid.optional(),
-    page: z.coerce.number().int().positive().optional(),
-    limit: z.coerce.number().int().positive().max(500).optional()
+    page: z.coerce.number().int().positive().default(1),
+    limit: z.coerce.number().int().positive().max(100).default(50)
 });
 
 module.exports = {

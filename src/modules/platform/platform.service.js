@@ -10,7 +10,8 @@ async function listPlans() {
     const { data, error } = await adminSupabase
         .from("plans")
         .select("*, plan_features(*)")
-        .order("created_at", { ascending: true });
+        .order("created_at", { ascending: true })
+        .limit(200);
 
     if (error) {
         throw new AppError(500, "PLANS_LIST_FAILED", "Unable to load plans.", error);
@@ -58,21 +59,30 @@ async function updatePlanFeatures(actor, planId, payload) {
     return listPlans();
 }
 
-async function listPlatformTenants() {
-    const { data: tenants, error } = await adminSupabase
+async function listPlatformTenants(query = {}) {
+    const page = Number(query.page || 1);
+    const limit = Math.min(Number(query.limit || 50), 100);
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
+
+    const { data: tenants, error, count } = await adminSupabase
         .from("tenants")
-        .select("*")
+        .select("*", { count: "exact" })
         .is("deleted_at", null)
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: false })
+        .range(from, to);
 
     if (error) {
         throw new AppError(500, "PLATFORM_TENANTS_LIST_FAILED", "Unable to load platform tenants.", error);
     }
 
+    const tenantIds = (tenants || []).map((tenant) => tenant.id);
+
     const { data: branches, error: branchError } = await adminSupabase
         .from("branches")
         .select("tenant_id")
-        .is("deleted_at", null);
+        .is("deleted_at", null)
+        .in("tenant_id", tenantIds.length ? tenantIds : [EMPTY_UUID]);
 
     if (branchError) {
         throw new AppError(500, "PLATFORM_BRANCHES_LIST_FAILED", "Unable to load platform branch counts.", branchError);
@@ -89,7 +99,14 @@ async function listPlatformTenants() {
         subscription: await getSubscriptionStatus(tenant.id)
     })));
 
-    return enriched;
+    return {
+        data: enriched,
+        pagination: {
+            page,
+            limit,
+            total: count || 0
+        }
+    };
 }
 
 async function assignSubscription(actor, tenantId, payload) {

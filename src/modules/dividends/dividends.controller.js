@@ -7,8 +7,11 @@ exports.getOptions = asyncHandler(async (req, res) => {
 });
 
 exports.listCycles = asyncHandler(async (req, res) => {
-    const data = await dividendsService.listCycles(req.auth, req.validated.query);
-    res.json({ data });
+    const result = await dividendsService.listCycles(req.auth, req.validated.query);
+    res.json({
+        data: result.data,
+        pagination: result.pagination
+    });
 });
 
 exports.getCycle = asyncHandler(async (req, res) => {

@@ -11,9 +11,12 @@ function applyNoStore(res) {
 }
 
 exports.listTenants = asyncHandler(async (req, res) => {
-    const tenants = await tenantService.listTenants(req.auth);
+    const tenants = await tenantService.listTenants(req.auth, req.validated.query);
     applyNoStore(res);
-    res.json({ data: tenants });
+    res.json({
+        data: tenants.data,
+        pagination: tenants.pagination
+    });
 });
 
 exports.createTenant = asyncHandler(async (req, res) => {

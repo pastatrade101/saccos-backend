@@ -63,11 +63,17 @@ async function listSessions(actor, query) {
     const tenantId = actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
 
+    const page = Number(query.page || 1);
+    const limit = Math.min(Number(query.limit || 50), 100);
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
+
     let request = adminSupabase
         .from("teller_sessions")
-        .select("*")
+        .select("*", { count: "exact" })
         .eq("tenant_id", tenantId)
-        .order("opened_at", { ascending: false });
+        .order("opened_at", { ascending: false })
+        .range(from, to);
 
     if (query.status) {
         request = request.eq("status", query.status);
@@ -89,13 +95,20 @@ async function listSessions(actor, query) {
         request = request.gte("opened_at", `${query.date}T00:00:00.000Z`).lt("opened_at", `${query.date}T23:59:59.999Z`);
     }
 
-    const { data, error } = await request;
+    const { data, error, count } = await request;
 
     if (error) {
         throw new AppError(500, "TELLER_SESSIONS_LIST_FAILED", "Unable to load teller sessions.", error);
     }
 
-    return data || [];
+    return {
+        data: data || [],
+        pagination: {
+            page,
+            limit,
+            total: count || 0
+        }
+    };
 }
 
 async function getCurrentSession(actor, branchId = null) {
@@ -587,7 +600,8 @@ async function getDailySummary(actor, query) {
         .from("v_daily_cash_summary")
         .select("*")
         .eq("tenant_id", tenantId)
-        .order("business_date", { ascending: false });
+        .order("business_date", { ascending: false })
+        .limit(200);
 
     if (query.date) {
         request = request.eq("business_date", query.date);
@@ -623,7 +637,8 @@ async function listJournalReceipts(actor, journalId) {
         .select("*")
         .eq("tenant_id", tenantId)
         .eq("journal_id", journalId)
-        .order("created_at", { ascending: true });
+        .order("created_at", { ascending: true })
+        .limit(200);
 
     if (error) {
         throw new AppError(500, "TRANSACTION_RECEIPTS_FETCH_FAILED", "Unable to load transaction receipts.", error);
@@ -673,9 +688,13 @@ async function exportDailyCashbook(actor, res, query) {
 }
 
 async function exportTellerBalancing(actor, res, query) {
-    const rows = await listSessions(actor, query);
+    const result = await listSessions(actor, {
+        ...query,
+        page: 1,
+        limit: 100
+    });
     return sendExport(res, {
-        rows,
+        rows: result.data,
         format: "csv",
         filename: `teller-balancing-${query.date || "latest"}`,
         title: "Teller Balancing Report"

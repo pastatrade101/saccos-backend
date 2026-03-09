@@ -16,6 +16,7 @@ router.use(auth, requireSubscription());
 router.get(
     "/",
     authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER, ROLES.AUDITOR], { allowInternalOps: false }),
+    validate(schemas.listApplicationsQuerySchema, "query"),
     controller.listApplications
 );
 router.get(

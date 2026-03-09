@@ -39,7 +39,16 @@ const createApplicationSchema = baseSchema.superRefine((value, ctx) => {
     }
 });
 
+const listApplicationsQuerySchema = z.object({
+    status: z.enum(["draft", "submitted", "reviewed", "approved", "rejected", "cancelled"]).optional(),
+    branch_id: z.string().uuid().optional(),
+    search: z.string().trim().min(1).max(120).optional(),
+    page: z.coerce.number().int().positive().default(1),
+    limit: z.coerce.number().int().positive().max(100).default(50)
+});
+
 module.exports = {
+    listApplicationsQuerySchema,
     createApplicationSchema,
     updateApplicationSchema: z.object(baseFields).partial(),
     reviewApplicationSchema: z.object({

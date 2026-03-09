@@ -6,7 +6,9 @@ const sessionQuerySchema = z.object({
     date: z.string().date().optional(),
     branch_id: z.string().uuid().optional(),
     teller_user_id: z.string().uuid().optional(),
-    status: z.enum(["open", "closed_pending_review", "reviewed"]).optional()
+    status: z.enum(["open", "closed_pending_review", "reviewed"]).optional(),
+    page: z.coerce.number().int().positive().default(1),
+    limit: z.coerce.number().int().positive().max(100).default(50)
 });
 
 const openSessionSchema = z.object({

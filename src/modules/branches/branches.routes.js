@@ -7,7 +7,7 @@ const requireSubscription = require("../../middleware/require-subscription");
 const validate = require("../../middleware/validate");
 const { ROLES } = require("../../constants/roles");
 const controller = require("./branches.controller");
-const { createBranchSchema } = require("./branches.schemas");
+const { createBranchSchema, listBranchesQuerySchema } = require("./branches.schemas");
 
 const router = express.Router();
 
@@ -22,6 +22,7 @@ router.get(
         ROLES.TELLER,
         ROLES.AUDITOR
     ]),
+    validate(listBranchesQuerySchema, "query"),
     controller.listBranches
 );
 router.post(

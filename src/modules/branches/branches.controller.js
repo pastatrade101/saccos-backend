@@ -2,8 +2,11 @@ const asyncHandler = require("../../utils/async-handler");
 const branchService = require("./branches.service");
 
 exports.listBranches = asyncHandler(async (req, res) => {
-    const branches = await branchService.listBranches(req.auth);
-    res.json({ data: branches });
+    const branches = await branchService.listBranches(req.auth, req.validated.query);
+    res.json({
+        data: branches.data,
+        pagination: branches.pagination
+    });
 });
 
 exports.createBranch = asyncHandler(async (req, res) => {

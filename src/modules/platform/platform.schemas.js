@@ -29,9 +29,15 @@ const deleteTenantSchema = z.object({
     confirm_name: z.string().min(1).max(255)
 });
 
+const listPlatformTenantsQuerySchema = z.object({
+    page: z.coerce.number().int().positive().default(1),
+    limit: z.coerce.number().int().positive().max(100).default(50)
+});
+
 module.exports = {
     planParamSchema,
     tenantParamSchema,
+    listPlatformTenantsQuerySchema,
     updatePlanFeaturesSchema,
     assignSubscriptionSchema,
     deleteTenantSchema

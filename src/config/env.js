@@ -65,6 +65,15 @@ const envSchema = z.object({
     REPORT_BRAND_NAME: z.string().min(1).default("SACCOS System"),
     REPORT_BRAND_SUBTITLE: z.string().min(1).default("Official Financial Report"),
     REPORT_BRAND_LOGO_PATH: z.string().optional(),
+    OBSERVABILITY_ENABLED: z
+        .string()
+        .optional()
+        .transform((value) => parseBooleanEnv(value, true)),
+    OBSERVABILITY_SAMPLE_LIMIT: z.coerce.number().int().positive().default(500),
+    METRICS_BEARER_TOKEN: z.string().min(8).optional(),
+    SLO_LIST_ENDPOINT_P95_MS: z.coerce.number().positive().default(400),
+    SLO_HEAVY_REPORT_P95_MS: z.coerce.number().positive().default(2000),
+    SLO_ERROR_RATE_PCT: z.coerce.number().nonnegative().default(1),
     SSL_ENABLED: z
         .string()
         .optional()
@@ -119,6 +128,12 @@ module.exports = {
     reportBrandName: env.REPORT_BRAND_NAME,
     reportBrandSubtitle: env.REPORT_BRAND_SUBTITLE,
     reportBrandLogoPath: env.REPORT_BRAND_LOGO_PATH || "",
+    observabilityEnabled: env.OBSERVABILITY_ENABLED,
+    observabilitySampleLimit: env.OBSERVABILITY_SAMPLE_LIMIT,
+    metricsBearerToken: env.METRICS_BEARER_TOKEN || "",
+    sloListEndpointP95Ms: env.SLO_LIST_ENDPOINT_P95_MS,
+    sloHeavyReportP95Ms: env.SLO_HEAVY_REPORT_P95_MS,
+    sloErrorRatePct: env.SLO_ERROR_RATE_PCT,
     sslEnabled: env.SSL_ENABLED,
     logLevel: env.LOG_LEVEL
 };

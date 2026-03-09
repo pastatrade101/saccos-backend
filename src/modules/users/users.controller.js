@@ -3,8 +3,11 @@ const userService = require("./users.service");
 const { getSubscriptionStatus } = require("../../services/subscription.service");
 
 exports.listUsers = asyncHandler(async (req, res) => {
-    const users = await userService.listUsers(req.auth);
-    res.json({ data: users });
+    const users = await userService.listUsers(req.auth, req.validated.query);
+    res.json({
+        data: users,
+        pagination: users.pagination
+    });
 });
 
 exports.createUser = asyncHandler(async (req, res) => {

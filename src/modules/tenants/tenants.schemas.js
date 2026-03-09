@@ -19,7 +19,13 @@ const updateTenantSchema = createTenantSchema.partial().omit({
     grace_period_until: true
 });
 
+const listTenantsQuerySchema = z.object({
+    page: z.coerce.number().int().positive().default(1),
+    limit: z.coerce.number().int().positive().max(100).default(50)
+});
+
 module.exports = {
     createTenantSchema,
-    updateTenantSchema
+    updateTenantSchema,
+    listTenantsQuerySchema
 };

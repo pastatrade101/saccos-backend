@@ -1,4 +1,5 @@
 const asyncHandler = require("../../utils/async-handler");
+const { runObservedJob } = require("../../services/observability.service");
 const service = require("./imports.service");
 
 exports.importMembers = asyncHandler(async (req, res) => {
@@ -11,14 +12,16 @@ exports.importMembers = asyncHandler(async (req, res) => {
         });
     }
 
-    const result = await service.processMemberImport({
-        actor: req.auth,
-        fileBuffer: req.file.buffer,
-        options: req.validated.body,
-        requestMeta: {
-            ip: req.ip,
-            userAgent: req.get("user-agent") || null
-        }
+    const result = await runObservedJob("members.import.csv", { tenantId: req.auth?.tenantId }, async () => {
+        return service.processMemberImport({
+            actor: req.auth,
+            fileBuffer: req.file.buffer,
+            options: req.validated.body,
+            requestMeta: {
+                ip: req.ip,
+                userAgent: req.get("user-agent") || null
+            }
+        });
     });
 
     res.status(202).json({ data: result });

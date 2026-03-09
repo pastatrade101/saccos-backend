@@ -2,6 +2,7 @@ const asyncHandler = require("../../utils/async-handler");
 const { adminSupabase } = require("../../config/supabase");
 const { sendExport, assertExportQuota } = require("../../services/export.service");
 const { logAudit } = require("../../services/audit.service");
+const { runObservedJob } = require("../../services/observability.service");
 const reportService = require("./reports.service");
 
 async function resolveTenantName(tenantId) {
@@ -24,28 +25,30 @@ async function resolveTenantName(tenantId) {
 }
 
 async function runExport(req, res, loader, action) {
-    const report = await loader(req.auth, req.validated.query);
-    const rowCount = Array.isArray(report?.rows) ? report.rows.length : 0;
     const tenantId = req.validated?.query?.tenant_id || req.tenantId || req.auth.tenantId;
-    const tenantName = await resolveTenantName(tenantId);
+    return runObservedJob(`report.export.${action}`, { tenantId }, async () => {
+        const report = await loader(req.auth, req.validated.query);
+        const rowCount = Array.isArray(report?.rows) ? report.rows.length : 0;
+        const tenantName = await resolveTenantName(tenantId);
 
-    await assertExportQuota(req.subscription, tenantId);
-    await logAudit({
-        tenantId,
-        userId: req.auth.user.id,
-        table: "reports",
-        action,
-        afterData: {
+        await assertExportQuota(req.subscription, tenantId);
+        await logAudit({
+            tenantId,
+            userId: req.auth.user.id,
+            table: "reports",
+            action,
+            afterData: {
+                format: req.validated.query.format,
+                row_count: rowCount
+            }
+        });
+        return sendExport(res, {
+            rows: report.rows,
             format: req.validated.query.format,
-            row_count: rowCount
-        }
-    });
-    return sendExport(res, {
-        rows: report.rows,
-        format: req.validated.query.format,
-        filename: report.filename,
-        title: report.title,
-        tenantName
+            filename: report.filename,
+            title: report.title,
+            tenantName
+        });
     });
 }
 

@@ -66,8 +66,8 @@ const bulkDeleteMembersSchema = z.object({
 });
 
 const paginationSchema = {
-    page: z.coerce.number().int().positive().optional(),
-    limit: z.coerce.number().int().positive().max(500).optional()
+    page: z.coerce.number().int().positive().default(1),
+    limit: z.coerce.number().int().positive().max(100).default(50)
 };
 
 const listMembersQuerySchema = z.object({

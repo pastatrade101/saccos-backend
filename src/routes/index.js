@@ -16,6 +16,7 @@ const productRoutes = require("../modules/products/products.routes");
 const platformRoutes = require("../modules/platform/platform.routes");
 const auditorRoutes = require("../modules/auditor/auditor.routes");
 const reportRoutes = require("../modules/reports/reports.routes");
+const observabilityRoutes = require("../modules/observability/observability.routes");
 
 const router = express.Router();
 
@@ -42,5 +43,6 @@ router.use("/", financeRoutes);
 router.use("/dividends", dividendRoutes);
 router.use("/auditor", auditorRoutes);
 router.use("/reports", reportRoutes);
+router.use("/observability", observabilityRoutes);
 
 module.exports = router;

@@ -4,19 +4,32 @@ const { logAudit } = require("../../services/audit.service");
 const { assignTenantSubscription } = require("../../services/subscription.service");
 const { assertTenantAccess } = require("../../services/user-context.service");
 
-async function listTenants(actor) {
+async function listTenants(actor, query = {}) {
+    const page = Number(query.page || 1);
+    const limit = Math.min(Number(query.limit || 50), 100);
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
+
     if (actor.isInternalOps) {
-        const { data, error } = await adminSupabase
+        const { data, error, count } = await adminSupabase
             .from("tenants")
-            .select("*, subscriptions(*)")
+            .select("*, subscriptions(*)", { count: "exact" })
             .is("deleted_at", null)
-            .order("created_at", { ascending: false });
+            .order("created_at", { ascending: false })
+            .range(from, to);
 
         if (error) {
             throw new AppError(500, "TENANTS_LIST_FAILED", "Unable to load tenants.", error);
         }
 
-        return data || [];
+        return {
+            data: data || [],
+            pagination: {
+                page,
+                limit,
+                total: count || 0
+            }
+        };
     }
 
     if (!actor.tenantId) {
@@ -34,7 +47,14 @@ async function listTenants(actor) {
         throw new AppError(500, "TENANT_FETCH_FAILED", "Unable to load tenant.", error);
     }
 
-    return [data];
+    return {
+        data: [data],
+        pagination: {
+            page: 1,
+            limit: 1,
+            total: data ? 1 : 0
+        }
+    };
 }
 
 async function createTenant(actor, payload) {

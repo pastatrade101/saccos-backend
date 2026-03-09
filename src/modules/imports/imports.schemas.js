@@ -28,7 +28,9 @@ const startMemberImportSchema = z.object({
 const listImportRowsQuerySchema = z.object({
     status: z.enum(["success", "failed"]).optional(),
     page: positiveInt.default(1),
-    limit: positiveInt.default(25)
+    limit: positiveInt.default(25).refine((value) => value <= 100, {
+        message: "limit must be less than or equal to 100"
+    })
 });
 
 module.exports = {

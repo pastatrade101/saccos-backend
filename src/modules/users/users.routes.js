@@ -7,7 +7,7 @@ const requireSubscription = require("../../middleware/require-subscription");
 const validate = require("../../middleware/validate");
 const { ROLES } = require("../../constants/roles");
 const controller = require("./users.controller");
-const { createUserSchema, updateUserSchema, bootstrapSuperAdminSchema } = require("./users.schemas");
+const { createUserSchema, updateUserSchema, bootstrapSuperAdminSchema, listUsersQuerySchema } = require("./users.schemas");
 
 const router = express.Router();
 
@@ -24,6 +24,7 @@ router.get(
     "/",
     authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER, ROLES.AUDITOR], { allowInternalOps: false }),
     requireSubscription(),
+    validate(listUsersQuerySchema, "query"),
     controller.listUsers
 );
 router.post(

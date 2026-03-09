@@ -11,6 +11,13 @@ const createBranchSchema = z.object({
     country: z.string().min(2).max(80)
 });
 
+const listBranchesQuerySchema = z.object({
+    tenant_id: z.string().uuid().optional(),
+    page: z.coerce.number().int().positive().default(1),
+    limit: z.coerce.number().int().positive().max(100).default(50)
+});
+
 module.exports = {
-    createBranchSchema
+    createBranchSchema,
+    listBranchesQuerySchema
 };

@@ -2,7 +2,8 @@ const asyncHandler = require("../../utils/async-handler");
 const service = require("./cash-control.service");
 
 exports.listSessions = asyncHandler(async (req, res) => {
-    res.json({ data: await service.listSessions(req.auth, req.validated.query) });
+    const result = await service.listSessions(req.auth, req.validated.query);
+    res.json({ data: result.data, pagination: result.pagination });
 });
 
 exports.currentSession = asyncHandler(async (req, res) => {
