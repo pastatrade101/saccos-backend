@@ -1028,8 +1028,8 @@ async function provisionMemberLogin(actor, member, payload) {
             phone: member.phone || null,
             role: "member",
             member_id: member.id,
-            must_change_password: existingProfile?.must_change_password ?? false,
-            first_login_at: existingProfile?.first_login_at ?? (payload.first_login_at || null),
+            must_change_password: mustChangePassword,
+            first_login_at: mustChangePassword ? null : (existingProfile?.first_login_at ?? (payload.first_login_at || null)),
             is_active: true
         };
 
@@ -1057,7 +1057,7 @@ async function provisionMemberLogin(actor, member, payload) {
             throw new AppError(500, "MEMBER_LINK_FAILED", "Unable to update member login link.", updateError);
         }
 
-        const { error: authError } = await adminSupabase.auth.admin.updateUserById(member.user_id, {
+        const authUserUpdatePayload = {
             email,
             user_metadata: {
                 full_name: member.full_name,
@@ -1068,10 +1068,34 @@ async function provisionMemberLogin(actor, member, payload) {
                 role: "member",
                 member_id: member.id
             }
-        });
+        };
+
+        if (!payload.send_invite) {
+            authUserUpdatePayload.password = payload.password || temporaryPassword;
+            authUserUpdatePayload.email_confirm = true;
+        }
+
+        const { error: authError } = await adminSupabase.auth.admin.updateUserById(member.user_id, authUserUpdatePayload);
 
         if (authError) {
             throw new AppError(500, "MEMBER_AUTH_SYNC_FAILED", "Unable to sync existing member login.", authError);
+        }
+
+        await ensureBranchAssignments({
+            tenantId: member.tenant_id,
+            userId: member.user_id,
+            branchIds: [member.branch_id]
+        });
+
+        if (!payload.send_invite && (temporaryPassword || payload.password)) {
+            await saveCredentialHandoff({
+                tenantId: member.tenant_id,
+                userId: member.user_id,
+                memberId: member.id,
+                email,
+                password: temporaryPassword || payload.password,
+                createdBy: actor.user.id
+            });
         }
 
         return {
@@ -1082,7 +1106,7 @@ async function provisionMemberLogin(actor, member, payload) {
                 email
             },
             already_exists: true,
-            temporary_password: (await getActiveCredentialByUser({
+            temporary_password: temporaryPassword || (await getActiveCredentialByUser({
                 tenantId: member.tenant_id,
                 userId: member.user_id
             }))?.temporary_password || null

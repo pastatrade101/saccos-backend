@@ -156,6 +156,21 @@ async function getDistributableSurplus(tenantId) {
     return Number(balanceRow?.balance || 0);
 }
 
+async function getPendingPayableAllocations(cycleId) {
+    const { count, error } = await adminSupabase
+        .from("dividend_allocations")
+        .select("id", { count: "exact", head: true })
+        .eq("cycle_id", cycleId)
+        .eq("status", "pending")
+        .gt("payout_amount", 0);
+
+    if (error) {
+        throw new AppError(500, "DIVIDEND_ALLOCATIONS_FETCH_FAILED", "Unable to validate dividend allocations.", error);
+    }
+
+    return Number(count || 0);
+}
+
 function computeEndBalance(transactions, recordDate) {
     return transactions
         .filter((entry) => toDateOnly(entry.created_at) <= recordDate)
@@ -775,7 +790,9 @@ async function allocateCycle(actor, cycleId) {
             throw new AppError(400, "NEGATIVE_DIVIDEND_PAYOUT", "Negative dividend payouts are not allowed.");
         }
 
-        summary.allocations.forEach((allocation) => {
+        summary.allocations
+            .filter((allocation) => Number(allocation.payout_amount || 0) > 0)
+            .forEach((allocation) => {
             rows.push({
                 cycle_id: cycleId,
                 component_id: component.id,
@@ -798,6 +815,15 @@ async function allocateCycle(actor, cycleId) {
             eligible_members: summary.allocations.filter((entry) => entry.payout_amount > 0).length
         });
     });
+
+    if (!rows.length) {
+        throw new AppError(
+            400,
+            "NO_ALLOCATIONS_TO_APPROVE",
+            "No payable dividend allocations were generated. Reduce minimum payout threshold or increase rates, then allocate again.",
+            { component_totals: componentTotals }
+        );
+    }
 
     await adminSupabase.from("dividend_allocations").delete().eq("cycle_id", cycleId);
     if (rows.length) {
@@ -846,6 +872,15 @@ async function submitCycle(actor, cycleId) {
         throw new AppError(409, "INVALID_DIVIDEND_STATE", "Only allocated cycles can be submitted for approval.");
     }
 
+    const pendingPayableCount = await getPendingPayableAllocations(cycleId);
+    if (!pendingPayableCount) {
+        throw new AppError(
+            400,
+            "NO_ALLOCATIONS_TO_APPROVE",
+            "No payable dividend allocations are pending for approval. Re-run allocation with updated payout rules."
+        );
+    }
+
     const { error } = await adminSupabase
         .from("dividend_cycles")
         .update({
@@ -875,6 +910,15 @@ async function approveCycle(actor, cycleId, payload) {
 
     if (!cycle.submitted_for_approval_at) {
         throw new AppError(409, "DIVIDEND_NOT_SUBMITTED", "The dividend cycle must be submitted for approval before it can be approved.");
+    }
+
+    const pendingPayableCount = await getPendingPayableAllocations(cycleId);
+    if (!pendingPayableCount) {
+        throw new AppError(
+            400,
+            "NO_ALLOCATIONS_TO_APPROVE",
+            "No payable dividend allocations are pending for approval. Ask branch manager to re-run allocation with updated payout rules."
+        );
     }
 
     const { data, error } = await adminSupabase.rpc("approve_dividend_cycle", {
@@ -929,7 +973,7 @@ async function rejectCycle(actor, cycleId, payload) {
     await adminSupabase
         .from("dividend_cycles")
         .update({
-            status: "frozen",
+            status: "draft",
             submitted_for_approval_at: null,
             submitted_for_approval_by: null
         })

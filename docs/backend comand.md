@@ -1,0 +1,1 @@
+docker compose -f docker-compose.yml -f docker-compose.scale.yml up -d --build --scale backend=2 backend report-worker api-lb

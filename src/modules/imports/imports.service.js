@@ -413,7 +413,7 @@ async function findExistingMember({ tenantId, memberNo, email, phoneNumber, tinN
     return null;
 }
 
-async function upsertMember({ actor, tenantId, branchId, row }) {
+async function upsertMember({ actor, tenantId, branchId, row, updateExistingOnly = false }) {
     const memberNo = normalizeString(row.member_no);
     const email = normalizeString(row.email)?.toLowerCase() || null;
     const phoneNumber = normalizePhone(row.phone_number);
@@ -510,6 +510,14 @@ async function upsertMember({ actor, tenantId, branchId, row }) {
         });
 
         return { member: data, created: false };
+    }
+
+    if (updateExistingOnly) {
+        throw new AppError(
+            400,
+            "MEMBER_NOT_FOUND_FOR_UPDATE",
+            "No existing member was found for update_existing_only mode."
+        );
     }
 
     const { data, error } = await adminSupabase
@@ -1128,6 +1136,20 @@ function validatePreviewRow(normalizedRow, options) {
         errors.push(error.message);
     }
 
+    if (options.update_existing_only) {
+        const hasLookupKey = Boolean(
+            normalizedRow.member_no ||
+            normalizedRow.email ||
+            normalizedRow.phone_number ||
+            normalizedRow.tin_number ||
+            normalizedRow.nin
+        );
+
+        if (!hasLookupKey) {
+            errors.push("update_existing_only requires at least one identifier: member_no, email, phone_number, tin_number, or nin.");
+        }
+    }
+
     return errors;
 }
 
@@ -1212,6 +1234,34 @@ async function previewMemberImport({ actor, fileBuffer, options }) {
         };
     });
 
+    if (options.update_existing_only) {
+        for (const row of previewRows) {
+            if (row.errors.length > 0) {
+                continue;
+            }
+
+            let normalizedPhone = null;
+            try {
+                normalizedPhone = normalizePhone(row.data.phone_number);
+            } catch (error) {
+                // Validation message is already present from validatePreviewRow.
+            }
+
+            const existing = await findExistingMember({
+                tenantId,
+                memberNo: normalizeString(row.data.member_no),
+                email: normalizeString(row.data.email)?.toLowerCase() || null,
+                phoneNumber: normalizedPhone,
+                tinNumber: normalizeIdentityCode(row.data.tin_number, "tin_number"),
+                nin: normalizeIdentityCode(row.data.nin, "nin")
+            });
+
+            if (!existing) {
+                row.errors.push("No existing member was found for update_existing_only mode.");
+            }
+        }
+    }
+
     const invalidRows = previewRows.filter((row) => row.errors.length > 0).length;
 
     return {
@@ -1283,6 +1333,7 @@ async function runMemberImportJob({ jobId, actor, fileBuffer, options, requestMe
                     actor,
                     tenantId,
                     branchId,
+                    updateExistingOnly: Boolean(options.update_existing_only),
                     row: {
                         ...normalizedRow,
                         full_name: fullName
@@ -1313,12 +1364,12 @@ async function runMemberImportJob({ jobId, actor, fileBuffer, options, requestMe
 
                         authUserId = loginResult.user.id;
 
-                        if (!loginResult.already_exists) {
+                        if (loginResult.temporary_password) {
                             credentialsRows.push({
                                 full_name: upserted.member.full_name,
                                 email,
                                 member_no: upserted.member.member_no || "",
-                                temp_password: tempPassword
+                                temp_password: loginResult.temporary_password
                             });
                         }
 
@@ -1475,6 +1526,13 @@ async function processMemberImport({ actor, fileBuffer, options, requestMeta }) 
     const tenantId = actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
 
+    const { headers, rows } = parseCsvBuffer(fileBuffer);
+    ensureCsvHeaders(headers);
+
+    if (!rows.length) {
+        throw new AppError(400, "IMPORT_ROWS_REQUIRED", "CSV must include at least one data row.");
+    }
+
     const defaultBranchId = await resolveImportJobBranchId({
         tenantId,
         actor,
@@ -1501,7 +1559,8 @@ async function processMemberImport({ actor, fileBuffer, options, requestMeta }) 
         ip: requestMeta.ip,
         userAgent: requestMeta.userAgent,
         afterData: {
-            create_portal_account: options.create_portal_account
+            create_portal_account: options.create_portal_account,
+            update_existing_only: options.update_existing_only
         }
     });
 

@@ -22,6 +22,7 @@ const positiveInt = z.preprocess((value) => {
 
 const startMemberImportSchema = z.object({
     create_portal_account: booleanish.default(false),
+    update_existing_only: booleanish.default(false),
     default_branch_id: z.string().uuid().optional().nullable()
 });
 
