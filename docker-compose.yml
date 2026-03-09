@@ -40,6 +40,8 @@ services:
       NODE_ENV: production
       REPORT_EXPORT_WORKER_BACKOFF_MS: "${REPORT_EXPORT_WORKER_BACKOFF_MS:-1000}"
     command: ["node", "src/worker.js"]
+    healthcheck:
+      disable: true
     init: true
     restart: unless-stopped
     depends_on:

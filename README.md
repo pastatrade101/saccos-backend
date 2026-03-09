@@ -162,7 +162,7 @@ docker compose up -d
 Backend (scaled 2x with internal LB):
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.scale.yml up -d --build --scale backend=2 backend api-lb report-worker
+docker compose -f docker-compose.scale.yml up -d --build --scale backend=2 backend api-lb report-worker
 ```
 
 Frontend:

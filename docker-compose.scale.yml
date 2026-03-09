@@ -1,6 +1,31 @@
 services:
   backend:
-    ports: []
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: 5000
+      HOST: "${HOST:-0.0.0.0}"
+      OTP_REQUIRED_ON_SIGNIN: "${OTP_REQUIRED_ON_SIGNIN:-true}"
+    init: true
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('http').get('http://127.0.0.1:' + (process.env.PORT || 5000) + '/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
 
   api-lb:
     image: nginx:1.27-alpine
@@ -12,5 +37,25 @@ services:
     volumes:
       - ./deploy/nginx/api-lb.conf:/etc/nginx/nginx.conf:ro
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+  report-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      REPORT_EXPORT_WORKER_BACKOFF_MS: "${REPORT_EXPORT_WORKER_BACKOFF_MS:-1000}"
+    command: ["node", "src/worker.js"]
+    healthcheck:
+      disable: true
+    init: true
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_started
     security_opt:
       - no-new-privileges:true

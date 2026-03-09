@@ -34,14 +34,14 @@ Date: 2026-03-09
 #### Start scaled stack
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.scale.yml up -d --build --scale backend=2 backend api-lb report-worker
+docker compose -f docker-compose.scale.yml up -d --build --scale backend=2 backend api-lb report-worker
 ```
 
 #### Verify
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.scale.yml ps
-docker compose -f docker-compose.yml -f docker-compose.scale.yml logs -f api-lb backend report-worker
+docker compose -f docker-compose.scale.yml ps
+docker compose -f docker-compose.scale.yml logs -f api-lb backend report-worker
 curl -sS http://127.0.0.1:${PORT:-5000}/health
 ```
 
