@@ -124,6 +124,7 @@ Run in this sequence:
 30. `029_phase3_report_export_retries.sql`
 31. `030_phase3_report_export_cleanup_indexes.sql`
 32. `031_phase4_distributed_rate_limits.sql`
+33. `032_phase4_otp_atomic_verify.sql`
 
 Important:
 

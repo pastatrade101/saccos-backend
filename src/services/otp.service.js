@@ -6,6 +6,11 @@ const AppError = require("../utils/app-error");
 const { assertRateLimit } = require("./rate-limit.service");
 const { sendOtpSms } = require("./sms.service");
 
+function isMissingConsumeOtpFunction(error) {
+    const message = String(error?.message || "").toLowerCase();
+    return error?.code === "42883" && message.includes("consume_otp_challenge_attempt");
+}
+
 function normalizePhone(phone) {
     const normalized = (phone || "")
         .trim()
@@ -286,49 +291,134 @@ async function verifyOtpChallenge({
     });
     const valid = compareOtpHash(challenge.otp_hash, nextHash);
 
-    if (!valid) {
-        const { error: attemptError } = await adminSupabase
-            .from("auth_otp_challenges")
-            .update({
-                attempt_count: challenge.attempt_count + 1,
-                last_attempt_at: new Date().toISOString()
-            })
-            .eq("id", challenge.id);
+    const nowIso = new Date().toISOString();
 
-        if (attemptError) {
+    const consumeWithFallback = async () => {
+        const { data, error } = await adminSupabase.rpc("consume_otp_challenge_attempt", {
+            p_challenge_id: challenge.id,
+            p_user_id: userId,
+            p_purpose: purpose,
+            p_is_valid: valid,
+            p_now: nowIso
+        });
+
+        if (!error) {
+            const row = Array.isArray(data) ? (data[0] || null) : data;
+            if (!row?.status) {
+                throw new AppError(
+                    500,
+                    "OTP_CONSUME_FAILED",
+                    "Unable to finalize OTP verification."
+                );
+            }
+            return row.status;
+        }
+
+        if (!isMissingConsumeOtpFunction(error)) {
             throw new AppError(
                 500,
-                "OTP_ATTEMPT_UPDATE_FAILED",
-                "Unable to update OTP attempts.",
-                attemptError
+                "OTP_CONSUME_FAILED",
+                "Unable to finalize OTP verification.",
+                error
             );
         }
 
+        // Backward compatibility for environments that have not yet applied migration 032.
+        if (!valid) {
+            const { error: attemptError } = await adminSupabase
+                .from("auth_otp_challenges")
+                .update({
+                    attempt_count: challenge.attempt_count + 1,
+                    last_attempt_at: nowIso
+                })
+                .eq("id", challenge.id);
+
+            if (attemptError) {
+                throw new AppError(
+                    500,
+                    "OTP_ATTEMPT_UPDATE_FAILED",
+                    "Unable to update OTP attempts.",
+                    attemptError
+                );
+            }
+
+            return "invalid";
+        }
+
+        const { data: consumed, error: consumeError } = await adminSupabase
+            .from("auth_otp_challenges")
+            .update({
+                verified_at: nowIso,
+                consumed_at: nowIso,
+                last_attempt_at: nowIso
+            })
+            .eq("id", challenge.id)
+            .is("consumed_at", null)
+            .select("id")
+            .maybeSingle();
+
+        if (consumeError) {
+            throw new AppError(
+                500,
+                "OTP_CONSUME_FAILED",
+                "Unable to finalize OTP verification.",
+                consumeError
+            );
+        }
+
+        if (!consumed) {
+            const refreshed = await getChallenge({ challengeId, userId, purpose });
+            if (refreshed?.consumed_at) {
+                return "already_used";
+            }
+            return "invalid";
+        }
+
+        return "verified";
+    };
+
+    const status = await consumeWithFallback();
+
+    if (status === "verified") {
+        return {
+            verified: true,
+            challenge_id: challenge.id
+        };
+    }
+
+    if (status === "invalid") {
         throw new AppError(401, "OTP_INVALID", "OTP code is invalid.");
     }
 
-    const { error: consumeError } = await adminSupabase
-        .from("auth_otp_challenges")
-        .update({
-            verified_at: new Date().toISOString(),
-            consumed_at: new Date().toISOString(),
-            last_attempt_at: new Date().toISOString()
-        })
-        .eq("id", challenge.id);
+    if (status === "already_used") {
+        throw new AppError(401, "OTP_ALREADY_USED", "OTP has already been used.");
+    }
 
-    if (consumeError) {
+    if (status === "expired") {
+        throw new AppError(401, "OTP_EXPIRED", "OTP code has expired.");
+    }
+
+    if (status === "attempts_exceeded") {
         throw new AppError(
-            500,
-            "OTP_CONSUME_FAILED",
-            "Unable to finalize OTP verification.",
-            consumeError
+            429,
+            "OTP_ATTEMPTS_EXCEEDED",
+            "Maximum OTP verification attempts exceeded."
         );
     }
 
-    return {
-        verified: true,
-        challenge_id: challenge.id
-    };
+    if (status === "not_found") {
+        throw new AppError(
+            401,
+            "OTP_CHALLENGE_NOT_FOUND",
+            "OTP challenge is invalid or expired."
+        );
+    }
+
+    throw new AppError(
+        500,
+        "OTP_CONSUME_FAILED",
+        "Unable to finalize OTP verification."
+    );
 }
 
 module.exports = {

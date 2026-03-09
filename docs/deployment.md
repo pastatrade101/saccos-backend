@@ -63,6 +63,14 @@ Apply in this exact sequence on a fresh environment:
 23. `supabase/sql/021_loan_workflow.sql`
 24. `supabase/sql/022_loan_workflow_rls.sql`
 25. `supabase/sql/023_performance_reliability.sql`
+26. `supabase/sql/025_auth_otp_challenges.sql`
+27. `supabase/sql/026_phase2_seek_indexes.sql`
+28. `supabase/sql/027_phase3_report_export_jobs.sql`
+29. `supabase/sql/028_phase3_report_export_worker.sql`
+30. `supabase/sql/029_phase3_report_export_retries.sql`
+31. `supabase/sql/030_phase3_report_export_cleanup_indexes.sql`
+32. `supabase/sql/031_phase4_distributed_rate_limits.sql`
+33. `supabase/sql/032_phase4_otp_atomic_verify.sql`
 
 For existing environments, run only new additive migrations and validate policy collisions before execution.
 

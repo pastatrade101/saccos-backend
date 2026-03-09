@@ -14,6 +14,7 @@
     "reset:members": "node scripts/reset-members.js",
     "cleanup:report-exports": "node scripts/cleanup-report-export-jobs.js",
     "load:baseline": "node scripts/load-baseline.js",
+    "load:scale": "node scripts/load-scale-stages.js",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:smoke": "jest test/smoke/smoke.test.ts"
