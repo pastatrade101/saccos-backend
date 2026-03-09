@@ -2,6 +2,7 @@ const { adminSupabase } = require("../config/supabase");
 const AppError = require("../utils/app-error");
 const asyncHandler = require("../utils/async-handler");
 const { getBranchAssignments, getUserProfile } = require("../services/user-context.service");
+const { verifySupabaseAccessToken } = require("../services/token-verifier.service");
 
 module.exports = asyncHandler(async (req, res, next) => {
     const authorization = req.headers.authorization || "";
@@ -11,13 +12,21 @@ module.exports = asyncHandler(async (req, res, next) => {
         throw new AppError(401, "AUTH_TOKEN_MISSING", "Authorization token is required.");
     }
 
-    const { data, error } = await adminSupabase.auth.getUser(token);
+    let authUser;
+    try {
+        authUser = await verifySupabaseAccessToken(token);
+    } catch (error) {
+        if (error instanceof AppError) {
+            throw error;
+        }
 
-    if (error || !data?.user) {
-        throw new AppError(401, "AUTH_TOKEN_INVALID", "Authorization token is invalid.");
+        // Fallback keeps auth available when JWKS is temporarily unreachable.
+        const { data, error: getUserError } = await adminSupabase.auth.getUser(token);
+        if (getUserError || !data?.user) {
+            throw new AppError(401, "AUTH_TOKEN_INVALID", "Authorization token is invalid.");
+        }
+        authUser = data.user;
     }
-
-    const authUser = data.user;
     const [profile, branchIds] = await Promise.all([
         getUserProfile(authUser.id),
         getBranchAssignments(authUser.id)
