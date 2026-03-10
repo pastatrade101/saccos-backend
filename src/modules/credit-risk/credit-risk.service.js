@@ -48,6 +48,30 @@ const COLLECTION_ACTION_COLUMNS = `
     updated_at
 `;
 
+const GUARANTOR_CLAIM_COLUMNS = `
+    id,
+    tenant_id,
+    branch_id,
+    default_case_id,
+    loan_id,
+    guarantor_member_id,
+    claim_amount,
+    settled_amount,
+    status,
+    claim_reference,
+    notes,
+    approval_request_id,
+    posted_journal_id,
+    claimed_by,
+    claimed_at,
+    settled_at,
+    waived_at,
+    created_at,
+    updated_at,
+    members(id, full_name, member_no, phone),
+    loan_default_cases(id, status, dpd_days)
+`;
+
 const CLOSED_DEFAULT_CASE_STATUSES = new Set([
     "restructured",
     "written_off",
@@ -57,6 +81,7 @@ const CLOSED_DEFAULT_CASE_STATUSES = new Set([
 const OPEN_DEFAULT_CASE_STATUSES = ["delinquent", "in_recovery", "claim_ready"];
 const COMMITTED_GUARANTOR_APPLICATION_STATUSES = ["submitted", "appraised", "approved", "disbursed"];
 const ACTIVE_GUARANTOR_CLAIM_STATUSES = ["approved", "posted", "partial_settled"];
+const OPEN_GUARANTOR_CLAIM_STATUSES = ["draft", "submitted", "approved", "posted", "partial_settled"];
 
 const DEFAULT_CASE_TRANSITIONS = {
     delinquent: ["in_recovery"],
@@ -495,6 +520,116 @@ async function getCollectionActionById(actor, actionId, tenantId) {
 
     if (!data) {
         throw new AppError(404, "COLLECTION_ACTION_NOT_FOUND", "Collection action was not found.");
+    }
+
+    return data;
+}
+
+async function getGuarantorClaimById(actor, claimId, tenantId) {
+    let builder = adminSupabase
+        .from("guarantor_claims")
+        .select(GUARANTOR_CLAIM_COLUMNS)
+        .eq("tenant_id", tenantId)
+        .eq("id", claimId);
+
+    builder = assertStaffBranchScopedRead(actor, builder);
+    const { data, error } = await builder.maybeSingle();
+
+    if (error) {
+        throw new AppError(500, "GUARANTOR_CLAIM_LOOKUP_FAILED", "Unable to load guarantor claim.", error);
+    }
+
+    if (!data) {
+        throw new AppError(404, "GUARANTOR_CLAIM_NOT_FOUND", "Guarantor claim was not found.");
+    }
+
+    return data;
+}
+
+async function getLoanGuarantorRecord(tenantId, loanId, guarantorMemberId) {
+    const { data: loan, error: loanError } = await adminSupabase
+        .from("loans")
+        .select("id, application_id")
+        .eq("tenant_id", tenantId)
+        .eq("id", loanId)
+        .maybeSingle();
+
+    if (loanError) {
+        throw new AppError(500, "LOAN_LOOKUP_FAILED", "Unable to load loan context for guarantor claim.", loanError);
+    }
+
+    if (!loan) {
+        throw new AppError(404, "LOAN_NOT_FOUND", "Loan was not found.");
+    }
+
+    let applicationId = loan.application_id || null;
+    if (!applicationId) {
+        const { data: fallbackApplication, error: fallbackApplicationError } = await adminSupabase
+            .from("loan_applications")
+            .select("id")
+            .eq("tenant_id", tenantId)
+            .eq("loan_id", loanId)
+            .maybeSingle();
+
+        if (fallbackApplicationError) {
+            throw new AppError(
+                500,
+                "LOAN_APPLICATION_LOOKUP_FAILED",
+                "Unable to resolve loan application context for guarantor claim.",
+                fallbackApplicationError
+            );
+        }
+
+        applicationId = fallbackApplication?.id || null;
+    }
+
+    if (!applicationId) {
+        throw new AppError(
+            400,
+            "GUARANTOR_CONTEXT_MISSING",
+            "Loan application context is missing for this disbursed loan."
+        );
+    }
+
+    const { data: guarantor, error: guarantorError } = await adminSupabase
+        .from("loan_guarantors")
+        .select("id, application_id, member_id, guaranteed_amount")
+        .eq("tenant_id", tenantId)
+        .eq("application_id", applicationId)
+        .eq("member_id", guarantorMemberId)
+        .maybeSingle();
+
+    if (guarantorError) {
+        throw new AppError(
+            500,
+            "GUARANTOR_LOOKUP_FAILED",
+            "Unable to validate guarantor assignment for this loan.",
+            guarantorError
+        );
+    }
+
+    if (!guarantor) {
+        throw new AppError(
+            400,
+            "GUARANTOR_NOT_LINKED_TO_LOAN",
+            "Selected guarantor member is not linked to this loan."
+        );
+    }
+
+    return guarantor;
+}
+
+async function updateGuarantorClaimById(tenantId, claimId, patch) {
+    const { data, error } = await adminSupabase
+        .from("guarantor_claims")
+        .update(patch)
+        .eq("tenant_id", tenantId)
+        .eq("id", claimId)
+        .select(GUARANTOR_CLAIM_COLUMNS)
+        .single();
+
+    if (error || !data) {
+        throw new AppError(500, "GUARANTOR_CLAIM_UPDATE_FAILED", "Unable to update guarantor claim.", error);
     }
 
     return data;
@@ -973,6 +1108,414 @@ async function recomputeGuarantorExposures(actor, payload = {}) {
     );
 }
 
+async function listGuarantorClaims(actor, query = {}) {
+    const tenantId = query.tenant_id || actor.tenantId;
+    assertTenantAccess({ auth: actor }, tenantId);
+    const { page, limit, from, to } = normalizePagination(query);
+
+    let builder = adminSupabase
+        .from("guarantor_claims")
+        .select(GUARANTOR_CLAIM_COLUMNS, { count: "exact" })
+        .eq("tenant_id", tenantId);
+
+    if (query.default_case_id) {
+        builder = builder.eq("default_case_id", query.default_case_id);
+    }
+    if (query.loan_id) {
+        builder = builder.eq("loan_id", query.loan_id);
+    }
+    if (query.guarantor_member_id) {
+        builder = builder.eq("guarantor_member_id", query.guarantor_member_id);
+    }
+    if (query.status) {
+        builder = builder.eq("status", query.status);
+    }
+    if (query.branch_id) {
+        assertBranchAccess({ auth: actor }, query.branch_id);
+        builder = builder.eq("branch_id", query.branch_id);
+    }
+
+    builder = assertStaffBranchScopedRead(actor, builder);
+
+    const { data, error, count } = await builder
+        .order("claimed_at", { ascending: false })
+        .range(from, to);
+
+    if (error) {
+        throw new AppError(500, "GUARANTOR_CLAIMS_FETCH_FAILED", "Unable to load guarantor claims.", error);
+    }
+
+    return {
+        data: data || [],
+        pagination: {
+            page,
+            limit,
+            total: count || 0
+        }
+    };
+}
+
+async function getGuarantorClaim(actor, claimId, query = {}) {
+    const tenantId = query.tenant_id || actor.tenantId;
+    assertTenantAccess({ auth: actor }, tenantId);
+    return getGuarantorClaimById(actor, claimId, tenantId);
+}
+
+async function createGuarantorClaim(actor, payload = {}) {
+    const tenantId = payload.tenant_id || actor.tenantId;
+    assertTenantAccess({ auth: actor }, tenantId);
+
+    const defaultCase = await getDefaultCaseById(actor, payload.default_case_id, tenantId);
+    assertBranchAccess({ auth: actor }, defaultCase.branch_id);
+
+    if (defaultCase.status !== "claim_ready") {
+        throw new AppError(
+            400,
+            "DEFAULT_CASE_NOT_CLAIM_READY",
+            "Guarantor claims can only be created when default case status is claim_ready."
+        );
+    }
+
+    await getLoanGuarantorRecord(tenantId, defaultCase.loan_id, payload.guarantor_member_id);
+
+    const { data: existingOpenClaims, error: existingOpenClaimsError } = await adminSupabase
+        .from("guarantor_claims")
+        .select("id")
+        .eq("tenant_id", tenantId)
+        .eq("default_case_id", defaultCase.id)
+        .eq("guarantor_member_id", payload.guarantor_member_id)
+        .in("status", OPEN_GUARANTOR_CLAIM_STATUSES)
+        .limit(1);
+
+    if (existingOpenClaimsError) {
+        throw new AppError(
+            500,
+            "GUARANTOR_CLAIM_LOOKUP_FAILED",
+            "Unable to validate existing guarantor claims for this case.",
+            existingOpenClaimsError
+        );
+    }
+
+    if (Array.isArray(existingOpenClaims) && existingOpenClaims.length) {
+        throw new AppError(
+            409,
+            "GUARANTOR_CLAIM_ALREADY_OPEN",
+            "An active guarantor claim already exists for this member on the selected default case."
+        );
+    }
+
+    const { data, error } = await adminSupabase
+        .from("guarantor_claims")
+        .insert({
+            tenant_id: tenantId,
+            branch_id: defaultCase.branch_id,
+            default_case_id: defaultCase.id,
+            loan_id: defaultCase.loan_id,
+            guarantor_member_id: payload.guarantor_member_id,
+            claim_amount: payload.claim_amount,
+            claim_reference: payload.claim_reference || null,
+            notes: payload.notes || null,
+            claimed_by: actor.user.id,
+            claimed_at: new Date().toISOString(),
+            status: "draft"
+        })
+        .select(GUARANTOR_CLAIM_COLUMNS)
+        .single();
+
+    if (error || !data) {
+        throw new AppError(500, "GUARANTOR_CLAIM_CREATE_FAILED", "Unable to create guarantor claim.", error);
+    }
+
+    await logAudit({
+        tenantId,
+        actorUserId: actor.user.id,
+        table: "guarantor_claims",
+        action: "create_guarantor_claim",
+        entityType: "guarantor_claim",
+        entityId: data.id,
+        afterData: data
+    });
+
+    return data;
+}
+
+async function submitGuarantorClaim(actor, claimId, payload = {}) {
+    const tenantId = actor.tenantId;
+    assertTenantAccess({ auth: actor }, tenantId);
+    const current = await getGuarantorClaimById(actor, claimId, tenantId);
+    assertBranchAccess({ auth: actor }, current.branch_id);
+
+    if (current.status === "submitted") {
+        return current;
+    }
+    if (current.status !== "draft") {
+        throw new AppError(
+            400,
+            "GUARANTOR_CLAIM_INVALID_TRANSITION",
+            `Cannot submit claim from status ${current.status}.`
+        );
+    }
+
+    const data = await updateGuarantorClaimById(tenantId, claimId, {
+        status: "submitted",
+        claim_reference: Object.prototype.hasOwnProperty.call(payload, "claim_reference")
+            ? (payload.claim_reference || null)
+            : current.claim_reference,
+        notes: Object.prototype.hasOwnProperty.call(payload, "notes")
+            ? (payload.notes || null)
+            : current.notes
+    });
+
+    await logAudit({
+        tenantId,
+        actorUserId: actor.user.id,
+        table: "guarantor_claims",
+        action: "submit_guarantor_claim",
+        entityType: "guarantor_claim",
+        entityId: data.id,
+        beforeData: current,
+        afterData: data
+    });
+
+    return data;
+}
+
+async function approveGuarantorClaim(actor, claimId, payload = {}) {
+    const tenantId = actor.tenantId;
+    assertTenantAccess({ auth: actor }, tenantId);
+    const current = await getGuarantorClaimById(actor, claimId, tenantId);
+    assertBranchAccess({ auth: actor }, current.branch_id);
+
+    if (current.status === "approved") {
+        return current;
+    }
+    if (current.status !== "submitted") {
+        throw new AppError(
+            400,
+            "GUARANTOR_CLAIM_INVALID_TRANSITION",
+            `Cannot approve claim from status ${current.status}.`
+        );
+    }
+
+    const data = await updateGuarantorClaimById(tenantId, claimId, {
+        status: "approved",
+        approval_request_id: Object.prototype.hasOwnProperty.call(payload, "approval_request_id")
+            ? (payload.approval_request_id || null)
+            : current.approval_request_id,
+        notes: Object.prototype.hasOwnProperty.call(payload, "notes")
+            ? (payload.notes || null)
+            : current.notes
+    });
+
+    await recomputeGuarantorExposuresForMembers({
+        tenantId,
+        memberIds: [data.guarantor_member_id],
+        actorUserId: actor.user.id,
+        source: "guarantor_claim_approve"
+    });
+
+    await logAudit({
+        tenantId,
+        actorUserId: actor.user.id,
+        table: "guarantor_claims",
+        action: "approve_guarantor_claim",
+        entityType: "guarantor_claim",
+        entityId: data.id,
+        beforeData: current,
+        afterData: data
+    });
+
+    return data;
+}
+
+async function rejectGuarantorClaim(actor, claimId, payload = {}) {
+    const tenantId = actor.tenantId;
+    assertTenantAccess({ auth: actor }, tenantId);
+    const current = await getGuarantorClaimById(actor, claimId, tenantId);
+    assertBranchAccess({ auth: actor }, current.branch_id);
+
+    if (!["submitted", "approved"].includes(current.status)) {
+        throw new AppError(
+            400,
+            "GUARANTOR_CLAIM_INVALID_TRANSITION",
+            `Cannot reject claim from status ${current.status}.`
+        );
+    }
+
+    const reasonNotes = [`rejection_reason:${payload.reason_code}`];
+    if (payload.notes) {
+        reasonNotes.push(payload.notes);
+    }
+
+    const data = await updateGuarantorClaimById(tenantId, claimId, {
+        status: "draft",
+        approval_request_id: null,
+        posted_journal_id: null,
+        notes: reasonNotes.join(" | ")
+    });
+
+    if (ACTIVE_GUARANTOR_CLAIM_STATUSES.includes(current.status)) {
+        await recomputeGuarantorExposuresForMembers({
+            tenantId,
+            memberIds: [data.guarantor_member_id],
+            actorUserId: actor.user.id,
+            source: "guarantor_claim_reject"
+        });
+    }
+
+    await logAudit({
+        tenantId,
+        actorUserId: actor.user.id,
+        table: "guarantor_claims",
+        action: "reject_guarantor_claim",
+        entityType: "guarantor_claim",
+        entityId: data.id,
+        beforeData: current,
+        afterData: data
+    });
+
+    return data;
+}
+
+async function postGuarantorClaim(actor, claimId, payload = {}) {
+    const tenantId = actor.tenantId;
+    assertTenantAccess({ auth: actor }, tenantId);
+    const current = await getGuarantorClaimById(actor, claimId, tenantId);
+    assertBranchAccess({ auth: actor }, current.branch_id);
+
+    if (current.status === "posted") {
+        return current;
+    }
+    if (current.status !== "approved") {
+        throw new AppError(400, "GUARANTOR_CLAIM_NOT_POSTABLE", "Claim must be approved before posting.");
+    }
+
+    const data = await updateGuarantorClaimById(tenantId, claimId, {
+        status: "posted",
+        posted_journal_id: Object.prototype.hasOwnProperty.call(payload, "posted_journal_id")
+            ? (payload.posted_journal_id || null)
+            : current.posted_journal_id,
+        notes: Object.prototype.hasOwnProperty.call(payload, "notes")
+            ? (payload.notes || null)
+            : current.notes
+    });
+
+    await logAudit({
+        tenantId,
+        actorUserId: actor.user.id,
+        table: "guarantor_claims",
+        action: "post_guarantor_claim",
+        entityType: "guarantor_claim",
+        entityId: data.id,
+        beforeData: current,
+        afterData: data
+    });
+
+    return data;
+}
+
+async function settleGuarantorClaim(actor, claimId, payload = {}) {
+    const tenantId = actor.tenantId;
+    assertTenantAccess({ auth: actor }, tenantId);
+    const current = await getGuarantorClaimById(actor, claimId, tenantId);
+    assertBranchAccess({ auth: actor }, current.branch_id);
+
+    if (!["approved", "posted", "partial_settled"].includes(current.status)) {
+        throw new AppError(
+            400,
+            "GUARANTOR_CLAIM_NOT_SETTLEABLE",
+            `Cannot settle claim in status ${current.status}.`
+        );
+    }
+
+    const nextSettledAmount = Number(current.settled_amount || 0) + Number(payload.settled_amount || 0);
+    const claimAmount = Number(current.claim_amount || 0);
+    if (nextSettledAmount > claimAmount) {
+        throw new AppError(
+            400,
+            "GUARANTOR_CLAIM_SETTLEMENT_EXCEEDS_AMOUNT",
+            "Settlement amount cannot exceed outstanding claim amount."
+        );
+    }
+
+    const nextStatus = nextSettledAmount >= claimAmount ? "settled" : "partial_settled";
+    const nowIso = new Date().toISOString();
+    const data = await updateGuarantorClaimById(tenantId, claimId, {
+        status: nextStatus,
+        settled_amount: Number(nextSettledAmount.toFixed(2)),
+        settled_at: nextStatus === "settled" ? nowIso : null,
+        notes: Object.prototype.hasOwnProperty.call(payload, "notes")
+            ? (payload.notes || null)
+            : current.notes
+    });
+
+    await recomputeGuarantorExposuresForMembers({
+        tenantId,
+        memberIds: [data.guarantor_member_id],
+        actorUserId: actor.user.id,
+        source: "guarantor_claim_settle"
+    });
+
+    await logAudit({
+        tenantId,
+        actorUserId: actor.user.id,
+        table: "guarantor_claims",
+        action: "settle_guarantor_claim",
+        entityType: "guarantor_claim",
+        entityId: data.id,
+        beforeData: current,
+        afterData: data
+    });
+
+    return data;
+}
+
+async function waiveGuarantorClaim(actor, claimId, payload = {}) {
+    const tenantId = actor.tenantId;
+    assertTenantAccess({ auth: actor }, tenantId);
+    const current = await getGuarantorClaimById(actor, claimId, tenantId);
+    assertBranchAccess({ auth: actor }, current.branch_id);
+
+    if (["settled", "waived"].includes(current.status)) {
+        throw new AppError(
+            400,
+            "GUARANTOR_CLAIM_NOT_WAIVABLE",
+            `Cannot waive claim in status ${current.status}.`
+        );
+    }
+
+    const reasonNotes = [`waiver_reason:${payload.reason_code}`];
+    if (payload.notes) {
+        reasonNotes.push(payload.notes);
+    }
+
+    const data = await updateGuarantorClaimById(tenantId, claimId, {
+        status: "waived",
+        waived_at: new Date().toISOString(),
+        notes: reasonNotes.join(" | ")
+    });
+
+    await recomputeGuarantorExposuresForMembers({
+        tenantId,
+        memberIds: [data.guarantor_member_id],
+        actorUserId: actor.user.id,
+        source: "guarantor_claim_waive"
+    });
+
+    await logAudit({
+        tenantId,
+        actorUserId: actor.user.id,
+        table: "guarantor_claims",
+        action: "waive_guarantor_claim",
+        entityType: "guarantor_claim",
+        entityId: data.id,
+        beforeData: current,
+        afterData: data
+    });
+
+    return data;
+}
+
 async function assertGuarantorExposureWithinLimits({
     tenantId,
     guarantors = [],
@@ -1221,6 +1764,15 @@ module.exports = {
     escalateCollectionAction,
     listGuarantorExposures,
     recomputeGuarantorExposures,
+    listGuarantorClaims,
+    getGuarantorClaim,
+    createGuarantorClaim,
+    submitGuarantorClaim,
+    approveGuarantorClaim,
+    rejectGuarantorClaim,
+    postGuarantorClaim,
+    settleGuarantorClaim,
+    waiveGuarantorClaim,
     assertGuarantorExposureWithinLimits,
     recomputeGuarantorExposuresForMembers,
     runDefaultDetection,

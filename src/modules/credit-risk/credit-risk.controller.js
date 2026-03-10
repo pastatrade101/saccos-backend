@@ -52,3 +52,41 @@ exports.listGuarantorExposures = asyncHandler(async (req, res) => {
 exports.recomputeGuarantorExposures = asyncHandler(async (req, res) => {
     res.json({ data: await service.recomputeGuarantorExposures(req.auth, req.validated.body) });
 });
+
+exports.listGuarantorClaims = asyncHandler(async (req, res) => {
+    const result = await service.listGuarantorClaims(req.auth, req.validated.query);
+    res.json({ data: result.data, pagination: result.pagination });
+});
+
+exports.getGuarantorClaim = asyncHandler(async (req, res) => {
+    const query = req.validated?.query || {};
+    res.json({ data: await service.getGuarantorClaim(req.auth, req.params.claimId, query) });
+});
+
+exports.createGuarantorClaim = asyncHandler(async (req, res) => {
+    res.status(201).json({ data: await service.createGuarantorClaim(req.auth, req.validated.body) });
+});
+
+exports.submitGuarantorClaim = asyncHandler(async (req, res) => {
+    res.json({ data: await service.submitGuarantorClaim(req.auth, req.params.claimId, req.validated.body) });
+});
+
+exports.approveGuarantorClaim = asyncHandler(async (req, res) => {
+    res.json({ data: await service.approveGuarantorClaim(req.auth, req.params.claimId, req.validated.body) });
+});
+
+exports.rejectGuarantorClaim = asyncHandler(async (req, res) => {
+    res.json({ data: await service.rejectGuarantorClaim(req.auth, req.params.claimId, req.validated.body) });
+});
+
+exports.postGuarantorClaim = asyncHandler(async (req, res) => {
+    res.json({ data: await service.postGuarantorClaim(req.auth, req.params.claimId, req.validated.body) });
+});
+
+exports.settleGuarantorClaim = asyncHandler(async (req, res) => {
+    res.json({ data: await service.settleGuarantorClaim(req.auth, req.params.claimId, req.validated.body) });
+});
+
+exports.waiveGuarantorClaim = asyncHandler(async (req, res) => {
+    res.json({ data: await service.waiveGuarantorClaim(req.auth, req.params.claimId, req.validated.body) });
+});

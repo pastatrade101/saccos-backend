@@ -18,8 +18,9 @@ Implement auditable default and guarantor enforcement workflows end-to-end:
 - `CR-001`: Done (schema + RLS migrations 035/036)
 - `CR-002`: Done (default case service + APIs)
 - `CR-003`: Done (collection actions service + APIs)
-- `CR-004`: In progress (auto-detection service + manual trigger + optional scheduler; migration 037 required)
-- `CR-005`: In progress (guarantor exposure recompute APIs + approval-time enforcement; migration 038 required)
+- `CR-004`: Done (auto-detection service + manual trigger + optional scheduler; migration 037)
+- `CR-005`: Done (guarantor exposure recompute APIs + approval-time enforcement; migration 038)
+- `CR-006`: Done (guarantor claim create/submit/approve/reject/post/settle/waive APIs + audit + exposure recompute)
 
 ## 2. Sprint Sequence (2-3 weeks)
 

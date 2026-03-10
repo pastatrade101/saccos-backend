@@ -44,6 +44,8 @@ Phase 0 kickoff artifacts in `docs/`:
 ## Phase 1: Credit Risk Controls (Default + Guarantor Enforcement) (2-3 weeks)
 Priority: `Critical`
 
+Status (March 10, 2026): Backend critical scope implemented (`CR-001` to `CR-006`) with migrations `035`-`038`, APIs, audit trails, default detection scheduler support, guarantor exposure enforcement, and guarantor claims workflow.
+
 Focus:
 
 - Implement full default lifecycle and collections workflow.

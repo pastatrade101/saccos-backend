@@ -34,6 +34,16 @@ const collectionOutcomeCodeSchema = z.enum([
     "escalate"
 ]);
 
+const guarantorClaimStatusSchema = z.enum([
+    "draft",
+    "submitted",
+    "approved",
+    "posted",
+    "partial_settled",
+    "settled",
+    "waived"
+]);
+
 const paginationSchema = {
     page: z.coerce.number().int().positive().default(1),
     limit: z.coerce.number().int().positive().max(100).default(50)
@@ -45,6 +55,10 @@ const defaultCaseParamSchema = z.object({
 
 const collectionActionParamSchema = z.object({
     actionId: uuid
+});
+
+const guarantorClaimParamSchema = z.object({
+    claimId: uuid
 });
 
 const tenantScopedLookupQuerySchema = z.object({
@@ -134,9 +148,60 @@ const recomputeGuarantorExposuresSchema = z.object({
     dry_run: z.boolean().optional().default(false)
 });
 
+const listGuarantorClaimsQuerySchema = z.object({
+    tenant_id: uuid.optional(),
+    default_case_id: uuid.optional(),
+    loan_id: uuid.optional(),
+    guarantor_member_id: uuid.optional(),
+    branch_id: uuid.optional(),
+    status: guarantorClaimStatusSchema.optional(),
+    ...paginationSchema
+});
+
+const createGuarantorClaimSchema = z.object({
+    tenant_id: uuid.optional(),
+    default_case_id: uuid,
+    guarantor_member_id: uuid,
+    claim_amount: z.coerce.number().positive(),
+    claim_reference: z.string().trim().max(120).optional().nullable(),
+    notes: z.string().trim().max(1000).optional().nullable()
+});
+
+const submitGuarantorClaimSchema = z.object({
+    claim_reference: z.string().trim().max(120).optional().nullable(),
+    notes: z.string().trim().max(1000).optional().nullable()
+});
+
+const approveGuarantorClaimSchema = z.object({
+    approval_request_id: uuid.optional().nullable(),
+    notes: z.string().trim().max(1000).optional().nullable()
+});
+
+const rejectGuarantorClaimSchema = z.object({
+    reason_code: z.string().trim().min(2).max(80),
+    notes: z.string().trim().max(1000).optional().nullable()
+});
+
+const postGuarantorClaimSchema = z.object({
+    posted_journal_id: uuid.optional().nullable(),
+    notes: z.string().trim().max(1000).optional().nullable()
+});
+
+const settleGuarantorClaimSchema = z.object({
+    settled_amount: z.coerce.number().positive(),
+    reference: z.string().trim().max(120).optional().nullable(),
+    notes: z.string().trim().max(1000).optional().nullable()
+});
+
+const waiveGuarantorClaimSchema = z.object({
+    reason_code: z.string().trim().min(2).max(80),
+    notes: z.string().trim().max(1000).optional().nullable()
+});
+
 module.exports = {
     defaultCaseParamSchema,
     collectionActionParamSchema,
+    guarantorClaimParamSchema,
     tenantScopedLookupQuerySchema,
     listDefaultCasesQuerySchema,
     createDefaultCaseSchema,
@@ -148,5 +213,13 @@ module.exports = {
     escalateCollectionActionSchema,
     runDefaultDetectionSchema,
     listGuarantorExposuresQuerySchema,
-    recomputeGuarantorExposuresSchema
+    recomputeGuarantorExposuresSchema,
+    listGuarantorClaimsQuerySchema,
+    createGuarantorClaimSchema,
+    submitGuarantorClaimSchema,
+    approveGuarantorClaimSchema,
+    rejectGuarantorClaimSchema,
+    postGuarantorClaimSchema,
+    settleGuarantorClaimSchema,
+    waiveGuarantorClaimSchema
 };
