@@ -911,8 +911,16 @@ async function postImportedLoan({ actor, tenantId, branchId, member, row }) {
             reference: externalLoanReference || `IMPORT-LOAN-${member.member_no || member.id}`,
             description: `Imported loan opening balance for ${member.full_name}`
         },
-        { skipWorkflow: true }
+        { skipWorkflow: true, skipApprovalGate: true }
     );
+
+    if (!result?.loan_id) {
+        throw new AppError(
+            400,
+            "IMPORTED_LOAN_CREATE_FAILED",
+            "loan_amount row did not produce a loan_id during import."
+        );
+    }
 
     await logAudit({
         tenantId,
@@ -952,14 +960,18 @@ async function postImportedWithdrawal({ actor, tenantId, member, row }) {
     }
 
     const savingsAccountId = await getMemberProductAccount(member.id, "savings");
-    const result = await financeService.withdraw(actor, {
-        tenant_id: tenantId,
-        account_id: savingsAccountId,
-        amount: withdrawalAmount,
-        teller_id: actor.user.id,
-        reference: `IMPORT-WDL-${member.member_no || member.id}`,
-        description: `Imported withdrawal activity for ${member.full_name}`
-    });
+    const result = await financeService.withdraw(
+        actor,
+        {
+            tenant_id: tenantId,
+            account_id: savingsAccountId,
+            amount: withdrawalAmount,
+            teller_id: actor.user.id,
+            reference: `IMPORT-WDL-${member.member_no || member.id}`,
+            description: `Imported withdrawal activity for ${member.full_name}`
+        },
+        { skipApprovalGate: true }
+    );
 
     await logAudit({
         tenantId,

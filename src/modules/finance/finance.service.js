@@ -186,7 +186,7 @@ async function deposit(actor, payload) {
     return result;
 }
 
-async function withdraw(actor, payload) {
+async function withdraw(actor, payload, options = {}) {
     const tenantId = payload.tenant_id || actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
     await assertPostingRuleConfigured(tenantId, "withdrawal");
@@ -199,27 +199,30 @@ async function withdraw(actor, payload) {
         branchId: member.branch_id
     });
 
-    const approvalGate = await approvalService.ensureOperationApproval({
-        actor,
-        tenantId,
-        branchId: member.branch_id,
-        operationKey: "finance.withdraw",
-        requestedAmount: payload.amount,
-        approvalRequestId: payload.approval_request_id || null,
-        payload: {
-            account_id: payload.account_id,
-            amount: payload.amount,
-            reference: payload.reference || null,
-            description: payload.description || null,
-            member_id: member.id,
-            branch_id: member.branch_id
-        },
-        entityType: "member_account",
-        entityId: payload.account_id
-    });
+    let approvalGate = null;
+    if (!options.skipApprovalGate) {
+        approvalGate = await approvalService.ensureOperationApproval({
+            actor,
+            tenantId,
+            branchId: member.branch_id,
+            operationKey: "finance.withdraw",
+            requestedAmount: payload.amount,
+            approvalRequestId: payload.approval_request_id || null,
+            payload: {
+                account_id: payload.account_id,
+                amount: payload.amount,
+                reference: payload.reference || null,
+                description: payload.description || null,
+                member_id: member.id,
+                branch_id: member.branch_id
+            },
+            entityType: "member_account",
+            entityId: payload.account_id
+        });
 
-    if (approvalGate?.approval_required && approvalGate.status === "pending_approval") {
-        return approvalGate;
+        if (approvalGate?.approval_required && approvalGate.status === "pending_approval") {
+            return approvalGate;
+        }
     }
 
     const result = await runFinancialFunction("withdraw", {
@@ -448,30 +451,33 @@ async function loanDisburse(actor, payload, options = {}) {
         branchId: effectivePayload.branch_id
     });
 
-    const approvalGate = await approvalService.ensureOperationApproval({
-        actor,
-        tenantId,
-        branchId: effectivePayload.branch_id,
-        operationKey: "finance.loan_disburse",
-        requestedAmount: effectivePayload.principal_amount,
-        approvalRequestId: effectivePayload.approval_request_id || null,
-        payload: {
-            application_id: effectivePayload.application_id || null,
-            member_id: effectivePayload.member_id,
-            branch_id: effectivePayload.branch_id,
-            principal_amount: effectivePayload.principal_amount,
-            annual_interest_rate: effectivePayload.annual_interest_rate,
-            term_count: effectivePayload.term_count,
-            repayment_frequency: effectivePayload.repayment_frequency,
-            reference: effectivePayload.reference || null,
-            description: effectivePayload.description || null
-        },
-        entityType: "loan_application",
-        entityId: effectivePayload.application_id || null
-    });
+    let approvalGate = null;
+    if (!options.skipApprovalGate) {
+        approvalGate = await approvalService.ensureOperationApproval({
+            actor,
+            tenantId,
+            branchId: effectivePayload.branch_id,
+            operationKey: "finance.loan_disburse",
+            requestedAmount: effectivePayload.principal_amount,
+            approvalRequestId: effectivePayload.approval_request_id || null,
+            payload: {
+                application_id: effectivePayload.application_id || null,
+                member_id: effectivePayload.member_id,
+                branch_id: effectivePayload.branch_id,
+                principal_amount: effectivePayload.principal_amount,
+                annual_interest_rate: effectivePayload.annual_interest_rate,
+                term_count: effectivePayload.term_count,
+                repayment_frequency: effectivePayload.repayment_frequency,
+                reference: effectivePayload.reference || null,
+                description: effectivePayload.description || null
+            },
+            entityType: "loan_application",
+            entityId: effectivePayload.application_id || null
+        });
 
-    if (approvalGate?.approval_required && approvalGate.status === "pending_approval") {
-        return approvalGate;
+        if (approvalGate?.approval_required && approvalGate.status === "pending_approval") {
+            return approvalGate;
+        }
     }
 
     const result = await runFinancialFunction("loan_disburse", {

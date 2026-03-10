@@ -391,11 +391,24 @@ async function bootstrapSuperAdmin(actor, payload) {
 }
 
 async function getMe(actor, tenantContextId = null) {
+    const { data: freshProfile, error: freshProfileError } = await adminSupabase
+        .from("user_profiles")
+        .select("*")
+        .eq("user_id", actor.user.id)
+        .is("deleted_at", null)
+        .maybeSingle();
+
+    if (freshProfileError) {
+        throw new AppError(500, "ME_PROFILE_FETCH_FAILED", "Unable to load user profile.", freshProfileError);
+    }
+
+    const effectiveProfile = freshProfile || actor.profile || null;
+
     let tenant = null;
     let branches = [];
     const effectiveTenantId = actor.isInternalOps && tenantContextId
         ? tenantContextId
-        : actor.profile?.tenant_id || null;
+        : effectiveProfile?.tenant_id || null;
 
     if (effectiveTenantId) {
         const { data: tenantData, error: tenantError } = await adminSupabase
@@ -441,7 +454,7 @@ async function getMe(actor, tenantContextId = null) {
 
     return {
         user: actor.user,
-        profile: actor.profile,
+        profile: effectiveProfile,
         branch_ids: actor.branchIds,
         tenant,
         branches
@@ -487,6 +500,8 @@ async function markPasswordChanged(actor) {
         userId: actor.user.id,
         clearedBy: actor.user.id
     });
+
+    invalidateUserContextCache(actor.user.id);
 
     return {
         user_id: actor.user.id,

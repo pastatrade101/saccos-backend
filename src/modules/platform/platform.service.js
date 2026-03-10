@@ -421,6 +421,10 @@ async function deleteAuthUsers(userIds) {
         const { data, error } = await adminSupabase.auth.admin.getUserById(userId);
 
         if (error) {
+            // User might already be removed by prior cleanup pass; continue.
+            if (error.status === 404 || error.code === "user_not_found") {
+                continue;
+            }
             throw new AppError(500, "TENANT_AUTH_USER_LOOKUP_FAILED", `Unable to inspect auth user ${userId}.`, error);
         }
 
@@ -433,6 +437,9 @@ async function deleteAuthUsers(userIds) {
         const { error: deleteError } = await adminSupabase.auth.admin.deleteUser(userId);
 
         if (deleteError) {
+            if (deleteError.status === 404 || deleteError.code === "user_not_found") {
+                continue;
+            }
             throw new AppError(500, "TENANT_AUTH_USER_DELETE_FAILED", `Unable to delete auth user ${userId}.`, deleteError);
         }
     }
@@ -559,8 +566,8 @@ async function deleteTenant(actor, tenantId, payload) {
     // Final guardrail sweep for any tenant-scoped rows introduced by newer schema changes.
     await purgeTenantScopedRows(tenantId);
 
-    await deleteIn("tenants", "id", scope.tenantIds);
     await deleteAuthUsers(scope.authUserIds);
+    await deleteIn("tenants", "id", scope.tenantIds);
 
     return {
         deleted: true,
