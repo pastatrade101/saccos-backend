@@ -34,5 +34,9 @@ exports.reject = asyncHandler(async (req, res) => {
 });
 
 exports.disburse = asyncHandler(async (req, res) => {
-    res.status(201).json({ data: await service.disburseLoanApplication(req.auth, req.params.id, req.validated.body) });
+    const result = await service.disburseLoanApplication(req.auth, req.params.id, req.validated.body);
+    if (result?.approval_required) {
+        return res.status(202).json({ data: result });
+    }
+    return res.status(201).json({ data: result });
 });

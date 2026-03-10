@@ -77,6 +77,8 @@ Apply in this exact sequence on a fresh environment:
 37. `supabase/sql/036_phase1_credit_risk_controls_rls.sql`
 38. `supabase/sql/037_phase1_default_detection_policy.sql`
 39. `supabase/sql/038_phase1_guarantor_exposure_policy.sql`
+40. `supabase/sql/039_phase2_maker_checker_engine.sql`
+41. `supabase/sql/040_phase2_maker_checker_engine_rls.sql`
 
 For existing environments, run only new additive migrations and validate policy collisions before execution.
 

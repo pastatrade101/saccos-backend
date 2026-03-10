@@ -16,7 +16,9 @@ const depositSchema = z.object({
     receipt_ids: z.array(z.string().uuid()).max(10).optional().default([])
 });
 
-const withdrawSchema = depositSchema;
+const withdrawSchema = depositSchema.extend({
+    approval_request_id: z.string().uuid().optional()
+});
 const shareContributionSchema = depositSchema;
 const dividendAllocationSchema = z.object({
     tenant_id: z.string().uuid().optional(),
@@ -40,6 +42,7 @@ const transferSchema = z.object({
 const loanDisburseSchema = z.object({
     tenant_id: z.string().uuid().optional(),
     application_id: z.string().uuid().optional(),
+    approval_request_id: z.string().uuid().optional(),
     member_id: z.string().uuid(),
     branch_id: z.string().uuid(),
     principal_amount: moneyAmount,

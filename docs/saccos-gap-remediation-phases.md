@@ -82,6 +82,8 @@ Phase 1 execution artifacts in `docs/` and `supabase/sql/`:
 ## Phase 2: Enterprise Maker-Checker Engine (2 weeks)
 Priority: `Critical`
 
+Status (March 10, 2026): Kickoff implemented with approval engine schema/API and high-value enforcement for `withdraw` and `loan_disburse`; remaining scope is UI, scheduler automation, and expanded operation coverage.
+
 Focus:
 
 - Expand dual control from selected areas to all high-risk operations.
@@ -104,6 +106,12 @@ Exit criteria:
 
 - Configured critical transactions cannot post without required approvals.
 - Maker-checker violations are blocked and logged.
+
+Phase 2 execution artifacts in `docs/` and `supabase/sql/`:
+
+- [phase-2-maker-checker-execution-backlog.md](/Users/pastoryjoseph/Desktop/saccos-backend/docs/phase-2-maker-checker-execution-backlog.md)
+- [039_phase2_maker_checker_engine.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/039_phase2_maker_checker_engine.sql)
+- [040_phase2_maker_checker_engine_rls.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/040_phase2_maker_checker_engine_rls.sql)
 
 ## Phase 3: Financial Statements and Period Governance (2 weeks)
 Priority: `Important`

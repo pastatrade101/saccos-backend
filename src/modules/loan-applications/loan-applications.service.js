@@ -778,6 +778,7 @@ async function disburseLoanApplication(actor, applicationId, payload) {
         {
             tenant_id: tenantId,
             application_id: applicationId,
+            approval_request_id: payload.approval_request_id || null,
             member_id: existing.member_id,
             branch_id: existing.branch_id,
             principal_amount: existing.recommended_amount || existing.requested_amount,
@@ -790,6 +791,14 @@ async function disburseLoanApplication(actor, applicationId, payload) {
         },
         { skipWorkflow: true }
     );
+
+    if (disburseResult?.approval_required) {
+        return {
+            approval_required: true,
+            application_id: applicationId,
+            ...disburseResult
+        };
+    }
 
     const updatePayload = {
         status: "disbursed",

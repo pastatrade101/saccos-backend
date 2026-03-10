@@ -8,6 +8,7 @@ const {
     finalizeReceiptsForTransaction,
     recordSessionTransaction
 } = require("../cash-control/cash-control.service");
+const approvalService = require("../approvals/approvals.service");
 
 function isMissingDeletedAtColumn(error) {
     const message = error?.message || "";
@@ -198,6 +199,29 @@ async function withdraw(actor, payload) {
         branchId: member.branch_id
     });
 
+    const approvalGate = await approvalService.ensureOperationApproval({
+        actor,
+        tenantId,
+        branchId: member.branch_id,
+        operationKey: "finance.withdraw",
+        requestedAmount: payload.amount,
+        approvalRequestId: payload.approval_request_id || null,
+        payload: {
+            account_id: payload.account_id,
+            amount: payload.amount,
+            reference: payload.reference || null,
+            description: payload.description || null,
+            member_id: member.id,
+            branch_id: member.branch_id
+        },
+        entityType: "member_account",
+        entityId: payload.account_id
+    });
+
+    if (approvalGate?.approval_required && approvalGate.status === "pending_approval") {
+        return approvalGate;
+    }
+
     const result = await runFinancialFunction("withdraw", {
         p_tenant_id: tenantId,
         p_account_id: payload.account_id,
@@ -242,6 +266,16 @@ async function withdraw(actor, payload) {
             journal_id: result.journal_id || null
         }
     });
+
+    if (approvalGate?.approval_required && approvalGate.approval_request_id) {
+        await approvalService.markApprovalRequestExecuted({
+            actor,
+            tenantId,
+            requestId: approvalGate.approval_request_id,
+            entityType: "journal_entry",
+            entityId: result.journal_id || null
+        });
+    }
 
     return result;
 }
@@ -414,6 +448,32 @@ async function loanDisburse(actor, payload, options = {}) {
         branchId: effectivePayload.branch_id
     });
 
+    const approvalGate = await approvalService.ensureOperationApproval({
+        actor,
+        tenantId,
+        branchId: effectivePayload.branch_id,
+        operationKey: "finance.loan_disburse",
+        requestedAmount: effectivePayload.principal_amount,
+        approvalRequestId: effectivePayload.approval_request_id || null,
+        payload: {
+            application_id: effectivePayload.application_id || null,
+            member_id: effectivePayload.member_id,
+            branch_id: effectivePayload.branch_id,
+            principal_amount: effectivePayload.principal_amount,
+            annual_interest_rate: effectivePayload.annual_interest_rate,
+            term_count: effectivePayload.term_count,
+            repayment_frequency: effectivePayload.repayment_frequency,
+            reference: effectivePayload.reference || null,
+            description: effectivePayload.description || null
+        },
+        entityType: "loan_application",
+        entityId: effectivePayload.application_id || null
+    });
+
+    if (approvalGate?.approval_required && approvalGate.status === "pending_approval") {
+        return approvalGate;
+    }
+
     const result = await runFinancialFunction("loan_disburse", {
         p_tenant_id: tenantId,
         p_member_id: effectivePayload.member_id,
@@ -465,6 +525,16 @@ async function loanDisburse(actor, payload, options = {}) {
             loan_number: result.loan_number || null
         }
     });
+
+    if (approvalGate?.approval_required && approvalGate.approval_request_id) {
+        await approvalService.markApprovalRequestExecuted({
+            actor,
+            tenantId,
+            requestId: approvalGate.approval_request_id,
+            entityType: "loan",
+            entityId: result.loan_id || null
+        });
+    }
 
     return result;
 }

@@ -407,6 +407,10 @@ async function deleteTenant(actor, tenantId, payload) {
     await deleteByTenant("api_idempotency_requests", scope.tenantIds);
     await deleteByTenant("report_export_jobs", scope.tenantIds);
     await deleteByTenant("import_jobs", scope.tenantIds);
+    await deleteByTenant("approval_decisions", scope.tenantIds);
+    await deleteByTenant("approval_steps", scope.tenantIds);
+    await deleteByTenant("approval_requests", scope.tenantIds);
+    await deleteByTenant("approval_policies", scope.tenantIds);
     await deleteByTenant("member_application_attachments", scope.tenantIds);
     await deleteByTenant("membership_status_history", scope.tenantIds);
     await deleteByTenant("member_applications", scope.tenantIds);

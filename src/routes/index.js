@@ -18,6 +18,7 @@ const auditorRoutes = require("../modules/auditor/auditor.routes");
 const reportRoutes = require("../modules/reports/reports.routes");
 const observabilityRoutes = require("../modules/observability/observability.routes");
 const creditRiskRoutes = require("../modules/credit-risk/credit-risk.routes");
+const approvalRoutes = require("../modules/approvals/approvals.routes");
 
 const router = express.Router();
 
@@ -46,5 +47,6 @@ router.use("/auditor", auditorRoutes);
 router.use("/reports", reportRoutes);
 router.use("/observability", observabilityRoutes);
 router.use("/credit-risk", creditRiskRoutes);
+router.use("/approvals", approvalRoutes);
 
 module.exports = router;

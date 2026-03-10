@@ -17,7 +17,10 @@ exports.deposit = asyncHandler(async (req, res) => {
 
 exports.withdraw = asyncHandler(async (req, res) => {
     const result = await financeService.withdraw(req.auth, req.validated.body);
-    res.status(201).json({ data: result });
+    if (result?.approval_required) {
+        return res.status(202).json({ data: result });
+    }
+    return res.status(201).json({ data: result });
 });
 
 exports.shareContribution = asyncHandler(async (req, res) => {
@@ -37,7 +40,10 @@ exports.transfer = asyncHandler(async (req, res) => {
 
 exports.loanDisburse = asyncHandler(async (req, res) => {
     const result = await financeService.loanDisburse(req.auth, req.validated.body);
-    res.status(201).json({ data: result });
+    if (result?.approval_required) {
+        return res.status(202).json({ data: result });
+    }
+    return res.status(201).json({ data: result });
 });
 
 exports.loanRepay = asyncHandler(async (req, res) => {

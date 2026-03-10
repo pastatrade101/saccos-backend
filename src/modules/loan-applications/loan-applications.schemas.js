@@ -57,6 +57,7 @@ const rejectLoanApplicationSchema = z.object({
 const disburseApprovedLoanSchema = z.object({
     reference: z.string().max(80).optional().nullable(),
     description: z.string().max(255).optional().nullable(),
+    approval_request_id: uuid.optional(),
     receipt_ids: z.array(z.string().uuid()).max(10).optional().default([])
 });
 
