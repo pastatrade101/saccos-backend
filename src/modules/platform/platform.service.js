@@ -326,6 +326,39 @@ async function deleteRateLimitWindows(scope) {
     }
 }
 
+async function listAuthUsersByTenantMetadata(tenantId) {
+    const matched = [];
+    const perPage = 1000;
+    let page = 1;
+
+    while (true) {
+        const { data, error } = await adminSupabase.auth.admin.listUsers({
+            page,
+            perPage
+        });
+
+        if (error) {
+            throw new AppError(500, "TENANT_AUTH_USER_LIST_FAILED", "Unable to list auth users for tenant cleanup.", error);
+        }
+
+        const users = data?.users || [];
+
+        for (const user of users) {
+            if (user?.app_metadata?.tenant_id === tenantId) {
+                matched.push(user.id);
+            }
+        }
+
+        if (users.length < perPage) {
+            break;
+        }
+
+        page += 1;
+    }
+
+    return matched;
+}
+
 async function loadTenantDeletionScope(tenantId) {
     const tenantIds = [tenantId];
     const profiles = await listByTenant("user_profiles", "user_id, tenant_id, role, member_id", tenantIds);
@@ -344,11 +377,22 @@ async function loadTenantDeletionScope(tenantId) {
     const loans = await listByTenant("loans", "id", tenantIds);
     const loanAccounts = await listByTenant("loan_accounts", "id", tenantIds);
     const journalEntries = await listByTenant("journal_entries", "id", tenantIds);
+    const handoffs = await listByTenant("credential_handoffs", "user_id", tenantIds);
+    const metadataUserIds = await listAuthUsersByTenantMetadata(tenantId);
+    const authUserIds = Array.from(
+        new Set([
+            ...userIds,
+            ...memberUserIds,
+            ...(handoffs || []).map((row) => row.user_id).filter(Boolean),
+            ...metadataUserIds
+        ])
+    );
 
     return {
         tenantIds,
         userIds,
         memberUserIds,
+        authUserIds,
         memberIds,
         memberAccountIds: memberAccounts.map((row) => row.id),
         loanIds: loans.map((row) => row.id),
@@ -408,6 +452,7 @@ async function deleteTenant(actor, tenantId, payload) {
             tenant,
             scope: {
                 users: scope.userIds.length,
+                auth_users: scope.authUserIds.length,
                 members: scope.memberIds.length,
                 loans: scope.loanIds.length,
                 journals: scope.journalIds.length
@@ -425,7 +470,7 @@ async function deleteTenant(actor, tenantId, payload) {
     await updateByTenant("loans", scope.tenantIds, { application_id: null });
 
     await deleteIn("credential_handoffs", "member_id", scope.memberIds);
-    await deleteIn("credential_handoffs", "user_id", scope.userIds);
+    await deleteIn("credential_handoffs", "user_id", scope.authUserIds);
     await deleteByTenant("transaction_receipts", scope.tenantIds);
     await deleteByTenant("teller_session_transactions", scope.tenantIds);
     await deleteByTenant("teller_sessions", scope.tenantIds);
@@ -496,7 +541,7 @@ async function deleteTenant(actor, tenantId, payload) {
     await deleteByTenant("tenant_subscriptions", scope.tenantIds);
     await deleteByTenant("subscriptions", scope.tenantIds);
     await deleteIn("tenants", "id", scope.tenantIds);
-    await deleteAuthUsers(scope.userIds);
+    await deleteAuthUsers(scope.authUserIds);
 
     return {
         deleted: true,
