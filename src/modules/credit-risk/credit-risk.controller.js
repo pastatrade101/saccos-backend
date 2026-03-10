@@ -39,3 +39,16 @@ exports.completeCollectionAction = asyncHandler(async (req, res) => {
 exports.escalateCollectionAction = asyncHandler(async (req, res) => {
     res.json({ data: await service.escalateCollectionAction(req.auth, req.params.actionId, req.validated.body) });
 });
+
+exports.runDefaultDetection = asyncHandler(async (req, res) => {
+    res.json({ data: await service.runDefaultDetection(req.auth, req.validated.body) });
+});
+
+exports.listGuarantorExposures = asyncHandler(async (req, res) => {
+    const result = await service.listGuarantorExposures(req.auth, req.validated.query);
+    res.json({ data: result.data, pagination: result.pagination });
+});
+
+exports.recomputeGuarantorExposures = asyncHandler(async (req, res) => {
+    res.json({ data: await service.recomputeGuarantorExposures(req.auth, req.validated.body) });
+});

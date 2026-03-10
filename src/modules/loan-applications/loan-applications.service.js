@@ -4,6 +4,7 @@ const { getSubscriptionStatus } = require("../../services/subscription.service")
 const { assertBranchAccess, assertTenantAccess } = require("../../services/user-context.service");
 const { logAudit } = require("../../services/audit.service");
 const financeService = require("../finance/finance.service");
+const creditRiskService = require("../credit-risk/credit-risk.service");
 const AppError = require("../../utils/app-error");
 const LOAN_APPLICATIONS_COUNT_CACHE_TTL_MS = Math.max(0, Number(process.env.LOAN_APPLICATIONS_COUNT_CACHE_TTL_MS || 15000));
 const loanApplicationsCountCache = new Map();
@@ -506,6 +507,13 @@ async function submitLoanApplication(actor, applicationId) {
         throw new AppError(500, "LOAN_APPLICATION_SUBMIT_FAILED", "Unable to submit loan application.", error);
     }
 
+    await creditRiskService.recomputeGuarantorExposuresForMembers({
+        tenantId,
+        memberIds: (existing.loan_guarantors || []).map((row) => row.member_id),
+        actorUserId: actor.user.id,
+        source: "application_submit"
+    });
+
     await logAudit({
         tenantId,
         actorUserId: actor.user.id,
@@ -563,6 +571,13 @@ async function appraiseLoanApplication(actor, applicationId, payload) {
 
     await replaceChildren(applicationId, tenantId, payload.guarantors, payload.collateral_items);
 
+    await creditRiskService.recomputeGuarantorExposuresForMembers({
+        tenantId,
+        memberIds: (payload.guarantors || []).map((row) => row.member_id),
+        actorUserId: actor.user.id,
+        source: "application_appraisal"
+    });
+
     await logAudit({
         tenantId,
         actorUserId: actor.user.id,
@@ -594,6 +609,13 @@ async function approveLoanApplication(actor, applicationId, payload) {
     if (existing.requested_by === actor.user.id) {
         throw new AppError(400, "MAKER_CHECKER_VIOLATION", "The application maker cannot approve the same application.");
     }
+
+    await creditRiskService.assertGuarantorExposureWithinLimits({
+        tenantId,
+        guarantors: existing.loan_guarantors || [],
+        actorUserId: actor.user.id,
+        source: "application_approval"
+    });
 
     const { data: existingApproval } = await adminSupabase
         .from("loan_approvals")
@@ -712,6 +734,13 @@ async function rejectLoanApplication(actor, applicationId, payload) {
         throw new AppError(500, "LOAN_APPLICATION_REJECT_FAILED", "Unable to reject the loan application.", error);
     }
 
+    await creditRiskService.recomputeGuarantorExposuresForMembers({
+        tenantId,
+        memberIds: (existing.loan_guarantors || []).map((row) => row.member_id),
+        actorUserId: actor.user.id,
+        source: "application_reject"
+    });
+
     await logAudit({
         tenantId,
         actorUserId: actor.user.id,
@@ -785,6 +814,13 @@ async function disburseLoanApplication(actor, applicationId, payload) {
         .from("loans")
         .update({ application_id: applicationId })
         .eq("id", disburseResult.loan_id);
+
+    await creditRiskService.recomputeGuarantorExposuresForMembers({
+        tenantId,
+        memberIds: (existing.loan_guarantors || []).map((row) => row.member_id),
+        actorUserId: actor.user.id,
+        source: "application_disburse"
+    });
 
     await logAudit({
         tenantId,

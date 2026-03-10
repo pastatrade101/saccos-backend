@@ -13,6 +13,14 @@ Implement auditable default and guarantor enforcement workflows end-to-end:
 - guarantor exposure checks during lending decisions
 - guarantor claim posting and settlement tracking
 
+## Current Progress
+
+- `CR-001`: Done (schema + RLS migrations 035/036)
+- `CR-002`: Done (default case service + APIs)
+- `CR-003`: Done (collection actions service + APIs)
+- `CR-004`: In progress (auto-detection service + manual trigger + optional scheduler; migration 037 required)
+- `CR-005`: In progress (guarantor exposure recompute APIs + approval-time enforcement; migration 038 required)
+
 ## 2. Sprint Sequence (2-3 weeks)
 
 1. Sprint A (Schema + APIs foundation)

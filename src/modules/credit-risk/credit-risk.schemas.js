@@ -114,6 +114,26 @@ const escalateCollectionActionSchema = z.object({
     notes: z.string().trim().max(1000).optional().nullable()
 });
 
+const runDefaultDetectionSchema = z.object({
+    tenant_id: uuid.optional(),
+    branch_id: uuid.optional(),
+    dry_run: z.boolean().optional().default(false),
+    max_loans: z.coerce.number().int().positive().max(5000).optional().default(500)
+});
+
+const listGuarantorExposuresQuerySchema = z.object({
+    tenant_id: uuid.optional(),
+    guarantor_member_id: uuid.optional(),
+    branch_id: uuid.optional(),
+    ...paginationSchema
+});
+
+const recomputeGuarantorExposuresSchema = z.object({
+    tenant_id: uuid.optional(),
+    member_ids: z.array(uuid).max(500).optional().default([]),
+    dry_run: z.boolean().optional().default(false)
+});
+
 module.exports = {
     defaultCaseParamSchema,
     collectionActionParamSchema,
@@ -125,5 +145,8 @@ module.exports = {
     createCollectionActionSchema,
     updateCollectionActionSchema,
     completeCollectionActionSchema,
-    escalateCollectionActionSchema
+    escalateCollectionActionSchema,
+    runDefaultDetectionSchema,
+    listGuarantorExposuresQuerySchema,
+    recomputeGuarantorExposuresSchema
 };

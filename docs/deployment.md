@@ -75,6 +75,8 @@ Apply in this exact sequence on a fresh environment:
 35. `supabase/sql/034_member_profile_identity_fields.sql`
 36. `supabase/sql/035_phase1_credit_risk_controls.sql`
 37. `supabase/sql/036_phase1_credit_risk_controls_rls.sql`
+38. `supabase/sql/037_phase1_default_detection_policy.sql`
+39. `supabase/sql/038_phase1_guarantor_exposure_policy.sql`
 
 For existing environments, run only new additive migrations and validate policy collisions before execution.
 

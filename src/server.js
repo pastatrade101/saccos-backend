@@ -4,6 +4,7 @@ const http = require("http");
 
 const app = require("./app");
 const env = require("./config/env");
+const { startDefaultDetectionScheduler } = require("./modules/credit-risk/default-detection.scheduler");
 
 const server = http.createServer(app);
 
@@ -24,8 +25,11 @@ server.listen(env.port, env.host, () => {
     console.log(`OTP sign-in enforcement: ${env.otpRequiredOnSignIn ? "ENABLED" : "DISABLED"}`);
 });
 
+const stopDefaultDetectionScheduler = startDefaultDetectionScheduler();
+
 function shutdown(signal) {
     console.log(`Received ${signal}, shutting down gracefully.`);
+    stopDefaultDetectionScheduler();
     server.close((error) => {
         if (error) {
             console.error("Error while shutting down HTTP server", error);

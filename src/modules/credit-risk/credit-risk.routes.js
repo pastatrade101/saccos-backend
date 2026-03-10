@@ -81,4 +81,25 @@ router.post(
     controller.escalateCollectionAction
 );
 
+router.post(
+    "/default-detection/run",
+    authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER, ROLES.LOAN_OFFICER]),
+    validate(schemas.runDefaultDetectionSchema),
+    controller.runDefaultDetection
+);
+
+router.get(
+    "/guarantor-exposures",
+    authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER, ROLES.LOAN_OFFICER, ROLES.TELLER, ROLES.AUDITOR]),
+    validate(schemas.listGuarantorExposuresQuerySchema, "query"),
+    controller.listGuarantorExposures
+);
+
+router.post(
+    "/guarantor-exposures/recompute",
+    authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER, ROLES.LOAN_OFFICER]),
+    validate(schemas.recomputeGuarantorExposuresSchema),
+    controller.recomputeGuarantorExposures
+);
+
 module.exports = router;

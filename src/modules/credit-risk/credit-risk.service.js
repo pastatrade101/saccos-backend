@@ -1,7 +1,9 @@
 const { adminSupabase } = require("../../config/supabase");
 const { ROLES } = require("../../constants/roles");
 const { logAudit } = require("../../services/audit.service");
+const { runObservedJob } = require("../../services/observability.service");
 const { assertBranchAccess, assertTenantAccess } = require("../../services/user-context.service");
+const env = require("../../config/env");
 const AppError = require("../../utils/app-error");
 
 const DEFAULT_CASE_COLUMNS = `
@@ -52,6 +54,10 @@ const CLOSED_DEFAULT_CASE_STATUSES = new Set([
     "recovered"
 ]);
 
+const OPEN_DEFAULT_CASE_STATUSES = ["delinquent", "in_recovery", "claim_ready"];
+const COMMITTED_GUARANTOR_APPLICATION_STATUSES = ["submitted", "appraised", "approved", "disbursed"];
+const ACTIVE_GUARANTOR_CLAIM_STATUSES = ["approved", "posted", "partial_settled"];
+
 const DEFAULT_CASE_TRANSITIONS = {
     delinquent: ["in_recovery"],
     in_recovery: ["claim_ready", "restructured", "written_off", "recovered"],
@@ -81,6 +87,360 @@ function normalizePagination(query = {}) {
     const to = from + limit - 1;
 
     return { page, limit, from, to };
+}
+
+function normalizeDefaultDetectionPolicy(policy) {
+    return {
+        enabled: typeof policy?.default_case_detection_enabled === "boolean"
+            ? policy.default_case_detection_enabled
+            : true,
+        dpdThreshold: Math.max(
+            1,
+            Number(policy?.default_case_dpd_threshold || env.creditRiskDefaultDpdThreshold || 30)
+        ),
+        reasonCode: String(policy?.default_case_reason_code || "arrears_threshold_breached")
+            .trim()
+            .slice(0, 80)
+            || "arrears_threshold_breached"
+    };
+}
+
+function normalizeGuarantorPolicy(policy) {
+    const maxCommitmentRatio = Math.min(
+        1,
+        Math.max(
+            0.01,
+            Number(policy?.guarantor_max_commitment_ratio || env.creditRiskGuarantorMaxCommitmentRatio || 0.8)
+        )
+    );
+
+    return {
+        enabled: typeof policy?.guarantor_exposure_enforced === "boolean"
+            ? policy.guarantor_exposure_enforced
+            : true,
+        maxCommitmentRatio,
+        minAvailableAmount: Math.max(
+            0,
+            Number(policy?.guarantor_min_available_amount || env.creditRiskGuarantorMinAvailableAmount || 0)
+        )
+    };
+}
+
+async function getLoanPolicySettings(tenantId) {
+    const { data, error } = await adminSupabase
+        .from("loan_policy_settings")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .maybeSingle();
+
+    if (error) {
+        throw new AppError(500, "LOAN_POLICY_LOOKUP_FAILED", "Unable to load loan policy settings.", error);
+    }
+
+    return data || null;
+}
+
+async function listDetectionCandidates({ tenantId, dpdThreshold, branchId, maxLoans }) {
+    let arrearsQuery = adminSupabase
+        .from("loan_arrears_view")
+        .select("loan_id, days_past_due, overdue_amount")
+        .eq("tenant_id", tenantId)
+        .gte("days_past_due", dpdThreshold)
+        .gt("overdue_amount", 0)
+        .order("days_past_due", { ascending: false })
+        .limit(maxLoans);
+
+    const { data: arrearsRows, error: arrearsError } = await arrearsQuery;
+
+    if (arrearsError) {
+        throw new AppError(500, "LOAN_ARREARS_FETCH_FAILED", "Unable to load arrears candidates.", arrearsError);
+    }
+
+    const loanIds = (arrearsRows || []).map((row) => row.loan_id).filter(Boolean);
+    if (!loanIds.length) {
+        return [];
+    }
+
+    let loansQuery = adminSupabase
+        .from("loans")
+        .select("id, branch_id, member_id, status")
+        .eq("tenant_id", tenantId)
+        .in("id", loanIds)
+        .in("status", ["active", "in_arrears"]);
+
+    if (branchId) {
+        loansQuery = loansQuery.eq("branch_id", branchId);
+    }
+
+    const { data: loanRows, error: loanError } = await loansQuery;
+
+    if (loanError) {
+        throw new AppError(500, "LOAN_LOOKUP_FAILED", "Unable to load candidate loan details.", loanError);
+    }
+
+    const loanMap = new Map((loanRows || []).map((loan) => [loan.id, loan]));
+
+    return (arrearsRows || [])
+        .map((row) => ({
+            loan: loanMap.get(row.loan_id),
+            daysPastDue: Number(row.days_past_due || 0)
+        }))
+        .filter((entry) => entry.loan && entry.daysPastDue > 0);
+}
+
+async function listExistingOpenDefaultCaseLoanIds(tenantId, loanIds) {
+    if (!loanIds.length) {
+        return new Set();
+    }
+
+    const { data, error } = await adminSupabase
+        .from("loan_default_cases")
+        .select("loan_id")
+        .eq("tenant_id", tenantId)
+        .in("loan_id", loanIds)
+        .in("status", OPEN_DEFAULT_CASE_STATUSES)
+        .is("closed_at", null);
+
+    if (error) {
+        throw new AppError(
+            500,
+            "DEFAULT_CASE_LOOKUP_FAILED",
+            "Unable to load existing open default cases.",
+            error
+        );
+    }
+
+    return new Set((data || []).map((row) => row.loan_id));
+}
+
+async function listAllGuarantorMemberIds(tenantId) {
+    const [guarantorRows, claimRows, exposureRows] = await Promise.all([
+        adminSupabase
+            .from("loan_guarantors")
+            .select("member_id")
+            .eq("tenant_id", tenantId),
+        adminSupabase
+            .from("guarantor_claims")
+            .select("guarantor_member_id")
+            .eq("tenant_id", tenantId),
+        adminSupabase
+            .from("guarantor_exposures")
+            .select("guarantor_member_id")
+            .eq("tenant_id", tenantId)
+    ]);
+
+    if (guarantorRows.error) {
+        throw new AppError(500, "GUARANTOR_MEMBERS_LOOKUP_FAILED", "Unable to load guarantor members.", guarantorRows.error);
+    }
+    if (claimRows.error) {
+        throw new AppError(500, "GUARANTOR_CLAIMS_LOOKUP_FAILED", "Unable to load guarantor claims.", claimRows.error);
+    }
+    if (exposureRows.error) {
+        throw new AppError(500, "GUARANTOR_EXPOSURES_LOOKUP_FAILED", "Unable to load guarantor exposures.", exposureRows.error);
+    }
+
+    return Array.from(
+        new Set([
+            ...(guarantorRows.data || []).map((row) => row.member_id),
+            ...(claimRows.data || []).map((row) => row.guarantor_member_id),
+            ...(exposureRows.data || []).map((row) => row.guarantor_member_id)
+        ].filter(Boolean))
+    );
+}
+
+async function getGuarantorCapacityMap(tenantId, memberIds, policy) {
+    if (!memberIds.length) {
+        return new Map();
+    }
+
+    const { data, error } = await adminSupabase
+        .from("member_accounts")
+        .select("member_id, available_balance, product_type, status")
+        .eq("tenant_id", tenantId)
+        .in("member_id", memberIds)
+        .eq("status", "active")
+        .in("product_type", ["savings", "shares"]);
+
+    if (error) {
+        throw new AppError(500, "GUARANTOR_CAPACITY_LOOKUP_FAILED", "Unable to load guarantor account balances.", error);
+    }
+
+    const capacityMap = new Map();
+    for (const row of data || []) {
+        const current = Number(capacityMap.get(row.member_id) || 0);
+        const next = current + Number(row.available_balance || 0);
+        capacityMap.set(row.member_id, next);
+    }
+
+    for (const memberId of memberIds) {
+        const base = Number(capacityMap.get(memberId) || 0);
+        capacityMap.set(memberId, base * policy.maxCommitmentRatio);
+    }
+
+    return capacityMap;
+}
+
+async function getGuarantorCommittedMap(tenantId, memberIds) {
+    if (!memberIds.length) {
+        return new Map();
+    }
+
+    const { data: applications, error: applicationsError } = await adminSupabase
+        .from("loan_applications")
+        .select("id")
+        .eq("tenant_id", tenantId)
+        .in("status", COMMITTED_GUARANTOR_APPLICATION_STATUSES);
+
+    if (applicationsError) {
+        throw new AppError(500, "GUARANTOR_APPLICATIONS_LOOKUP_FAILED", "Unable to load guarantor application exposures.", applicationsError);
+    }
+
+    const applicationIds = (applications || []).map((row) => row.id);
+    if (!applicationIds.length) {
+        return new Map();
+    }
+
+    const { data, error } = await adminSupabase
+        .from("loan_guarantors")
+        .select("member_id, guaranteed_amount")
+        .eq("tenant_id", tenantId)
+        .in("member_id", memberIds)
+        .in("application_id", applicationIds);
+
+    if (error) {
+        throw new AppError(500, "GUARANTOR_COMMITTED_LOOKUP_FAILED", "Unable to load committed guarantor amounts.", error);
+    }
+
+    const committedMap = new Map();
+    for (const row of data || []) {
+        const current = Number(committedMap.get(row.member_id) || 0);
+        committedMap.set(row.member_id, current + Number(row.guaranteed_amount || 0));
+    }
+
+    return committedMap;
+}
+
+async function getGuarantorInvokedMap(tenantId, memberIds) {
+    if (!memberIds.length) {
+        return new Map();
+    }
+
+    const { data, error } = await adminSupabase
+        .from("guarantor_claims")
+        .select("guarantor_member_id, claim_amount, settled_amount, status")
+        .eq("tenant_id", tenantId)
+        .in("guarantor_member_id", memberIds)
+        .in("status", ACTIVE_GUARANTOR_CLAIM_STATUSES);
+
+    if (error) {
+        throw new AppError(500, "GUARANTOR_INVOKED_LOOKUP_FAILED", "Unable to load invoked guarantor claims.", error);
+    }
+
+    const invokedMap = new Map();
+    for (const row of data || []) {
+        const outstanding = Math.max(
+            0,
+            Number(row.claim_amount || 0) - Number(row.settled_amount || 0)
+        );
+        const current = Number(invokedMap.get(row.guarantor_member_id) || 0);
+        invokedMap.set(row.guarantor_member_id, current + outstanding);
+    }
+
+    return invokedMap;
+}
+
+async function recomputeGuarantorExposuresForMembers({
+    tenantId,
+    memberIds = [],
+    actorUserId = null,
+    dryRun = false,
+    source = "manual"
+}) {
+    const targetMemberIds = memberIds.length
+        ? Array.from(new Set(memberIds.filter(Boolean)))
+        : await listAllGuarantorMemberIds(tenantId);
+
+    if (!targetMemberIds.length) {
+        return {
+            tenant_id: tenantId,
+            source,
+            dry_run: dryRun,
+            members_scanned: 0,
+            rows_upserted: 0,
+            policy: normalizeGuarantorPolicy(await getLoanPolicySettings(tenantId)),
+            exposures: []
+        };
+    }
+
+    const policy = normalizeGuarantorPolicy(await getLoanPolicySettings(tenantId));
+    const [capacityMap, committedMap, invokedMap] = await Promise.all([
+        getGuarantorCapacityMap(tenantId, targetMemberIds, policy),
+        getGuarantorCommittedMap(tenantId, targetMemberIds),
+        getGuarantorInvokedMap(tenantId, targetMemberIds)
+    ]);
+
+    const nowIso = new Date().toISOString();
+    const exposures = targetMemberIds.map((memberId) => {
+        const capacity = Number(capacityMap.get(memberId) || 0);
+        const committed = Number(committedMap.get(memberId) || 0);
+        const invoked = Number(invokedMap.get(memberId) || 0);
+        const availableRaw = capacity - committed - invoked;
+        const available = Math.max(0, availableRaw);
+
+        return {
+            tenant_id: tenantId,
+            guarantor_member_id: memberId,
+            committed_amount: committed,
+            invoked_amount: invoked,
+            available_amount: available,
+            last_recalculated_at: nowIso,
+            exposure_capacity_amount: capacity,
+            available_raw_amount: availableRaw
+        };
+    });
+
+    if (!dryRun) {
+        const upsertRows = exposures.map((row) => ({
+            tenant_id: row.tenant_id,
+            guarantor_member_id: row.guarantor_member_id,
+            committed_amount: row.committed_amount,
+            invoked_amount: row.invoked_amount,
+            available_amount: row.available_amount,
+            last_recalculated_at: row.last_recalculated_at
+        }));
+
+        const { error } = await adminSupabase
+            .from("guarantor_exposures")
+            .upsert(upsertRows, { onConflict: "tenant_id,guarantor_member_id" });
+
+        if (error) {
+            throw new AppError(500, "GUARANTOR_EXPOSURES_UPSERT_FAILED", "Unable to persist guarantor exposure values.", error);
+        }
+
+        if (actorUserId) {
+            await logAudit({
+                tenantId,
+                actorUserId,
+                table: "guarantor_exposures",
+                action: "recompute_guarantor_exposures",
+                entityType: "guarantor_exposure_recompute",
+                afterData: {
+                    source,
+                    members_scanned: targetMemberIds.length
+                }
+            });
+        }
+    }
+
+    return {
+        tenant_id: tenantId,
+        source,
+        dry_run: dryRun,
+        members_scanned: targetMemberIds.length,
+        rows_upserted: dryRun ? 0 : targetMemberIds.length,
+        policy,
+        exposures
+    };
 }
 
 async function getLoanRecord(tenantId, loanId) {
@@ -539,6 +899,316 @@ async function escalateCollectionAction(actor, actionId, payload) {
     return data;
 }
 
+async function listGuarantorExposures(actor, query = {}) {
+    const tenantId = query.tenant_id || actor.tenantId;
+    assertTenantAccess({ auth: actor }, tenantId);
+    const { page, limit, from, to } = normalizePagination(query);
+
+    let builder = adminSupabase
+        .from("guarantor_exposures")
+        .select(`
+            id,
+            tenant_id,
+            guarantor_member_id,
+            committed_amount,
+            invoked_amount,
+            available_amount,
+            last_recalculated_at,
+            created_at,
+            updated_at,
+            members(id, full_name, member_no, phone, branch_id)
+        `, { count: "exact" })
+        .eq("tenant_id", tenantId);
+
+    if (query.guarantor_member_id) {
+        builder = builder.eq("guarantor_member_id", query.guarantor_member_id);
+    }
+    if (query.branch_id) {
+        assertBranchAccess({ auth: actor }, query.branch_id);
+        builder = builder.eq("members.branch_id", query.branch_id);
+    }
+
+    if (
+        !actor.isInternalOps
+        && [ROLES.BRANCH_MANAGER, ROLES.LOAN_OFFICER, ROLES.TELLER].includes(actor.role)
+        && Array.isArray(actor.branchIds)
+        && actor.branchIds.length
+    ) {
+        builder = builder.in("members.branch_id", actor.branchIds);
+    }
+
+    const { data, error, count } = await builder
+        .order("available_amount", { ascending: true })
+        .range(from, to);
+
+    if (error) {
+        throw new AppError(500, "GUARANTOR_EXPOSURES_FETCH_FAILED", "Unable to load guarantor exposures.", error);
+    }
+
+    return {
+        data: data || [],
+        pagination: {
+            page,
+            limit,
+            total: count || 0
+        }
+    };
+}
+
+async function recomputeGuarantorExposures(actor, payload = {}) {
+    const tenantId = payload.tenant_id || actor.tenantId;
+    assertTenantAccess({ auth: actor }, tenantId);
+
+    return runObservedJob(
+        "credit_risk.guarantor_exposure_recompute",
+        { tenantId },
+        () =>
+            recomputeGuarantorExposuresForMembers({
+                tenantId,
+                memberIds: Array.isArray(payload.member_ids) ? payload.member_ids : [],
+                actorUserId: actor.user.id,
+                dryRun: Boolean(payload.dry_run),
+                source: "manual"
+            })
+    );
+}
+
+async function assertGuarantorExposureWithinLimits({
+    tenantId,
+    guarantors = [],
+    actorUserId = null,
+    source = "approval"
+}) {
+    const uniqueMemberIds = Array.from(
+        new Set((guarantors || []).map((row) => row.member_id).filter(Boolean))
+    );
+
+    if (!uniqueMemberIds.length) {
+        return {
+            policy: normalizeGuarantorPolicy(await getLoanPolicySettings(tenantId)),
+            checked: 0,
+            violations: []
+        };
+    }
+
+    const recompute = await recomputeGuarantorExposuresForMembers({
+        tenantId,
+        memberIds: uniqueMemberIds,
+        actorUserId,
+        dryRun: false,
+        source
+    });
+    const policy = recompute.policy;
+    if (!policy.enabled) {
+        return { policy, checked: uniqueMemberIds.length, violations: [] };
+    }
+
+    const exposureByMember = new Map(
+        (recompute.exposures || []).map((row) => [row.guarantor_member_id, row])
+    );
+
+    const violations = [];
+    for (const guarantor of guarantors) {
+        const exposure = exposureByMember.get(guarantor.member_id);
+        if (!exposure) {
+            continue;
+        }
+
+        if (Number(exposure.available_raw_amount) < policy.minAvailableAmount) {
+            violations.push({
+                member_id: guarantor.member_id,
+                guaranteed_amount: Number(guarantor.guaranteed_amount || 0),
+                exposure_capacity_amount: Number(exposure.exposure_capacity_amount || 0),
+                committed_amount: Number(exposure.committed_amount || 0),
+                invoked_amount: Number(exposure.invoked_amount || 0),
+                available_amount: Number(exposure.available_amount || 0),
+                available_raw_amount: Number(exposure.available_raw_amount || 0),
+                min_available_amount_required: Number(policy.minAvailableAmount || 0)
+            });
+        }
+    }
+
+    if (violations.length) {
+        throw new AppError(
+            400,
+            "GUARANTOR_EXPOSURE_LIMIT_EXCEEDED",
+            "One or more guarantors exceed configured exposure limits.",
+            { violations, policy }
+        );
+    }
+
+    return {
+        policy,
+        checked: uniqueMemberIds.length,
+        violations: []
+    };
+}
+
+async function runDefaultDetectionForTenant({
+    tenantId,
+    actor = null,
+    branchId = null,
+    dryRun = false,
+    maxLoans = 500,
+    source = "manual"
+}) {
+    if (!tenantId) {
+        throw new AppError(400, "TENANT_ID_REQUIRED", "Tenant identifier is required.");
+    }
+
+    if (actor) {
+        assertTenantAccess({ auth: actor }, tenantId);
+        if (branchId) {
+            assertBranchAccess({ auth: actor }, branchId);
+        }
+    }
+
+    const policy = await getLoanPolicySettings(tenantId);
+    const normalizedPolicy = normalizeDefaultDetectionPolicy(policy);
+
+    if (!normalizedPolicy.enabled) {
+        return {
+            tenant_id: tenantId,
+            branch_id: branchId || null,
+            source,
+            detection_enabled: false,
+            dry_run: dryRun,
+            threshold_dpd_days: normalizedPolicy.dpdThreshold,
+            scanned_candidates: 0,
+            open_cases_existing: 0,
+            would_open_cases: 0,
+            created_cases: 0,
+            skipped_duplicates: 0
+        };
+    }
+
+    const candidates = await listDetectionCandidates({
+        tenantId,
+        dpdThreshold: normalizedPolicy.dpdThreshold,
+        branchId,
+        maxLoans
+    });
+
+    const loanIds = candidates.map((entry) => entry.loan.id);
+    const existingOpenLoanIds = await listExistingOpenDefaultCaseLoanIds(tenantId, loanIds);
+
+    const toCreate = candidates.filter((entry) => !existingOpenLoanIds.has(entry.loan.id));
+    const summary = {
+        tenant_id: tenantId,
+        branch_id: branchId || null,
+        source,
+        detection_enabled: true,
+        dry_run: dryRun,
+        threshold_dpd_days: normalizedPolicy.dpdThreshold,
+        scanned_candidates: candidates.length,
+        open_cases_existing: existingOpenLoanIds.size,
+        would_open_cases: toCreate.length,
+        created_cases: 0,
+        skipped_duplicates: 0
+    };
+
+    if (dryRun || !toCreate.length) {
+        return summary;
+    }
+
+    for (const entry of toCreate) {
+        const insertPayload = {
+            tenant_id: tenantId,
+            branch_id: entry.loan.branch_id,
+            loan_id: entry.loan.id,
+            member_id: entry.loan.member_id,
+            status: "delinquent",
+            dpd_days: entry.daysPastDue,
+            opened_at: new Date().toISOString(),
+            opened_by: actor?.user?.id || null,
+            reason_code: normalizedPolicy.reasonCode,
+            notes: source === "scheduler"
+                ? "Auto-opened by scheduled default detection."
+                : "Auto-opened by manual default detection run."
+        };
+
+        const { error } = await adminSupabase
+            .from("loan_default_cases")
+            .insert(insertPayload);
+
+        if (error) {
+            if (String(error.code || "") === "23505") {
+                summary.skipped_duplicates += 1;
+                continue;
+            }
+
+            throw new AppError(500, "DEFAULT_CASE_DETECTION_FAILED", "Unable to auto-open default case.", error);
+        }
+
+        summary.created_cases += 1;
+    }
+
+    if (actor?.user?.id) {
+        await logAudit({
+            tenantId,
+            actorUserId: actor.user.id,
+            table: "loan_default_cases",
+            action: "run_default_detection",
+            entityType: "loan_default_detection_run",
+            afterData: summary
+        });
+    }
+
+    return summary;
+}
+
+async function runDefaultDetection(actor, payload = {}) {
+    const tenantId = payload.tenant_id || actor.tenantId;
+    const branchId = payload.branch_id || null;
+    const dryRun = Boolean(payload.dry_run);
+    const maxLoans = Number(payload.max_loans || 500);
+
+    return runObservedJob(
+        "credit_risk.default_detection",
+        { tenantId },
+        () => runDefaultDetectionForTenant({
+            tenantId,
+            actor,
+            branchId,
+            dryRun,
+            maxLoans,
+            source: "manual"
+        })
+    );
+}
+
+async function runScheduledDefaultDetection() {
+    const { data: tenants, error } = await adminSupabase
+        .from("tenants")
+        .select("id")
+        .eq("status", "active")
+        .is("deleted_at", null)
+        .limit(env.creditRiskDefaultDetectionMaxTenantsPerRun);
+
+    if (error) {
+        throw new AppError(500, "TENANTS_LOOKUP_FAILED", "Unable to load tenants for default detection.", error);
+    }
+
+    const summaries = [];
+    for (const tenant of tenants || []) {
+        const summary = await runObservedJob(
+            "credit_risk.default_detection",
+            { tenantId: tenant.id },
+            () => runDefaultDetectionForTenant({
+                tenantId: tenant.id,
+                source: "scheduler",
+                maxLoans: env.creditRiskDefaultDetectionMaxLoansPerTenant
+            })
+        );
+        summaries.push(summary);
+    }
+
+    return {
+        tenants_scanned: summaries.length,
+        summaries
+    };
+}
+
 module.exports = {
     listDefaultCases,
     getDefaultCase,
@@ -548,5 +1218,12 @@ module.exports = {
     createCollectionAction,
     updateCollectionAction,
     completeCollectionAction,
-    escalateCollectionAction
+    escalateCollectionAction,
+    listGuarantorExposures,
+    recomputeGuarantorExposures,
+    assertGuarantorExposureWithinLimits,
+    recomputeGuarantorExposuresForMembers,
+    runDefaultDetection,
+    runScheduledDefaultDetection,
+    runDefaultDetectionForTenant
 };

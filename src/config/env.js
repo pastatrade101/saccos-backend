@@ -83,6 +83,16 @@ const envSchema = z.object({
     SLO_LIST_ENDPOINT_P95_MS: z.coerce.number().positive().default(400),
     SLO_HEAVY_REPORT_P95_MS: z.coerce.number().positive().default(2000),
     SLO_ERROR_RATE_PCT: z.coerce.number().nonnegative().default(1),
+    CREDIT_RISK_DEFAULT_DPD_THRESHOLD: z.coerce.number().int().positive().default(30),
+    CREDIT_RISK_DEFAULT_DETECTION_SCHEDULER_ENABLED: z
+        .string()
+        .optional()
+        .transform((value) => parseBooleanEnv(value, false)),
+    CREDIT_RISK_DEFAULT_DETECTION_INTERVAL_MS: z.coerce.number().int().positive().default(900000),
+    CREDIT_RISK_DEFAULT_DETECTION_MAX_TENANTS_PER_RUN: z.coerce.number().int().positive().default(200),
+    CREDIT_RISK_DEFAULT_DETECTION_MAX_LOANS_PER_TENANT: z.coerce.number().int().positive().default(500),
+    CREDIT_RISK_GUARANTOR_MAX_COMMITMENT_RATIO: z.coerce.number().positive().max(1).default(0.8),
+    CREDIT_RISK_GUARANTOR_MIN_AVAILABLE_AMOUNT: z.coerce.number().nonnegative().default(0),
     SSL_ENABLED: z
         .string()
         .optional()
@@ -152,6 +162,13 @@ module.exports = {
     sloListEndpointP95Ms: env.SLO_LIST_ENDPOINT_P95_MS,
     sloHeavyReportP95Ms: env.SLO_HEAVY_REPORT_P95_MS,
     sloErrorRatePct: env.SLO_ERROR_RATE_PCT,
+    creditRiskDefaultDpdThreshold: env.CREDIT_RISK_DEFAULT_DPD_THRESHOLD,
+    creditRiskDefaultDetectionSchedulerEnabled: env.CREDIT_RISK_DEFAULT_DETECTION_SCHEDULER_ENABLED,
+    creditRiskDefaultDetectionIntervalMs: env.CREDIT_RISK_DEFAULT_DETECTION_INTERVAL_MS,
+    creditRiskDefaultDetectionMaxTenantsPerRun: env.CREDIT_RISK_DEFAULT_DETECTION_MAX_TENANTS_PER_RUN,
+    creditRiskDefaultDetectionMaxLoansPerTenant: env.CREDIT_RISK_DEFAULT_DETECTION_MAX_LOANS_PER_TENANT,
+    creditRiskGuarantorMaxCommitmentRatio: env.CREDIT_RISK_GUARANTOR_MAX_COMMITMENT_RATIO,
+    creditRiskGuarantorMinAvailableAmount: env.CREDIT_RISK_GUARANTOR_MIN_AVAILABLE_AMOUNT,
     sslEnabled: env.SSL_ENABLED,
     logLevel: env.LOG_LEVEL
 };
