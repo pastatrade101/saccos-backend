@@ -414,6 +414,16 @@ async function deleteTenant(actor, tenantId, payload) {
     await deleteByTenant("member_application_attachments", scope.tenantIds);
     await deleteByTenant("membership_status_history", scope.tenantIds);
     await deleteByTenant("member_applications", scope.tenantIds);
+
+    // Credit-risk records reference loans/members and must be removed before loan/member deletes.
+    await deleteByTenant("collection_actions", scope.tenantIds);
+    await deleteByTenant("guarantor_claims", scope.tenantIds);
+    await deleteByTenant("loan_restructures", scope.tenantIds);
+    await deleteByTenant("loan_writeoffs", scope.tenantIds);
+    await deleteByTenant("loan_recoveries", scope.tenantIds);
+    await deleteByTenant("loan_default_cases", scope.tenantIds);
+    await deleteByTenant("guarantor_exposures", scope.tenantIds);
+
     await deleteByTenant("loan_approvals", scope.tenantIds);
     await deleteByTenant("loan_guarantors", scope.tenantIds);
     await deleteByTenant("collateral_items", scope.tenantIds);
