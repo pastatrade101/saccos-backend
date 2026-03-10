@@ -359,6 +359,21 @@ async function listAuthUsersByTenantMetadata(tenantId) {
     return matched;
 }
 
+async function purgeTenantScopedRows(tenantId) {
+    const { error } = await adminSupabase.rpc("purge_tenant_scoped_rows", {
+        p_tenant_id: tenantId
+    });
+
+    if (error) {
+        throw new AppError(
+            500,
+            "TENANT_DELETE_FAILED",
+            "Unable to run tenant scoped purge.",
+            error
+        );
+    }
+}
+
 async function loadTenantDeletionScope(tenantId) {
     const tenantIds = [tenantId];
     const profiles = await listByTenant("user_profiles", "user_id, tenant_id, role, member_id", tenantIds);
@@ -540,6 +555,10 @@ async function deleteTenant(actor, tenantId, payload) {
     await deleteByTenant("chart_of_accounts", scope.tenantIds);
     await deleteByTenant("tenant_subscriptions", scope.tenantIds);
     await deleteByTenant("subscriptions", scope.tenantIds);
+
+    // Final guardrail sweep for any tenant-scoped rows introduced by newer schema changes.
+    await purgeTenantScopedRows(tenantId);
+
     await deleteIn("tenants", "id", scope.tenantIds);
     await deleteAuthUsers(scope.authUserIds);
 
