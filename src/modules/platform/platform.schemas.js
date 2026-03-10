@@ -41,11 +41,39 @@ const listPlatformTenantsQuerySchema = z.object({
     status: z.string().trim().min(1).max(60).optional()
 });
 
+const platformMetricsQuerySchema = z.object({
+    tenant_id: z.string().uuid().optional(),
+    window_minutes: z.coerce.number().int().positive().max(1440).default(60)
+});
+
+const platformTenantMetricsQuerySchema = z.object({
+    tenant_id: z.string().uuid().optional(),
+    window_minutes: z.coerce.number().int().positive().max(1440).default(60),
+    sort_by: z.enum(["traffic", "errors", "latency"]).default("traffic"),
+    sort_dir: z.enum(["asc", "desc"]).default("desc")
+});
+
+const platformErrorsQuerySchema = z.object({
+    tenant_id: z.string().uuid().optional(),
+    page: z.coerce.number().int().positive().default(1),
+    limit: z.coerce.number().int().positive().max(100).default(20)
+});
+
+const platformSlowEndpointsQuerySchema = z.object({
+    tenant_id: z.string().uuid().optional(),
+    window_minutes: z.coerce.number().int().positive().max(1440).default(60),
+    limit: z.coerce.number().int().positive().max(100).default(10)
+});
+
 module.exports = {
     planParamSchema,
     listPlansQuerySchema,
     tenantParamSchema,
     listPlatformTenantsQuerySchema,
+    platformMetricsQuerySchema,
+    platformTenantMetricsQuerySchema,
+    platformErrorsQuerySchema,
+    platformSlowEndpointsQuerySchema,
     updatePlanFeaturesSchema,
     assignSubscriptionSchema,
     deleteTenantSchema

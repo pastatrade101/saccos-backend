@@ -1,5 +1,6 @@
 const ROLES = {
     PLATFORM_ADMIN: "platform_admin",
+    PLATFORM_OWNER: "platform_owner",
     SUPER_ADMIN: "super_admin",
     BRANCH_MANAGER: "branch_manager",
     LOAN_OFFICER: "loan_officer",

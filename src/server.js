@@ -5,6 +5,7 @@ const http = require("http");
 const app = require("./app");
 const env = require("./config/env");
 const { startDefaultDetectionScheduler } = require("./modules/credit-risk/default-detection.scheduler");
+const { startApiMetricsCollector } = require("./services/api-metrics-collector.service");
 
 const server = http.createServer(app);
 
@@ -26,18 +27,25 @@ server.listen(env.port, env.host, () => {
 });
 
 const stopDefaultDetectionScheduler = startDefaultDetectionScheduler();
+const stopApiMetricsCollector = startApiMetricsCollector();
 
 function shutdown(signal) {
     console.log(`Received ${signal}, shutting down gracefully.`);
     stopDefaultDetectionScheduler();
-    server.close((error) => {
-        if (error) {
-            console.error("Error while shutting down HTTP server", error);
-            process.exit(1);
-        }
+    Promise.resolve(stopApiMetricsCollector())
+        .catch((error) => {
+            console.error("Error while flushing API metrics collector", error);
+        })
+        .finally(() => {
+            server.close((error) => {
+                if (error) {
+                    console.error("Error while shutting down HTTP server", error);
+                    process.exit(1);
+                }
 
-        process.exit(0);
-    });
+                process.exit(0);
+            });
+        });
 }
 
 process.on("SIGINT", () => shutdown("SIGINT"));

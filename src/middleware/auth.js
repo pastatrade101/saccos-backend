@@ -33,8 +33,12 @@ module.exports = asyncHandler(async (req, res, next) => {
     ]);
     const isInternalOpsByMetadata =
         authUser.app_metadata?.platform_role === "internal_ops" ||
-        authUser.app_metadata?.platform_role === "platform_admin";
-    const isInternalOps = isInternalOpsByMetadata || profile?.role === "platform_admin";
+        authUser.app_metadata?.platform_role === "platform_admin" ||
+        authUser.app_metadata?.platform_role === "platform_owner";
+    const isInternalOps =
+        isInternalOpsByMetadata
+        || profile?.role === "platform_admin"
+        || profile?.role === "platform_owner";
 
     if (!profile && !isInternalOps) {
         throw new AppError(403, "PROFILE_NOT_FOUND", "User profile is not provisioned.");

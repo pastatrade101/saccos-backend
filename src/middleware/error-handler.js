@@ -21,6 +21,9 @@ module.exports = (err, req, res, next) => {
         error: err instanceof AppError ? undefined : err
     });
 
+    res.locals.apiErrorCode = normalizedError.code;
+    res.locals.apiErrorMessage = normalizedError.message;
+
     res.status(normalizedError.statusCode).json({
         error: {
             code: normalizedError.code,
