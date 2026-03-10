@@ -73,6 +73,8 @@ Apply in this exact sequence on a fresh environment:
 33. `supabase/sql/032_phase4_otp_atomic_verify.sql`
 34. `supabase/sql/033_phase5_platform_tenant_indexes.sql`
 35. `supabase/sql/034_member_profile_identity_fields.sql`
+36. `supabase/sql/035_phase1_credit_risk_controls.sql`
+37. `supabase/sql/036_phase1_credit_risk_controls_rls.sql`
 
 For existing environments, run only new additive migrations and validate policy collisions before execution.
 

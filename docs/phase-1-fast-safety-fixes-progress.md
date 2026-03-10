@@ -1,6 +1,6 @@
 # Phase 1 Progress: Fast Safety Fixes
 
-Date: 2026-03-09
+Date: 2026-03-10
 
 ## Scope
 
@@ -16,11 +16,13 @@ Phase 1 goal is to eliminate unbounded list reads and enforce safe defaults befo
   - users
   - branches
   - tenants
+  - product catalogs (savings/loan/share/fee/penalty/posting-rules)
   - platform tenants
+  - platform plans
   - member applications
   - dividend cycles
   - cash-control sessions
-- Hard max limits added on list-style endpoints that are not yet full paginated APIs (capped list responses).
+- Hard max limits applied on capped list responses (`<=100`) for auxiliary list endpoints (bootstrap/options/receipts/summary feeds).
 - Import row listing hardened with `limit <= 100`.
 
 ## API Safety Defaults
@@ -37,8 +39,9 @@ Phase 1 goal is to eliminate unbounded list reads and enforce safe defaults befo
 
 - Syntax checks passed for updated modules.
 - `npm run check` passed.
+- `rg "\.limit\(200\)" src/modules` returns no matches.
 
 ## Exit Criteria Status
 
-- Backend no-unbounded-list guardrails: In progress (substantially completed)
+- Backend no-unbounded-list guardrails: Completed
 - Frontend server-side pagination rollout: Pending

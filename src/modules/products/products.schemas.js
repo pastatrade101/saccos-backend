@@ -85,7 +85,13 @@ const postingRuleSchema = z.object({
     metadata: z.record(z.string(), z.any()).optional().default({})
 });
 
+const listProductsQuerySchema = z.object({
+    page: z.coerce.number().int().positive().default(1),
+    limit: z.coerce.number().int().positive().max(100).default(50)
+});
+
 module.exports = {
+    listProductsQuerySchema,
     savingsProductSchema,
     updateSavingsProductSchema: savingsProductSchema.partial(),
     loanProductSchema,

@@ -389,14 +389,14 @@ async function getOptions(actor) {
             .eq("tenant_id", tenantId)
             .is("deleted_at", null)
             .order("name", { ascending: true })
-            .limit(200),
+            .limit(100),
         adminSupabase
             .from("chart_of_accounts")
             .select("id, account_code, account_name, account_type, system_tag")
             .eq("tenant_id", tenantId)
             .is("deleted_at", null)
             .order("account_code", { ascending: true })
-            .limit(200)
+            .limit(100)
     ]);
 
     return {

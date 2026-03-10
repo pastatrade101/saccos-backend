@@ -1,0 +1,8 @@
+workstream,product_owner,platform_owner,finance_controller,credit_manager,operations_manager,compliance_lead,internal_auditor,security_lead
+control_principles_definition,A,R,C,C,C,C,C,C
+approval_policy_matrix,C,C,C,C,R,C,C,C
+default_and_collections_workflow,C,C,C,A,C,C,C,C
+guarantor_liability_workflow,C,C,C,A,C,C,C,C
+regulatory_report_catalog,C,C,C,C,C,A,C,C
+dr_rpo_rto_targets,C,A,C,C,C,C,C,R
+phase_0_signoff_gate,A,R,R,R,R,R,R,R

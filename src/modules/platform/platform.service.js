@@ -17,18 +17,37 @@ const MISSING_SUBSCRIPTION = {
     limits: null
 };
 
-async function listPlans() {
-    const { data, error } = await adminSupabase
+const DEFAULT_LIST_LIMIT = 50;
+const MAX_LIST_LIMIT = 100;
+
+function normalizePagination(query = {}) {
+    const page = Math.max(Number(query.page || 1), 1);
+    const limit = Math.min(Math.max(Number(query.limit || DEFAULT_LIST_LIMIT), 1), MAX_LIST_LIMIT);
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
+    return { page, limit, from, to };
+}
+
+async function listPlans(query = {}) {
+    const { page, limit, from, to } = normalizePagination(query);
+    const { data, error, count } = await adminSupabase
         .from("plans")
-        .select("*, plan_features(*)")
+        .select("*, plan_features(*)", { count: "exact" })
         .order("created_at", { ascending: true })
-        .limit(200);
+        .range(from, to);
 
     if (error) {
         throw new AppError(500, "PLANS_LIST_FAILED", "Unable to load plans.", error);
     }
 
-    return data || [];
+    return {
+        data: data || [],
+        pagination: {
+            page,
+            limit,
+            total: count || 0
+        }
+    };
 }
 
 async function updatePlanFeatures(actor, planId, payload) {
@@ -67,7 +86,7 @@ async function updatePlanFeatures(actor, planId, payload) {
         afterData: { plan_id: planId, features: rows }
     });
 
-    return listPlans();
+    return (await listPlans({ page: 1, limit: MAX_LIST_LIMIT })).data;
 }
 
 async function listPlatformTenants(query = {}) {

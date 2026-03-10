@@ -8,6 +8,7 @@ const controller = require("./platform.controller");
 const {
     assignSubscriptionSchema,
     deleteTenantSchema,
+    listPlansQuerySchema,
     listPlatformTenantsQuerySchema,
     planParamSchema,
     tenantParamSchema,
@@ -18,7 +19,7 @@ const router = express.Router();
 
 router.use(auth, authorize([ROLES.PLATFORM_ADMIN]));
 
-router.get("/plans", controller.listPlans);
+router.get("/plans", validate(listPlansQuerySchema, "query"), controller.listPlans);
 router.patch("/plans/:planId/features", validate(planParamSchema, "params"), validate(updatePlanFeaturesSchema), controller.updatePlanFeatures);
 router.get("/tenants", validate(listPlatformTenantsQuerySchema, "query"), controller.listTenants);
 router.post("/tenants/:tenantId/subscription", validate(tenantParamSchema, "params"), validate(assignSubscriptionSchema), controller.assignSubscription);

@@ -6,11 +6,13 @@ exports.bootstrap = asyncHandler(async (req, res) => {
 });
 
 exports.listSavingsProducts = asyncHandler(async (req, res) => {
-    res.json({ data: await service.listSavingsProducts(req.auth) });
+    const result = await service.listSavingsProducts(req.auth, req.validated.query);
+    res.json({ data: result.data, pagination: result.pagination });
 });
 
 exports.listLoanProducts = asyncHandler(async (req, res) => {
-    res.json({ data: await service.listLoanProducts(req.auth) });
+    const result = await service.listLoanProducts(req.auth, req.validated.query);
+    res.json({ data: result.data, pagination: result.pagination });
 });
 
 exports.createLoanProduct = asyncHandler(async (req, res) => {
@@ -30,7 +32,8 @@ exports.updateSavingsProduct = asyncHandler(async (req, res) => {
 });
 
 exports.listShareProducts = asyncHandler(async (req, res) => {
-    res.json({ data: await service.listShareProducts(req.auth) });
+    const result = await service.listShareProducts(req.auth, req.validated.query);
+    res.json({ data: result.data, pagination: result.pagination });
 });
 
 exports.createShareProduct = asyncHandler(async (req, res) => {
@@ -42,7 +45,8 @@ exports.updateShareProduct = asyncHandler(async (req, res) => {
 });
 
 exports.listFeeRules = asyncHandler(async (req, res) => {
-    res.json({ data: await service.listFeeRules(req.auth) });
+    const result = await service.listFeeRules(req.auth, req.validated.query);
+    res.json({ data: result.data, pagination: result.pagination });
 });
 
 exports.createFeeRule = asyncHandler(async (req, res) => {
@@ -54,7 +58,8 @@ exports.updateFeeRule = asyncHandler(async (req, res) => {
 });
 
 exports.listPenaltyRules = asyncHandler(async (req, res) => {
-    res.json({ data: await service.listPenaltyRules(req.auth) });
+    const result = await service.listPenaltyRules(req.auth, req.validated.query);
+    res.json({ data: result.data, pagination: result.pagination });
 });
 
 exports.createPenaltyRule = asyncHandler(async (req, res) => {
@@ -66,7 +71,8 @@ exports.updatePenaltyRule = asyncHandler(async (req, res) => {
 });
 
 exports.listPostingRules = asyncHandler(async (req, res) => {
-    res.json({ data: await service.listPostingRules(req.auth) });
+    const result = await service.listPostingRules(req.auth, req.validated.query);
+    res.json({ data: result.data, pagination: result.pagination });
 });
 
 exports.createPostingRule = asyncHandler(async (req, res) => {

@@ -601,7 +601,7 @@ async function getDailySummary(actor, query) {
         .select("*")
         .eq("tenant_id", tenantId)
         .order("business_date", { ascending: false })
-        .limit(200);
+        .limit(100);
 
     if (query.date) {
         request = request.eq("business_date", query.date);
@@ -638,7 +638,7 @@ async function listJournalReceipts(actor, journalId) {
         .eq("tenant_id", tenantId)
         .eq("journal_id", journalId)
         .order("created_at", { ascending: true })
-        .limit(200);
+        .limit(100);
 
     if (error) {
         throw new AppError(500, "TRANSACTION_RECEIPTS_FETCH_FAILED", "Unable to load transaction receipts.", error);

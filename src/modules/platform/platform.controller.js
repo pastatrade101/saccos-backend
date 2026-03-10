@@ -11,9 +11,9 @@ function applyNoStore(res) {
 }
 
 exports.listPlans = asyncHandler(async (req, res) => {
-    const data = await platformService.listPlans();
+    const result = await platformService.listPlans(req.validated.query);
     applyNoStore(res);
-    res.json({ data });
+    res.json({ data: result.data, pagination: result.pagination });
 });
 
 exports.updatePlanFeatures = asyncHandler(async (req, res) => {

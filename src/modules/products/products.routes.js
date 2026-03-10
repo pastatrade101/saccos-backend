@@ -22,11 +22,13 @@ router.get(
 router.get(
     "/savings",
     authorize(PRODUCT_MANAGER_ROLES, { allowInternalOps: false }),
+    validate(schemas.listProductsQuerySchema, "query"),
     controller.listSavingsProducts
 );
 router.get(
     "/loans",
     authorize([ROLES.BRANCH_MANAGER, ROLES.LOAN_OFFICER, ROLES.TELLER, ROLES.AUDITOR, ROLES.MEMBER], { allowInternalOps: false }),
+    validate(schemas.listProductsQuerySchema, "query"),
     controller.listLoanProducts
 );
 router.post(
@@ -57,6 +59,7 @@ router.patch(
 router.get(
     "/shares",
     authorize(PRODUCT_MANAGER_ROLES, { allowInternalOps: false }),
+    validate(schemas.listProductsQuerySchema, "query"),
     controller.listShareProducts
 );
 router.post(
@@ -75,6 +78,7 @@ router.patch(
 router.get(
     "/fees",
     authorize(PRODUCT_MANAGER_ROLES, { allowInternalOps: false }),
+    validate(schemas.listProductsQuerySchema, "query"),
     controller.listFeeRules
 );
 router.post(
@@ -93,6 +97,7 @@ router.patch(
 router.get(
     "/penalties",
     authorize(PRODUCT_MANAGER_ROLES, { allowInternalOps: false }),
+    validate(schemas.listProductsQuerySchema, "query"),
     controller.listPenaltyRules
 );
 router.post(
@@ -111,6 +116,7 @@ router.patch(
 router.get(
     "/posting-rules",
     authorize(PRODUCT_MANAGER_ROLES, { allowInternalOps: false }),
+    validate(schemas.listProductsQuerySchema, "query"),
     controller.listPostingRules
 );
 router.post(

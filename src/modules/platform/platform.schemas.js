@@ -4,6 +4,11 @@ const planParamSchema = z.object({
     planId: z.string().uuid()
 });
 
+const listPlansQuerySchema = z.object({
+    page: z.coerce.number().int().positive().default(1),
+    limit: z.coerce.number().int().positive().max(100).default(50)
+});
+
 const tenantParamSchema = z.object({
     tenantId: z.string().uuid()
 });
@@ -38,6 +43,7 @@ const listPlatformTenantsQuerySchema = z.object({
 
 module.exports = {
     planParamSchema,
+    listPlansQuerySchema,
     tenantParamSchema,
     listPlatformTenantsQuerySchema,
     updatePlanFeaturesSchema,
