@@ -216,6 +216,9 @@ async function deleteIn(table, column, values) {
         .in(column, values);
 
     if (error) {
+        if (error.code === "PGRST205" || error.code === "42P01") {
+            return;
+        }
         throw new AppError(500, "TENANT_DELETE_FAILED", `Unable to delete from ${table}.`, error);
     }
 }
@@ -231,6 +234,9 @@ async function deleteByTenant(table, tenantIds) {
         .in("tenant_id", tenantIds);
 
     if (error) {
+        if (error.code === "PGRST205" || error.code === "42P01") {
+            return;
+        }
         throw new AppError(500, "TENANT_DELETE_FAILED", `Unable to delete from ${table}.`, error);
     }
 }
@@ -405,7 +411,12 @@ async function deleteTenant(actor, tenantId, payload) {
     await deleteByTenant("receipt_policies", scope.tenantIds);
     await deleteByTenant("cash_control_settings", scope.tenantIds);
     await deleteByTenant("api_idempotency_requests", scope.tenantIds);
+    await deleteByTenant("api_rate_limit_windows", scope.tenantIds);
+    await deleteByTenant("api_metrics", scope.tenantIds);
+    await deleteByTenant("api_errors", scope.tenantIds);
+    await deleteByTenant("auth_otp_challenges", scope.tenantIds);
     await deleteByTenant("report_export_jobs", scope.tenantIds);
+    await deleteByTenant("import_job_rows", scope.tenantIds);
     await deleteByTenant("import_jobs", scope.tenantIds);
     await deleteByTenant("approval_decisions", scope.tenantIds);
     await deleteByTenant("approval_steps", scope.tenantIds);
@@ -442,6 +453,8 @@ async function deleteTenant(actor, tenantId, payload) {
     await deleteByTenant("loan_schedules", scope.tenantIds);
     await deleteByTenant("loans", scope.tenantIds);
     await deleteByTenant("member_accounts", scope.tenantIds);
+    await deleteByTenant("financial_snapshot_periods", scope.tenantIds);
+    await deleteByTenant("financial_statement_runs", scope.tenantIds);
     await deleteByTenant("period_closures", scope.tenantIds);
     await deleteByTenant("daily_account_snapshots", scope.tenantIds);
     await deleteByTenant("audit_logs", scope.tenantIds);
