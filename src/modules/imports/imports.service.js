@@ -12,25 +12,42 @@ const { parseCsvBuffer, toCsv } = require("../../utils/csv");
 
 const SUPPORTED_HEADERS = [
     "first_name",
+    "firstName",
     "middle_name",
+    "middleName",
     "last_name",
+    "lastName",
     "full_name",
+    "fullName",
     "email",
     "phone_number",
+    "phoneNumber",
     "phone",
     "gender",
     "date_of_birth",
+    "DateOfBirth",
+    "dob",
     "address",
     "tin_number",
+    "tinNumber",
     "nin",
+    "NIN",
     "member_no",
+    "memberNo",
+    "referenceNumber",
     "member_id",
     "national_id",
     "branch_code",
+    "branchCode",
     "status",
     "opening_savings",
+    "savingAmount",
+    "savings_amount",
     "cumulative_savings",
     "opening_shares",
+    "noOfShares",
+    "no_of_shares",
+    "shares",
     "opening_savings_date",
     "opening_shares_date",
     "withdrawal_amount",
@@ -158,7 +175,7 @@ function parseMoney(value) {
         return 0;
     }
 
-    const amount = Number(normalized);
+    const amount = Number(String(normalized).replace(/,/g, ""));
 
     if (!Number.isFinite(amount) || amount < 0) {
         throw new AppError(400, "INVALID_IMPORT_AMOUNT", "Opening balances must be numeric and non-negative.");
@@ -174,7 +191,7 @@ function parseOptionalPositiveNumber(value, fieldName) {
         return null;
     }
 
-    const parsed = Number(normalized);
+    const parsed = Number(String(normalized).replace(/,/g, ""));
 
     if (!Number.isFinite(parsed) || parsed <= 0) {
         throw new AppError(400, "INVALID_IMPORT_NUMBER", `${fieldName} must be a positive number when provided.`);
@@ -199,30 +216,40 @@ function parseOptionalTimestamp(value, fieldName) {
     return parsed.toISOString();
 }
 
+function pickRaw(raw, keys) {
+    for (const key of keys) {
+        const value = normalizeString(raw[key]);
+        if (value) {
+            return value;
+        }
+    }
+    return null;
+}
+
 function normalizeImportRow(raw) {
-    const firstName = normalizeString(raw.first_name);
-    const middleName = normalizeString(raw.middle_name);
-    const lastName = normalizeString(raw.last_name);
-    const fullName = normalizeString(raw.full_name) || composeFullName(firstName, middleName, lastName);
+    const firstName = pickRaw(raw, ["first_name", "firstName"]);
+    const middleName = pickRaw(raw, ["middle_name", "middleName"]);
+    const lastName = pickRaw(raw, ["last_name", "lastName"]);
+    const fullName = pickRaw(raw, ["full_name", "fullName"]) || composeFullName(firstName, middleName, lastName);
 
     return {
         first_name: firstName,
         middle_name: middleName,
         last_name: lastName,
         full_name: fullName,
-        email: normalizeString(raw.email)?.toLowerCase() || null,
-        phone_number: normalizeString(raw.phone_number) || normalizeString(raw.phone),
+        email: pickRaw(raw, ["email"])?.toLowerCase() || null,
+        phone_number: pickRaw(raw, ["phone_number", "phoneNumber", "phone"]),
         gender: normalizeString(raw.gender)?.toLowerCase() || null,
-        date_of_birth: normalizeString(raw.date_of_birth),
-        address: normalizeString(raw.address),
-        tin_number: normalizeString(raw.tin_number),
-        nin: normalizeString(raw.nin),
-        member_no: normalizeString(raw.member_no) || normalizeString(raw.member_id),
-        national_id: normalizeString(raw.national_id),
-        branch_code: normalizeString(raw.branch_code),
+        date_of_birth: pickRaw(raw, ["date_of_birth", "DateOfBirth", "dob"]),
+        address: pickRaw(raw, ["address"]),
+        tin_number: pickRaw(raw, ["tin_number", "tinNumber"]),
+        nin: pickRaw(raw, ["nin", "NIN"]),
+        member_no: pickRaw(raw, ["member_no", "memberNo", "member_id", "referenceNumber"]),
+        national_id: pickRaw(raw, ["national_id"]),
+        branch_code: pickRaw(raw, ["branch_code", "branchCode"]),
         status: normalizeString(raw.status) || "active",
-        opening_savings: normalizeString(raw.opening_savings) || normalizeString(raw.cumulative_savings) || "0",
-        opening_shares: normalizeString(raw.opening_shares) || "0",
+        opening_savings: pickRaw(raw, ["opening_savings", "cumulative_savings", "savingAmount", "savings_amount"]) || "0",
+        opening_shares: pickRaw(raw, ["opening_shares", "noOfShares", "no_of_shares", "shares"]) || "0",
         opening_savings_date: normalizeString(raw.opening_savings_date),
         opening_shares_date: normalizeString(raw.opening_shares_date),
         withdrawal_amount: normalizeString(raw.withdrawal_amount) || "0",
