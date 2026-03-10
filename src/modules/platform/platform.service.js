@@ -234,7 +234,7 @@ async function deleteByTenant(table, tenantIds) {
         .in("tenant_id", tenantIds);
 
     if (error) {
-        if (error.code === "PGRST205" || error.code === "42P01") {
+        if (error.code === "PGRST205" || error.code === "42P01" || error.code === "42703") {
             return;
         }
         throw new AppError(500, "TENANT_DELETE_FAILED", `Unable to delete from ${table}.`, error);
@@ -301,6 +301,27 @@ async function removeStorageTree(bucketName, prefix) {
         const { error } = await adminSupabase.storage.from(bucketName).remove(batch);
         if (error) {
             throw new AppError(500, "TENANT_STORAGE_DELETE_FAILED", `Unable to delete files from ${bucketName}.`, error);
+        }
+    }
+}
+
+async function deleteRateLimitWindows(scope) {
+    const keysToMatch = Array.from(new Set([
+        ...(scope?.tenantIds || []),
+        ...(scope?.userIds || [])
+    ])).filter(Boolean);
+
+    for (const key of keysToMatch) {
+        const { error } = await adminSupabase
+            .from("api_rate_limit_windows")
+            .delete()
+            .ilike("scope_key", `%${key}%`);
+
+        if (error) {
+            if (error.code === "PGRST205" || error.code === "42P01" || error.code === "42703") {
+                return;
+            }
+            throw new AppError(500, "TENANT_DELETE_FAILED", "Unable to delete from api_rate_limit_windows.", error);
         }
     }
 }
@@ -411,10 +432,10 @@ async function deleteTenant(actor, tenantId, payload) {
     await deleteByTenant("receipt_policies", scope.tenantIds);
     await deleteByTenant("cash_control_settings", scope.tenantIds);
     await deleteByTenant("api_idempotency_requests", scope.tenantIds);
-    await deleteByTenant("api_rate_limit_windows", scope.tenantIds);
+    await deleteRateLimitWindows(scope);
     await deleteByTenant("api_metrics", scope.tenantIds);
     await deleteByTenant("api_errors", scope.tenantIds);
-    await deleteByTenant("auth_otp_challenges", scope.tenantIds);
+    await deleteIn("auth_otp_challenges", "user_id", scope.userIds);
     await deleteByTenant("report_export_jobs", scope.tenantIds);
     await deleteByTenant("import_job_rows", scope.tenantIds);
     await deleteByTenant("import_jobs", scope.tenantIds);
