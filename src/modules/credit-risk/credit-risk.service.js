@@ -546,7 +546,53 @@ async function getGuarantorClaimById(actor, claimId, tenantId) {
     return data;
 }
 
-async function getLoanGuarantorRecord(tenantId, loanId, guarantorMemberId) {
+async function findLegacyGuarantorRecordByBorrowerContext({
+    tenantId,
+    borrowerMemberId,
+    guarantorMemberId
+}) {
+    if (!borrowerMemberId) return null;
+
+    const { data, error } = await adminSupabase
+        .from("loan_guarantors")
+        .select(`
+            id,
+            application_id,
+            member_id,
+            guaranteed_amount,
+            loan_applications!inner(id, member_id, status, loan_id)
+        `)
+        .eq("tenant_id", tenantId)
+        .eq("member_id", guarantorMemberId)
+        .eq("loan_applications.member_id", borrowerMemberId)
+        .in("loan_applications.status", COMMITTED_GUARANTOR_APPLICATION_STATUSES)
+        .order("created_at", { ascending: false })
+        .limit(2);
+
+    if (error) {
+        throw new AppError(
+            500,
+            "GUARANTOR_CONTEXT_LOOKUP_FAILED",
+            "Unable to resolve legacy guarantor context for this loan.",
+            error
+        );
+    }
+
+    const rows = data || [];
+    if (!rows.length) return null;
+
+    if (rows.length > 1) {
+        throw new AppError(
+            409,
+            "GUARANTOR_CONTEXT_AMBIGUOUS",
+            "Multiple guarantor assignments match this borrower; link loan to application before creating claim."
+        );
+    }
+
+    return rows[0];
+}
+
+async function getLoanGuarantorRecord(tenantId, loanId, guarantorMemberId, borrowerMemberId = null) {
     const { data: loan, error: loanError } = await adminSupabase
         .from("loans")
         .select("id, application_id")
@@ -584,6 +630,13 @@ async function getLoanGuarantorRecord(tenantId, loanId, guarantorMemberId) {
     }
 
     if (!applicationId) {
+        const legacyGuarantor = await findLegacyGuarantorRecordByBorrowerContext({
+            tenantId,
+            borrowerMemberId,
+            guarantorMemberId
+        });
+        if (legacyGuarantor) return legacyGuarantor;
+
         throw new AppError(
             400,
             "GUARANTOR_CONTEXT_MISSING",
@@ -1176,7 +1229,12 @@ async function createGuarantorClaim(actor, payload = {}) {
         );
     }
 
-    await getLoanGuarantorRecord(tenantId, defaultCase.loan_id, payload.guarantor_member_id);
+    await getLoanGuarantorRecord(
+        tenantId,
+        defaultCase.loan_id,
+        payload.guarantor_member_id,
+        defaultCase.member_id
+    );
 
     const { data: existingOpenClaims, error: existingOpenClaimsError } = await adminSupabase
         .from("guarantor_claims")
