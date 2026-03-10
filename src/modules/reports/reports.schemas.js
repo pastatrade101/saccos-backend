@@ -26,6 +26,22 @@ const asyncExportSchema = z
         return ["1", "true", "yes", "on"].includes(normalized);
     });
 
+const optionalBooleanSchema = z
+    .union([z.boolean(), z.string()])
+    .optional()
+    .transform((value) => {
+        if (typeof value === "undefined") {
+            return undefined;
+        }
+
+        if (typeof value === "boolean") {
+            return value;
+        }
+
+        const normalized = String(value).trim().toLowerCase();
+        return ["1", "true", "yes", "on"].includes(normalized);
+    });
+
 const exportSchema = z.object({
     tenant_id: z.string().uuid().optional(),
     branch_id: z.string().uuid().optional(),
@@ -34,8 +50,12 @@ const exportSchema = z.object({
     reason_code: exceptionReasonEnum.optional(),
     status: z.string().max(64).optional(),
     as_of_date: z.string().date().optional(),
+    compare_as_of_date: z.string().date().optional(),
     from_date: z.string().date().optional(),
     to_date: z.string().date().optional(),
+    compare_from_date: z.string().date().optional(),
+    compare_to_date: z.string().date().optional(),
+    include_zero_balances: optionalBooleanSchema,
     format: formatEnum,
     async: asyncExportSchema
 });

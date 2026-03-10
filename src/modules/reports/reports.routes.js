@@ -40,6 +40,20 @@ router.get(
     controller.trialBalance
 );
 router.get(
+    "/balance-sheet/export",
+    authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER, ROLES.AUDITOR], { allowInternalOps: false }),
+    requireFeature("advanced_reports"),
+    validate(exportSchema, "query"),
+    controller.balanceSheet
+);
+router.get(
+    "/income-statement/export",
+    authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER, ROLES.AUDITOR], { allowInternalOps: false }),
+    requireFeature("advanced_reports"),
+    validate(exportSchema, "query"),
+    controller.incomeStatement
+);
+router.get(
     "/cash-position/export",
     authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER, ROLES.TELLER, ROLES.AUDITOR], { allowInternalOps: false }),
     validate(exportSchema, "query"),

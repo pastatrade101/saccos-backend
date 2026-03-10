@@ -116,6 +116,8 @@ Phase 2 execution artifacts in `docs/` and `supabase/sql/`:
 ## Phase 3: Financial Statements and Period Governance (2 weeks)
 Priority: `Important`
 
+Status (March 10, 2026): Kickoff implemented with Balance Sheet + Income Statement exports (sync/async), financial statement run/snapshot persistence, and closed-period guardrail trigger for journal posting.
+
 Focus:
 
 - Add statutory financial statements from GL with period-safe reporting.
@@ -135,6 +137,12 @@ Suggested entities:
 Exit criteria:
 
 - Monthly/quarterly financial statements generated directly from posted journals.
+
+Phase 3 execution artifacts in `docs/` and `supabase/sql/`:
+
+- [phase-3-financial-statements-execution-backlog.md](/Users/pastoryjoseph/Desktop/saccos-backend/docs/phase-3-financial-statements-execution-backlog.md)
+- [041_phase3_financial_statements.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/041_phase3_financial_statements.sql)
+- [042_phase3_financial_statements_rls.sql](/Users/pastoryjoseph/Desktop/saccos-backend/supabase/sql/042_phase3_financial_statements_rls.sql)
 
 ## Phase 4: Notification Orchestration (1-2 weeks)
 Priority: `Important`

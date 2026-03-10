@@ -3,6 +3,7 @@ const AppError = require("../../utils/app-error");
 const { assertBranchAccess, assertTenantAccess } = require("../../services/user-context.service");
 
 const TENANT_WIDE_ROLES = new Set(["super_admin", "auditor", "platform_admin"]);
+const ZERO_UUID = "00000000-0000-0000-0000-000000000000";
 
 function toNumber(value) {
     const numeric = Number(value || 0);
@@ -52,6 +53,231 @@ function getReasonSeverity(reasonCode) {
     }
 
     return "medium";
+}
+
+function todayIsoDate() {
+    return new Date().toISOString().slice(0, 10);
+}
+
+function round2(value) {
+    return Number(toNumber(value).toFixed(2));
+}
+
+function mapByAccountId(rows) {
+    return new Map((rows || []).map((row) => [row.account_id, row]));
+}
+
+function shouldIncludeAccountRow(amount, comparativeAmount, includeZeroBalances) {
+    if (includeZeroBalances) {
+        return true;
+    }
+
+    return Math.abs(toNumber(amount)) > 0.0001 || Math.abs(toNumber(comparativeAmount)) > 0.0001;
+}
+
+function safePctChange(currentAmount, comparativeAmount) {
+    const baseline = toNumber(comparativeAmount);
+    if (Math.abs(baseline) < 0.0001) {
+        return null;
+    }
+
+    return round2(((toNumber(currentAmount) - baseline) / baseline) * 100);
+}
+
+function resolveReportBranchScope(actor, query) {
+    if (query.branch_id) {
+        assertBranchAccess({ auth: actor }, query.branch_id);
+        return [query.branch_id];
+    }
+
+    const scopedBranchIds = getScopedBranchIds(actor);
+    if (scopedBranchIds && !scopedBranchIds.length) {
+        throw new AppError(403, "BRANCH_SCOPE_REQUIRED", "No branch access scope is configured for this user.");
+    }
+
+    return scopedBranchIds;
+}
+
+function isMissingFinancialStatementsObjects(error) {
+    const message = String(error?.message || "").toLowerCase();
+    return (
+        error?.code === "42P01"
+        || error?.code === "42883"
+        || message.includes("financial_statement_runs")
+        || message.includes("financial_snapshot_periods")
+        || message.includes("financial_statement_account_balances")
+    );
+}
+
+function toFinancialStatementsSchemaError(error) {
+    return new AppError(
+        500,
+        "FINANCIAL_STATEMENTS_SCHEMA_MISSING",
+        "Financial statement schema is missing. Apply SQL migrations 041_phase3_financial_statements.sql and 042_phase3_financial_statements_rls.sql.",
+        error
+    );
+}
+
+async function loadFinancialStatementBalances({ tenantId, fromDate = null, toDate = null, branchIds = null }) {
+    const rpcPayload = {
+        p_tenant_id: tenantId,
+        p_from_date: fromDate,
+        p_to_date: toDate,
+        p_branch_ids: branchIds && branchIds.length ? branchIds : null
+    };
+
+    const { data, error } = await adminSupabase.rpc("financial_statement_account_balances", rpcPayload);
+
+    if (error) {
+        if (isMissingFinancialStatementsObjects(error)) {
+            throw toFinancialStatementsSchemaError(error);
+        }
+
+        throw new AppError(
+            500,
+            "FINANCIAL_STATEMENT_FETCH_FAILED",
+            "Unable to load financial statement balances.",
+            error
+        );
+    }
+
+    return data || [];
+}
+
+function normalizeIncomeStatementWindow(query) {
+    const toDate = query.to_date || todayIsoDate();
+    const defaultFromDate = `${String(toDate).slice(0, 4)}-01-01`;
+    const fromDate = query.from_date || defaultFromDate;
+
+    if (fromDate > toDate) {
+        throw new AppError(
+            400,
+            "INVALID_REPORT_PERIOD",
+            "`from_date` cannot be after `to_date` for income statement."
+        );
+    }
+
+    if ((query.compare_from_date && !query.compare_to_date) || (!query.compare_from_date && query.compare_to_date)) {
+        throw new AppError(
+            400,
+            "INVALID_COMPARATIVE_PERIOD",
+            "Provide both `compare_from_date` and `compare_to_date` for comparative income statement."
+        );
+    }
+
+    if (query.compare_from_date && query.compare_from_date > query.compare_to_date) {
+        throw new AppError(
+            400,
+            "INVALID_COMPARATIVE_PERIOD",
+            "`compare_from_date` cannot be after `compare_to_date`."
+        );
+    }
+
+    return {
+        fromDate,
+        toDate,
+        compareFromDate: query.compare_from_date || null,
+        compareToDate: query.compare_to_date || null
+    };
+}
+
+async function persistFinancialStatementRun({
+    statementType,
+    actor,
+    tenantId,
+    branchIds,
+    periodStartDate = null,
+    periodEndDate = null,
+    asOfDate = null,
+    format,
+    rowCount,
+    totals,
+    comparativeTotals = null,
+    metadata = {}
+}) {
+    const branchId = branchIds && branchIds.length === 1 ? branchIds[0] : null;
+    const branchScopeKey = branchId || ZERO_UUID;
+
+    const runPayload = {
+        tenant_id: tenantId,
+        branch_id: branchId,
+        statement_type: statementType,
+        period_start_date: periodStartDate,
+        period_end_date: periodEndDate,
+        as_of_date: asOfDate,
+        format: format || "csv",
+        report_key: statementType,
+        requested_by: actor.user.id,
+        row_count: Math.max(0, Number(rowCount || 0)),
+        totals_json: totals || {},
+        comparative_totals_json: comparativeTotals || null,
+        metadata_json: metadata || {}
+    };
+
+    const { data: runData, error: runError } = await adminSupabase
+        .from("financial_statement_runs")
+        .insert(runPayload)
+        .select("id")
+        .single();
+
+    if (runError || !runData?.id) {
+        if (isMissingFinancialStatementsObjects(runError)) {
+            throw toFinancialStatementsSchemaError(runError);
+        }
+
+        throw new AppError(
+            500,
+            "FINANCIAL_STATEMENT_RUN_LOG_FAILED",
+            "Unable to record financial statement run metadata.",
+            runError
+        );
+    }
+
+    const snapshotStartDate = periodStartDate || asOfDate;
+    const snapshotEndDate = periodEndDate || asOfDate;
+
+    if (!snapshotStartDate || !snapshotEndDate) {
+        return runData.id;
+    }
+
+    const snapshotPayload = {
+        tenant_id: tenantId,
+        branch_id: branchId,
+        statement_type: statementType,
+        period_start_date: snapshotStartDate,
+        period_end_date: snapshotEndDate,
+        branch_scope_key: branchScopeKey,
+        snapshot_key: `${statementType}:${snapshotStartDate}:${snapshotEndDate}:${branchScopeKey}`,
+        snapshot_json: {
+            totals: totals || {},
+            comparative_totals: comparativeTotals || null,
+            row_count: Math.max(0, Number(rowCount || 0)),
+            metadata: metadata || {}
+        },
+        source_run_id: runData.id,
+        created_by: actor.user.id
+    };
+
+    const { error: snapshotError } = await adminSupabase
+        .from("financial_snapshot_periods")
+        .upsert(snapshotPayload, {
+            onConflict: "tenant_id,branch_scope_key,statement_type,period_start_date,period_end_date"
+        });
+
+    if (snapshotError) {
+        if (isMissingFinancialStatementsObjects(snapshotError)) {
+            throw toFinancialStatementsSchemaError(snapshotError);
+        }
+
+        throw new AppError(
+            500,
+            "FINANCIAL_SNAPSHOT_WRITE_FAILED",
+            "Unable to persist financial snapshot period.",
+            snapshotError
+        );
+    }
+
+    return runData.id;
 }
 
 async function fetchRows(viewName, tenantId, queryBuilder) {
@@ -148,6 +374,303 @@ async function trialBalance(actor, query) {
     return {
         title: "Trial Balance",
         filename: "trial-balance",
+        rows
+    };
+}
+
+async function balanceSheet(actor, query) {
+    const tenantId = query.tenant_id || actor.tenantId;
+    assertTenantAccess({ auth: actor }, tenantId);
+
+    const asOfDate = query.as_of_date || todayIsoDate();
+    const compareAsOfDate = query.compare_as_of_date || null;
+    const includeZeroBalances = query.include_zero_balances === true;
+    const branchIds = resolveReportBranchScope(actor, query);
+
+    const [currentRows, comparativeRows] = await Promise.all([
+        loadFinancialStatementBalances({
+            tenantId,
+            fromDate: null,
+            toDate: asOfDate,
+            branchIds
+        }),
+        compareAsOfDate
+            ? loadFinancialStatementBalances({
+                tenantId,
+                fromDate: null,
+                toDate: compareAsOfDate,
+                branchIds
+            })
+            : Promise.resolve([])
+    ]);
+
+    const comparativeMap = mapByAccountId(comparativeRows);
+    const groupedCurrent = {
+        asset: [],
+        liability: [],
+        equity: []
+    };
+
+    (currentRows || [])
+        .filter((row) => ["asset", "liability", "equity"].includes(row.account_type))
+        .forEach((row) => {
+            const comparative = comparativeMap.get(row.account_id);
+            const comparativeAmount = toNumber(comparative?.amount);
+
+            if (!shouldIncludeAccountRow(row.amount, comparativeAmount, includeZeroBalances)) {
+                return;
+            }
+
+            groupedCurrent[row.account_type].push({
+                row_type: "account",
+                section: row.account_type.toUpperCase(),
+                account_code: row.account_code,
+                account_name: row.account_name,
+                amount: round2(row.amount),
+                comparative_amount: compareAsOfDate ? round2(comparativeAmount) : null,
+                change_amount: compareAsOfDate ? round2(toNumber(row.amount) - comparativeAmount) : null,
+                change_pct: compareAsOfDate ? safePctChange(row.amount, comparativeAmount) : null
+            });
+        });
+
+    Object.keys(groupedCurrent).forEach((key) => {
+        groupedCurrent[key] = groupedCurrent[key].sort((left, right) => String(left.account_code).localeCompare(String(right.account_code)));
+    });
+
+    const totals = {
+        total_assets: round2(groupedCurrent.asset.reduce((sum, row) => sum + toNumber(row.amount), 0)),
+        total_liabilities: round2(groupedCurrent.liability.reduce((sum, row) => sum + toNumber(row.amount), 0)),
+        total_equity: round2(groupedCurrent.equity.reduce((sum, row) => sum + toNumber(row.amount), 0))
+    };
+
+    const comparativeTotals = compareAsOfDate
+        ? {
+            total_assets: round2(groupedCurrent.asset.reduce((sum, row) => sum + toNumber(row.comparative_amount), 0)),
+            total_liabilities: round2(groupedCurrent.liability.reduce((sum, row) => sum + toNumber(row.comparative_amount), 0)),
+            total_equity: round2(groupedCurrent.equity.reduce((sum, row) => sum + toNumber(row.comparative_amount), 0))
+        }
+        : null;
+
+    totals.balance_check = round2(totals.total_assets - (totals.total_liabilities + totals.total_equity));
+    if (comparativeTotals) {
+        comparativeTotals.balance_check = round2(
+            comparativeTotals.total_assets - (comparativeTotals.total_liabilities + comparativeTotals.total_equity)
+        );
+    }
+
+    const rows = [
+        ...groupedCurrent.asset,
+        {
+            row_type: "total",
+            section: "ASSET",
+            account_code: "",
+            account_name: "Total Assets",
+            amount: totals.total_assets,
+            comparative_amount: comparativeTotals ? comparativeTotals.total_assets : null,
+            change_amount: comparativeTotals ? round2(totals.total_assets - comparativeTotals.total_assets) : null,
+            change_pct: comparativeTotals ? safePctChange(totals.total_assets, comparativeTotals.total_assets) : null
+        },
+        ...groupedCurrent.liability,
+        {
+            row_type: "total",
+            section: "LIABILITY",
+            account_code: "",
+            account_name: "Total Liabilities",
+            amount: totals.total_liabilities,
+            comparative_amount: comparativeTotals ? comparativeTotals.total_liabilities : null,
+            change_amount: comparativeTotals ? round2(totals.total_liabilities - comparativeTotals.total_liabilities) : null,
+            change_pct: comparativeTotals ? safePctChange(totals.total_liabilities, comparativeTotals.total_liabilities) : null
+        },
+        ...groupedCurrent.equity,
+        {
+            row_type: "total",
+            section: "EQUITY",
+            account_code: "",
+            account_name: "Total Equity",
+            amount: totals.total_equity,
+            comparative_amount: comparativeTotals ? comparativeTotals.total_equity : null,
+            change_amount: comparativeTotals ? round2(totals.total_equity - comparativeTotals.total_equity) : null,
+            change_pct: comparativeTotals ? safePctChange(totals.total_equity, comparativeTotals.total_equity) : null
+        },
+        {
+            row_type: "check",
+            section: "BALANCE_CHECK",
+            account_code: "",
+            account_name: "Assets - (Liabilities + Equity)",
+            amount: totals.balance_check,
+            comparative_amount: comparativeTotals ? comparativeTotals.balance_check : null,
+            change_amount: comparativeTotals ? round2(totals.balance_check - comparativeTotals.balance_check) : null,
+            change_pct: comparativeTotals ? safePctChange(totals.balance_check, comparativeTotals.balance_check) : null
+        }
+    ];
+
+    await persistFinancialStatementRun({
+        statementType: "balance_sheet",
+        actor,
+        tenantId,
+        branchIds,
+        periodStartDate: asOfDate,
+        periodEndDate: asOfDate,
+        asOfDate,
+        format: query.format,
+        rowCount: rows.length,
+        totals,
+        comparativeTotals,
+        metadata: {
+            compare_as_of_date: compareAsOfDate,
+            include_zero_balances: includeZeroBalances
+        }
+    });
+
+    const title = compareAsOfDate
+        ? `Balance Sheet (As of ${asOfDate}, Comparative ${compareAsOfDate})`
+        : `Balance Sheet (As of ${asOfDate})`;
+
+    return {
+        title,
+        filename: "balance-sheet",
+        rows
+    };
+}
+
+async function incomeStatement(actor, query) {
+    const tenantId = query.tenant_id || actor.tenantId;
+    assertTenantAccess({ auth: actor }, tenantId);
+
+    const includeZeroBalances = query.include_zero_balances === true;
+    const branchIds = resolveReportBranchScope(actor, query);
+    const {
+        fromDate,
+        toDate,
+        compareFromDate,
+        compareToDate
+    } = normalizeIncomeStatementWindow(query);
+
+    const [currentRows, comparativeRows] = await Promise.all([
+        loadFinancialStatementBalances({
+            tenantId,
+            fromDate,
+            toDate,
+            branchIds
+        }),
+        compareFromDate && compareToDate
+            ? loadFinancialStatementBalances({
+                tenantId,
+                fromDate: compareFromDate,
+                toDate: compareToDate,
+                branchIds
+            })
+            : Promise.resolve([])
+    ]);
+
+    const comparativeMap = mapByAccountId(comparativeRows);
+    const groupedCurrent = {
+        income: [],
+        expense: []
+    };
+
+    (currentRows || [])
+        .filter((row) => ["income", "expense"].includes(row.account_type))
+        .forEach((row) => {
+            const comparative = comparativeMap.get(row.account_id);
+            const comparativeAmount = toNumber(comparative?.amount);
+
+            if (!shouldIncludeAccountRow(row.amount, comparativeAmount, includeZeroBalances)) {
+                return;
+            }
+
+            groupedCurrent[row.account_type].push({
+                row_type: "account",
+                section: row.account_type.toUpperCase(),
+                account_code: row.account_code,
+                account_name: row.account_name,
+                amount: round2(row.amount),
+                comparative_amount: compareFromDate && compareToDate ? round2(comparativeAmount) : null,
+                change_amount: compareFromDate && compareToDate ? round2(toNumber(row.amount) - comparativeAmount) : null,
+                change_pct: compareFromDate && compareToDate ? safePctChange(row.amount, comparativeAmount) : null
+            });
+        });
+
+    groupedCurrent.income = groupedCurrent.income.sort((left, right) => String(left.account_code).localeCompare(String(right.account_code)));
+    groupedCurrent.expense = groupedCurrent.expense.sort((left, right) => String(left.account_code).localeCompare(String(right.account_code)));
+
+    const totals = {
+        total_income: round2(groupedCurrent.income.reduce((sum, row) => sum + toNumber(row.amount), 0)),
+        total_expenses: round2(groupedCurrent.expense.reduce((sum, row) => sum + toNumber(row.amount), 0))
+    };
+    totals.net_surplus = round2(totals.total_income - totals.total_expenses);
+
+    const comparativeTotals = compareFromDate && compareToDate
+        ? {
+            total_income: round2(groupedCurrent.income.reduce((sum, row) => sum + toNumber(row.comparative_amount), 0)),
+            total_expenses: round2(groupedCurrent.expense.reduce((sum, row) => sum + toNumber(row.comparative_amount), 0))
+        }
+        : null;
+    if (comparativeTotals) {
+        comparativeTotals.net_surplus = round2(comparativeTotals.total_income - comparativeTotals.total_expenses);
+    }
+
+    const rows = [
+        ...groupedCurrent.income,
+        {
+            row_type: "total",
+            section: "INCOME",
+            account_code: "",
+            account_name: "Total Income",
+            amount: totals.total_income,
+            comparative_amount: comparativeTotals ? comparativeTotals.total_income : null,
+            change_amount: comparativeTotals ? round2(totals.total_income - comparativeTotals.total_income) : null,
+            change_pct: comparativeTotals ? safePctChange(totals.total_income, comparativeTotals.total_income) : null
+        },
+        ...groupedCurrent.expense,
+        {
+            row_type: "total",
+            section: "EXPENSE",
+            account_code: "",
+            account_name: "Total Expenses",
+            amount: totals.total_expenses,
+            comparative_amount: comparativeTotals ? comparativeTotals.total_expenses : null,
+            change_amount: comparativeTotals ? round2(totals.total_expenses - comparativeTotals.total_expenses) : null,
+            change_pct: comparativeTotals ? safePctChange(totals.total_expenses, comparativeTotals.total_expenses) : null
+        },
+        {
+            row_type: "result",
+            section: "NET_RESULT",
+            account_code: "",
+            account_name: "Net Surplus / (Deficit)",
+            amount: totals.net_surplus,
+            comparative_amount: comparativeTotals ? comparativeTotals.net_surplus : null,
+            change_amount: comparativeTotals ? round2(totals.net_surplus - comparativeTotals.net_surplus) : null,
+            change_pct: comparativeTotals ? safePctChange(totals.net_surplus, comparativeTotals.net_surplus) : null
+        }
+    ];
+
+    await persistFinancialStatementRun({
+        statementType: "income_statement",
+        actor,
+        tenantId,
+        branchIds,
+        periodStartDate: fromDate,
+        periodEndDate: toDate,
+        asOfDate: toDate,
+        format: query.format,
+        rowCount: rows.length,
+        totals,
+        comparativeTotals,
+        metadata: {
+            compare_from_date: compareFromDate,
+            compare_to_date: compareToDate,
+            include_zero_balances: includeZeroBalances
+        }
+    });
+
+    const title = compareFromDate && compareToDate
+        ? `Income Statement (${fromDate} to ${toDate}, Comparative ${compareFromDate} to ${compareToDate})`
+        : `Income Statement (${fromDate} to ${toDate})`;
+
+    return {
+        title,
+        filename: "income-statement",
         rows
     };
 }
@@ -607,6 +1130,8 @@ async function auditExceptionsReport(actor, query) {
 module.exports = {
     memberStatement,
     trialBalance,
+    balanceSheet,
+    incomeStatement,
     cashPosition,
     parReport,
     loanAging,

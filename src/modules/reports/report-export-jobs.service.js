@@ -66,6 +66,14 @@ const REPORT_REGISTRY = {
         loader: reportService.trialBalance,
         action: "export_trial_balance"
     },
+    balance_sheet: {
+        loader: reportService.balanceSheet,
+        action: "export_balance_sheet"
+    },
+    income_statement: {
+        loader: reportService.incomeStatement,
+        action: "export_income_statement"
+    },
     cash_position: {
         loader: reportService.cashPosition,
         action: "export_cash_position"

@@ -75,6 +75,14 @@ exports.trialBalance = asyncHandler(async (req, res) =>
     runExport(req, res, reportService.trialBalance, "export_trial_balance")
 );
 
+exports.balanceSheet = asyncHandler(async (req, res) =>
+    runExport(req, res, reportService.balanceSheet, "export_balance_sheet")
+);
+
+exports.incomeStatement = asyncHandler(async (req, res) =>
+    runExport(req, res, reportService.incomeStatement, "export_income_statement")
+);
+
 exports.cashPosition = asyncHandler(async (req, res) =>
     runExport(req, res, reportService.cashPosition, "export_cash_position")
 );

@@ -79,6 +79,8 @@ Apply in this exact sequence on a fresh environment:
 39. `supabase/sql/038_phase1_guarantor_exposure_policy.sql`
 40. `supabase/sql/039_phase2_maker_checker_engine.sql`
 41. `supabase/sql/040_phase2_maker_checker_engine_rls.sql`
+42. `supabase/sql/041_phase3_financial_statements.sql`
+43. `supabase/sql/042_phase3_financial_statements_rls.sql`
 
 For existing environments, run only new additive migrations and validate policy collisions before execution.
 
