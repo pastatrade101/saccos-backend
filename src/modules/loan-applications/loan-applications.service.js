@@ -541,6 +541,9 @@ function applyLoanApplicationListFilters(builder, { actor, query, tenantId, ownM
     } else if (actor.role === ROLES.BRANCH_MANAGER) {
         // Branch managers should process active checker queue only, not rejected rework items.
         scoped = scoped.in("status", ["submitted", "appraised", "approved", "disbursed"]);
+    } else if (actor.role === ROLES.TELLER) {
+        // Teller queue should only show loans pending disbursement.
+        scoped = scoped.eq("status", "approved");
     }
     if (query.member_id) scoped = scoped.eq("member_id", query.member_id);
     if (query.branch_id) {
