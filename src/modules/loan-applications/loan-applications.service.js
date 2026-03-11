@@ -303,6 +303,75 @@ async function listGuarantorRequests(actor, query = {}) {
     };
 }
 
+async function enrichLoanApplicationListDetails(rows, tenantId) {
+    const applicationIds = Array.from(new Set((rows || []).map((row) => row.id).filter(Boolean)));
+    if (!applicationIds.length) {
+        return rows || [];
+    }
+
+    const [{ data: guarantors, error: guarantorsError }, { data: collateralItems, error: collateralError }] = await Promise.all([
+        adminSupabase
+            .from("loan_guarantors")
+            .select(`
+                id,
+                application_id,
+                tenant_id,
+                member_id,
+                guaranteed_amount,
+                consent_status,
+                consented_at,
+                notes,
+                created_at,
+                members(id, full_name, member_no)
+            `)
+            .eq("tenant_id", tenantId)
+            .in("application_id", applicationIds),
+        adminSupabase
+            .from("collateral_items")
+            .select(`
+                id,
+                application_id,
+                tenant_id,
+                collateral_type,
+                description,
+                valuation_amount,
+                lien_reference,
+                documents_json,
+                created_at
+            `)
+            .eq("tenant_id", tenantId)
+            .in("application_id", applicationIds)
+    ]);
+
+    if (guarantorsError) {
+        throw new AppError(500, "LOAN_GUARANTORS_FETCH_FAILED", "Unable to load loan guarantors.", guarantorsError);
+    }
+
+    if (collateralError) {
+        throw new AppError(500, "COLLATERAL_ITEMS_FETCH_FAILED", "Unable to load collateral details.", collateralError);
+    }
+
+    const guarantorsByApplication = new Map();
+    for (const row of guarantors || []) {
+        const existing = guarantorsByApplication.get(row.application_id) || [];
+        existing.push(row);
+        guarantorsByApplication.set(row.application_id, existing);
+    }
+
+    const collateralByApplication = new Map();
+    for (const row of collateralItems || []) {
+        const existing = collateralByApplication.get(row.application_id) || [];
+        existing.push(row);
+        collateralByApplication.set(row.application_id, existing);
+    }
+
+    return (rows || []).map((row) => ({
+        ...row,
+        loan_guarantors: guarantorsByApplication.get(row.id) || [],
+        collateral_items: collateralByApplication.get(row.id) || []
+    }));
+}
+
 async function listLoanApplications(actor, query) {
     const tenantId = query.tenant_id || actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
@@ -341,15 +410,18 @@ async function listLoanApplications(actor, query) {
     }
 
     const rows = data || [];
+    const hydratedRows = actor.role === ROLES.BRANCH_MANAGER
+        ? await enrichLoanApplicationListDetails(rows, tenantId)
+        : rows;
     if (hasCursor) {
-        const lastRow = rows.length ? rows[rows.length - 1] : null;
+        const lastRow = hydratedRows.length ? hydratedRows[hydratedRows.length - 1] : null;
         return {
-            data: rows,
+            data: hydratedRows,
             pagination: {
                 mode: "cursor",
                 limit,
                 cursor,
-                next_cursor: rows.length === limit ? lastRow?.created_at || null : null,
+                next_cursor: hydratedRows.length === limit ? lastRow?.created_at || null : null,
                 total: null
             }
         };
@@ -360,7 +432,7 @@ async function listLoanApplications(actor, query) {
         : null;
 
     return {
-        data: rows,
+        data: hydratedRows,
         pagination: hasPagination
             ? {
                 page,
