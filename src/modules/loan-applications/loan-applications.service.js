@@ -387,8 +387,8 @@ function applyLoanApplicationListFilters(builder, { actor, query, tenantId, ownM
     if (query.status) {
         scoped = scoped.eq("status", query.status);
     } else if (actor.role === ROLES.BRANCH_MANAGER) {
-        // Branch managers handle checker flow after appraisal.
-        scoped = scoped.in("status", ["appraised", "approved", "disbursed", "rejected"]);
+        // Branch managers need visibility from submitted (guarantor pending) through checker/disbursement flow.
+        scoped = scoped.in("status", ["submitted", "appraised", "approved", "disbursed", "rejected"]);
     }
     if (query.member_id) scoped = scoped.eq("member_id", query.member_id);
     if (query.branch_id) {
