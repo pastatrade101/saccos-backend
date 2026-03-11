@@ -9,6 +9,14 @@ exports.list = asyncHandler(async (req, res) => {
     });
 });
 
+exports.listGuarantorRequests = asyncHandler(async (req, res) => {
+    const result = await service.listGuarantorRequests(req.auth, req.validated.query);
+    res.json({
+        data: result.data,
+        pagination: result.pagination
+    });
+});
+
 exports.create = asyncHandler(async (req, res) => {
     res.status(201).json({ data: await service.createLoanApplication(req.auth, req.validated.body) });
 });
@@ -39,4 +47,9 @@ exports.disburse = asyncHandler(async (req, res) => {
         return res.status(202).json({ data: result });
     }
     return res.status(201).json({ data: result });
+});
+
+exports.respondGuarantorConsent = asyncHandler(async (req, res) => {
+    const result = await service.respondGuarantorConsent(req.auth, req.params.id, req.validated.body);
+    res.json({ data: result });
 });

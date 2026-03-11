@@ -502,6 +502,7 @@ async function deleteTenant(actor, tenantId, payload) {
     await deleteRateLimitWindows(scope);
     await deleteByTenant("api_metrics", scope.tenantIds);
     await deleteByTenant("api_errors", scope.tenantIds);
+    await deleteByTenant("notification_dispatches", scope.tenantIds);
     await deleteIn("auth_otp_challenges", "user_id", scope.userIds);
     await deleteByTenant("report_export_jobs", scope.tenantIds);
     await deleteByTenant("import_job_rows", scope.tenantIds);

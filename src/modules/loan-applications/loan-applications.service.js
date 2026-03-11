@@ -3,6 +3,12 @@ const { ROLES } = require("../../constants/roles");
 const { getSubscriptionStatus } = require("../../services/subscription.service");
 const { assertBranchAccess, assertTenantAccess } = require("../../services/user-context.service");
 const { logAudit } = require("../../services/audit.service");
+const {
+    notifyLoanOfficerGuarantorDeclined,
+    notifyLoanOfficersApprovedForDisbursement,
+    notifyLoanOfficersNewApplication,
+    notifyLoanOfficersReappraisalNeeded
+} = require("../../services/branch-alerts.service");
 const financeService = require("../finance/finance.service");
 const creditRiskService = require("../credit-risk/credit-risk.service");
 const AppError = require("../../utils/app-error");
@@ -196,6 +202,105 @@ function ensureApplicationEditAllowed(actor, application) {
     if (!["draft", "rejected"].includes(application.status)) {
         throw new AppError(400, "LOAN_APPLICATION_LOCKED", "Only draft or rejected applications can be edited.");
     }
+}
+
+function assertAllGuarantorsAccepted(application) {
+    const guarantors = Array.isArray(application?.loan_guarantors) ? application.loan_guarantors : [];
+    if (!guarantors.length) {
+        return;
+    }
+
+    const unresolved = guarantors.filter((guarantor) => guarantor.consent_status !== "accepted");
+    if (!unresolved.length) {
+        return;
+    }
+
+    throw new AppError(
+        400,
+        "GUARANTOR_CONSENT_PENDING",
+        "All guarantors must accept before loan can proceed.",
+        {
+            unresolved_guarantors: unresolved.map((guarantor) => ({
+                member_id: guarantor.member_id,
+                consent_status: guarantor.consent_status || "pending",
+                guaranteed_amount: Number(guarantor.guaranteed_amount || 0)
+            }))
+        }
+    );
+}
+
+async function listGuarantorRequests(actor, query = {}) {
+    if (actor.role !== ROLES.MEMBER) {
+        throw new AppError(403, "FORBIDDEN", "Only members can view guarantor consent requests.");
+    }
+
+    const tenantId = query.tenant_id || actor.tenantId;
+    assertTenantAccess({ auth: actor }, tenantId);
+    const ownMember = await getMemberByUser(tenantId, actor.user.id);
+    const page = Math.max(Number(query.page || 1), 1);
+    const limit = Math.min(Math.max(Number(query.limit || 50), 1), 100);
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
+
+    let builder = adminSupabase
+        .from("loan_guarantors")
+        .select(`
+            id,
+            application_id,
+            tenant_id,
+            member_id,
+            guaranteed_amount,
+            consent_status,
+            consented_at,
+            notes,
+            created_at,
+            loan_applications!inner(
+                id,
+                tenant_id,
+                branch_id,
+                member_id,
+                product_id,
+                purpose,
+                requested_amount,
+                requested_term_count,
+                requested_repayment_frequency,
+                requested_interest_rate,
+                status,
+                created_at,
+                updated_at,
+                members(id, full_name, member_no)
+            )
+        `, { count: "exact" })
+        .eq("tenant_id", tenantId)
+        .eq("member_id", ownMember.id);
+
+    if (query.status) {
+        builder = builder.eq("consent_status", query.status);
+    }
+
+    const { data, error, count } = await builder
+        .order("created_at", { ascending: false })
+        .range(from, to);
+
+    if (error) {
+        throw new AppError(500, "GUARANTOR_REQUESTS_FETCH_FAILED", "Unable to load guarantor requests.", error);
+    }
+
+    return {
+        data: (data || []).map((row) => {
+            const application = row.loan_applications || null;
+            return {
+                ...row,
+                borrower: application?.members || null,
+                loan_application: application || null
+            };
+        }),
+        pagination: {
+            page,
+            limit,
+            total: count || 0
+        }
+    };
 }
 
 async function listLoanApplications(actor, query) {
@@ -525,12 +630,18 @@ async function submitLoanApplication(actor, applicationId) {
         afterData: data
     });
 
-    return getExpandedApplication(tenantId, applicationId);
+    const expanded = await getExpandedApplication(tenantId, applicationId);
+    await notifyLoanOfficersNewApplication({
+        actor,
+        application: expanded
+    });
+
+    return expanded;
 }
 
 async function appraiseLoanApplication(actor, applicationId, payload) {
-    if (actor.role !== ROLES.LOAN_OFFICER) {
-        throw new AppError(403, "FORBIDDEN", "Only loan officers can appraise applications.");
+    if (![ROLES.LOAN_OFFICER, ROLES.BRANCH_MANAGER].includes(actor.role)) {
+        throw new AppError(403, "FORBIDDEN", "Only loan officers or branch managers can appraise applications.");
     }
 
     const tenantId = actor.tenantId;
@@ -610,6 +721,8 @@ async function approveLoanApplication(actor, applicationId, payload) {
         throw new AppError(400, "MAKER_CHECKER_VIOLATION", "The application maker cannot approve the same application.");
     }
 
+    assertAllGuarantorsAccepted(existing);
+
     await creditRiskService.assertGuarantorExposureWithinLimits({
         tenantId,
         guarantors: existing.loan_guarantors || [],
@@ -679,7 +792,15 @@ async function approveLoanApplication(actor, applicationId, payload) {
         }
     });
 
-    return getExpandedApplication(tenantId, applicationId);
+    const expanded = await getExpandedApplication(tenantId, applicationId);
+    if (enoughApprovals) {
+        await notifyLoanOfficersApprovedForDisbursement({
+            actor,
+            application: expanded
+        });
+    }
+
+    return expanded;
 }
 
 async function rejectLoanApplication(actor, applicationId, payload) {
@@ -752,7 +873,14 @@ async function rejectLoanApplication(actor, applicationId, payload) {
         afterData: data
     });
 
-    return getExpandedApplication(tenantId, applicationId);
+    const expanded = await getExpandedApplication(tenantId, applicationId);
+    await notifyLoanOfficersReappraisalNeeded({
+        actor,
+        application: expanded,
+        reason: payload.reason || payload.notes || ""
+    });
+
+    return expanded;
 }
 
 async function disburseLoanApplication(actor, applicationId, payload) {
@@ -770,6 +898,8 @@ async function disburseLoanApplication(actor, applicationId, payload) {
     if (existing.loan_id) {
         throw new AppError(400, "LOAN_ALREADY_DISBURSED", "This application has already been disbursed.");
     }
+
+    assertAllGuarantorsAccepted(existing);
 
     assertBranchAccess({ auth: actor }, existing.branch_id);
 
@@ -852,13 +982,96 @@ async function disburseLoanApplication(actor, applicationId, payload) {
     };
 }
 
+async function respondGuarantorConsent(actor, applicationId, payload = {}) {
+    if (actor.role !== ROLES.MEMBER) {
+        throw new AppError(403, "FORBIDDEN", "Only guarantor members can respond to guarantor requests.");
+    }
+
+    const tenantId = payload.tenant_id || actor.tenantId;
+    assertTenantAccess({ auth: actor }, tenantId);
+    const guarantorMember = await getMemberByUser(tenantId, actor.user.id);
+    const application = await getExpandedApplication(tenantId, applicationId);
+
+    if (!["submitted", "appraised"].includes(application.status)) {
+        throw new AppError(
+            400,
+            "GUARANTOR_CONSENT_WINDOW_CLOSED",
+            "Guarantor response is only allowed while application is submitted or appraised."
+        );
+    }
+
+    const { data: current, error: currentError } = await adminSupabase
+        .from("loan_guarantors")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .eq("application_id", applicationId)
+        .eq("member_id", guarantorMember.id)
+        .maybeSingle();
+
+    if (currentError) {
+        throw new AppError(500, "GUARANTOR_CONSENT_LOOKUP_FAILED", "Unable to load guarantor assignment.", currentError);
+    }
+
+    if (!current) {
+        throw new AppError(404, "GUARANTOR_REQUEST_NOT_FOUND", "No guarantor request was found for your member profile.");
+    }
+
+    const patch = {
+        consent_status: payload.decision,
+        consented_at: new Date().toISOString(),
+        notes: Object.prototype.hasOwnProperty.call(payload, "notes")
+            ? (payload.notes || null)
+            : current.notes || null
+    };
+
+    const { error: updateError } = await adminSupabase
+        .from("loan_guarantors")
+        .update(patch)
+        .eq("tenant_id", tenantId)
+        .eq("application_id", applicationId)
+        .eq("member_id", guarantorMember.id);
+
+    if (updateError) {
+        throw new AppError(500, "GUARANTOR_CONSENT_UPDATE_FAILED", "Unable to update guarantor consent.", updateError);
+    }
+
+    await logAudit({
+        tenantId,
+        actorUserId: actor.user.id,
+        table: "loan_guarantors",
+        action: payload.decision === "accepted"
+            ? "LOAN_GUARANTOR_CONSENT_ACCEPTED"
+            : "LOAN_GUARANTOR_CONSENT_REJECTED",
+        entityType: "loan_guarantor",
+        entityId: current.id,
+        beforeData: current,
+        afterData: {
+            ...current,
+            ...patch
+        }
+    });
+
+    const expanded = await getExpandedApplication(tenantId, applicationId);
+    if (payload.decision === "rejected") {
+        await notifyLoanOfficerGuarantorDeclined({
+            actor,
+            application: expanded,
+            guarantorMemberId: guarantorMember.id
+        });
+    }
+
+    return expanded;
+}
+
 module.exports = {
     listLoanApplications,
+    listGuarantorRequests,
     createLoanApplication,
     updateLoanApplication,
     submitLoanApplication,
     appraiseLoanApplication,
     approveLoanApplication,
     rejectLoanApplication,
-    disburseLoanApplication
+    disburseLoanApplication,
+    respondGuarantorConsent
 };

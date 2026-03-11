@@ -7,6 +7,7 @@ const AppError = require("../../utils/app-error");
 const { assertBranchAccess, assertTenantAccess } = require("../../services/user-context.service");
 const { logAudit } = require("../../services/audit.service");
 const { sendExport } = require("../../services/export.service");
+const { notifyTellerCashMismatch } = require("../../services/branch-alerts.service");
 const { ROLES } = require("../../constants/roles");
 
 function sanitizeFileName(fileName) {
@@ -251,6 +252,14 @@ async function closeSession(actor, sessionId, payload) {
         beforeData: session,
         afterData: data
     });
+
+    if (Number(variance || 0) !== 0) {
+        await notifyTellerCashMismatch({
+            actor,
+            session: data,
+            variance
+        });
+    }
 
     return data;
 }

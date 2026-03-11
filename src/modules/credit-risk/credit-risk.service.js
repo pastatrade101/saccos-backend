@@ -1,6 +1,12 @@
 const { adminSupabase } = require("../../config/supabase");
 const { ROLES } = require("../../constants/roles");
 const { logAudit } = require("../../services/audit.service");
+const {
+    notifyDefaultCaseClaimReady,
+    notifyDefaultCaseOpened,
+    notifyGuarantorClaimSubmitted,
+    notifyLoanOfficersDefaultFlag
+} = require("../../services/branch-alerts.service");
 const { runObservedJob } = require("../../services/observability.service");
 const { assertBranchAccess, assertTenantAccess } = require("../../services/user-context.service");
 const env = require("../../config/env");
@@ -792,6 +798,15 @@ async function createDefaultCase(actor, payload) {
         afterData: data
     });
 
+    await notifyDefaultCaseOpened({
+        actor,
+        defaultCase: data
+    });
+    await notifyLoanOfficersDefaultFlag({
+        actor,
+        defaultCase: data
+    });
+
     return data;
 }
 
@@ -833,6 +848,13 @@ async function transitionDefaultCase(actor, id, payload) {
         beforeData: current,
         afterData: data
     });
+
+    if (payload.to_status === "claim_ready" && current.status !== "claim_ready") {
+        await notifyDefaultCaseClaimReady({
+            actor,
+            defaultCase: data
+        });
+    }
 
     return data;
 }
@@ -1335,6 +1357,11 @@ async function submitGuarantorClaim(actor, claimId, payload = {}) {
         afterData: data
     });
 
+    await notifyGuarantorClaimSubmitted({
+        actor,
+        claim: data
+    });
+
     return data;
 }
 
@@ -1728,9 +1755,11 @@ async function runDefaultDetectionForTenant({
                 : "Auto-opened by manual default detection run."
         };
 
-        const { error } = await adminSupabase
+        const { data: createdCase, error } = await adminSupabase
             .from("loan_default_cases")
-            .insert(insertPayload);
+            .insert(insertPayload)
+            .select("id, tenant_id, branch_id, loan_id, member_id, dpd_days")
+            .single();
 
         if (error) {
             if (String(error.code || "") === "23505") {
@@ -1742,6 +1771,15 @@ async function runDefaultDetectionForTenant({
         }
 
         summary.created_cases += 1;
+
+        await notifyDefaultCaseOpened({
+            actor,
+            defaultCase: createdCase || insertPayload
+        });
+        await notifyLoanOfficersDefaultFlag({
+            actor,
+            defaultCase: createdCase || insertPayload
+        });
     }
 
     if (actor?.user?.id) {

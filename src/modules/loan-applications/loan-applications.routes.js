@@ -21,6 +21,13 @@ router.get(
     controller.list
 );
 
+router.get(
+    "/guarantor-requests",
+    authorize([ROLES.MEMBER], { allowInternalOps: false }),
+    validate(schemas.guarantorRequestsQuerySchema, "query"),
+    controller.listGuarantorRequests
+);
+
 router.post(
     "/",
     authorize([ROLES.BRANCH_MANAGER, ROLES.LOAN_OFFICER, ROLES.TELLER, ROLES.MEMBER], { allowInternalOps: false }),
@@ -43,7 +50,7 @@ router.post(
 
 router.post(
     "/:id/appraise",
-    authorize([ROLES.LOAN_OFFICER], { allowInternalOps: false }),
+    authorize([ROLES.LOAN_OFFICER, ROLES.BRANCH_MANAGER], { allowInternalOps: false }),
     validate(schemas.appraiseLoanApplicationSchema),
     controller.appraise
 );
@@ -68,6 +75,13 @@ router.post(
     validate(schemas.disburseApprovedLoanSchema),
     idempotency,
     controller.disburse
+);
+
+router.post(
+    "/:id/guarantor-consent",
+    authorize([ROLES.MEMBER], { allowInternalOps: false }),
+    validate(schemas.guarantorConsentSchema),
+    controller.respondGuarantorConsent
 );
 
 module.exports = router;

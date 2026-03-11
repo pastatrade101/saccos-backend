@@ -2,22 +2,30 @@ const env = require("../config/env");
 const AppError = require("../utils/app-error");
 const { runObservedJob } = require("./observability.service");
 
-async function sendOtpSms({ to, text, reference }) {
-    return runObservedJob("sms.otp.send", {}, async () => {
-        const authorizationHeader = env.otpSmsAuthorization
-            ? env.otpSmsAuthorization
-            : env.otpSmsBasicUsername && env.otpSmsBasicPassword
-                ? `Basic ${Buffer.from(
-                    `${env.otpSmsBasicUsername}:${env.otpSmsBasicPassword}`
-                ).toString("base64")}`
-                : "";
+function getAuthorizationHeader() {
+    return env.otpSmsAuthorization
+        ? env.otpSmsAuthorization
+        : env.otpSmsBasicUsername && env.otpSmsBasicPassword
+            ? `Basic ${Buffer.from(
+                `${env.otpSmsBasicUsername}:${env.otpSmsBasicPassword}`
+            ).toString("base64")}`
+            : "";
+}
+
+async function sendSmsWithGateway({
+    to,
+    text,
+    reference,
+    jobKey,
+    configMissingCode,
+    requestFailedCode,
+    deliveryFailedCode
+}) {
+    return runObservedJob(jobKey, {}, async () => {
+        const authorizationHeader = getAuthorizationHeader();
 
         if (!authorizationHeader) {
-            throw new AppError(
-                500,
-                "OTP_SMS_CONFIG_MISSING",
-                "OTP SMS authorization is not configured."
-            );
+            throw new AppError(500, configMissingCode, "SMS authorization is not configured.");
         }
 
         let response;
@@ -41,7 +49,7 @@ async function sendOtpSms({ to, text, reference }) {
         } catch (error) {
             throw new AppError(
                 502,
-                "OTP_SMS_REQUEST_FAILED",
+                requestFailedCode,
                 "Unable to reach SMS gateway.",
                 { message: error instanceof Error ? error.message : "Request failed." }
             );
@@ -60,9 +68,9 @@ async function sendOtpSms({ to, text, reference }) {
         if (!response.ok) {
             throw new AppError(
                 502,
-                "OTP_SMS_DELIVERY_FAILED",
+                deliveryFailedCode,
                 (payload && typeof payload.message === "string" && payload.message) ||
-                    "SMS gateway rejected OTP delivery request.",
+                    "SMS gateway rejected delivery request.",
                 payload || { status: response.status }
             );
         }
@@ -70,7 +78,7 @@ async function sendOtpSms({ to, text, reference }) {
         if (payload && payload.success === false) {
             throw new AppError(
                 502,
-                "OTP_SMS_DELIVERY_FAILED",
+                deliveryFailedCode,
                 payload.message || "SMS gateway reported delivery failure.",
                 payload
             );
@@ -85,7 +93,7 @@ async function sendOtpSms({ to, text, reference }) {
             if (failedMessage) {
                 throw new AppError(
                     502,
-                    "OTP_SMS_DELIVERY_FAILED",
+                    deliveryFailedCode,
                     failedMessage?.status?.description || "SMS gateway rejected message delivery.",
                     payload
                 );
@@ -98,6 +106,31 @@ async function sendOtpSms({ to, text, reference }) {
     });
 }
 
+async function sendOtpSms({ to, text, reference }) {
+    return sendSmsWithGateway({
+        to,
+        text,
+        reference,
+        jobKey: "sms.otp.send",
+        configMissingCode: "OTP_SMS_CONFIG_MISSING",
+        requestFailedCode: "OTP_SMS_REQUEST_FAILED",
+        deliveryFailedCode: "OTP_SMS_DELIVERY_FAILED"
+    });
+}
+
+async function sendTransactionalSms({ to, text, reference }) {
+    return sendSmsWithGateway({
+        to,
+        text,
+        reference,
+        jobKey: "sms.transactional.send",
+        configMissingCode: "ALERT_SMS_CONFIG_MISSING",
+        requestFailedCode: "ALERT_SMS_REQUEST_FAILED",
+        deliveryFailedCode: "ALERT_SMS_DELIVERY_FAILED"
+    });
+}
+
 module.exports = {
-    sendOtpSms
+    sendOtpSms,
+    sendTransactionalSms
 };

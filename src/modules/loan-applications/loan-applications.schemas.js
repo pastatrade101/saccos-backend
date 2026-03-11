@@ -72,6 +72,19 @@ const loanApplicationQuerySchema = z.object({
     limit: z.coerce.number().int().positive().max(100).default(50)
 });
 
+const guarantorRequestsQuerySchema = z.object({
+    tenant_id: uuid.optional(),
+    status: z.enum(["pending", "accepted", "rejected"]).optional(),
+    page: z.coerce.number().int().positive().default(1),
+    limit: z.coerce.number().int().positive().max(100).default(50)
+});
+
+const guarantorConsentSchema = z.object({
+    tenant_id: uuid.optional(),
+    decision: z.enum(["accepted", "rejected"]),
+    notes: z.string().trim().min(2).max(255).optional().nullable()
+});
+
 module.exports = {
     createLoanApplicationSchema,
     updateLoanApplicationSchema,
@@ -79,5 +92,7 @@ module.exports = {
     approveLoanApplicationSchema,
     rejectLoanApplicationSchema,
     disburseApprovedLoanSchema,
-    loanApplicationQuerySchema
+    loanApplicationQuerySchema,
+    guarantorRequestsQuerySchema,
+    guarantorConsentSchema
 };

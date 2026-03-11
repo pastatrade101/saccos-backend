@@ -2,6 +2,11 @@ const { adminSupabase } = require("../../config/supabase");
 const env = require("../../config/env");
 const { ROLES } = require("../../constants/roles");
 const { logAudit } = require("../../services/audit.service");
+const {
+    notifyApprovalOutcomeToMaker,
+    notifyApprovalRequestPending,
+    notifyTellerWithdrawalApprovalRequired
+} = require("../../services/branch-alerts.service");
 const { getSubscriptionStatus } = require("../../services/subscription.service");
 const { assertBranchAccess, assertTenantAccess } = require("../../services/user-context.service");
 const AppError = require("../../utils/app-error");
@@ -340,6 +345,17 @@ async function createApprovalRequest({
         afterData: data
     });
 
+    await notifyApprovalRequestPending({
+        actor,
+        request: data
+    });
+    if (data.operation_key === "finance.withdraw") {
+        await notifyTellerWithdrawalApprovalRequired({
+            actor,
+            request: data
+        });
+    }
+
     return {
         approval_required: true,
         status: "pending_approval",
@@ -447,6 +463,12 @@ async function ensureOperationApproval({
         if (expiredError) {
             throw new AppError(500, "APPROVAL_REQUEST_EXPIRE_FAILED", "Unable to expire stale approval request.", expiredError);
         }
+
+        await notifyApprovalOutcomeToMaker({
+            actor,
+            request: expiredRow || request,
+            outcome: "expired"
+        });
 
         throw new AppError(409, "APPROVAL_REQUEST_EXPIRED", "Approval request has expired; create a new request.", {
             approval_request_id: expiredRow?.id || request.id
@@ -603,6 +625,14 @@ async function decideRequest(actor, requestId, payload = {}, decision = "approve
         beforeData: request,
         afterData: updated
     });
+
+    if (["approved", "rejected"].includes(updated.status)) {
+        await notifyApprovalOutcomeToMaker({
+            actor,
+            request: updated,
+            outcome: updated.status
+        });
+    }
 
     return {
         ...updated,

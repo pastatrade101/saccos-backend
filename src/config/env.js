@@ -65,6 +65,10 @@ const envSchema = z.object({
     OTP_SMS_BASIC_USERNAME: z.string().min(1).optional(),
     OTP_SMS_BASIC_PASSWORD: z.string().min(1).optional(),
     OTP_HASH_SECRET: z.string().min(16).optional(),
+    BRANCH_ALERT_SMS_ENABLED: z
+        .string()
+        .optional()
+        .transform((value) => parseBooleanEnv(value, true)),
     IDEMPOTENCY_IN_PROGRESS_TTL_MS: z.coerce.number().int().nonnegative().default(300000),
     PASSWORD_SETUP_REDIRECT_URL: z.string().url().optional(),
     MEMBER_IMPORT_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(3),
@@ -147,6 +151,7 @@ module.exports = {
     otpSmsBasicUsername: env.OTP_SMS_BASIC_USERNAME || "",
     otpSmsBasicPassword: env.OTP_SMS_BASIC_PASSWORD || "",
     otpHashSecret: env.OTP_HASH_SECRET || env.SUPABASE_SERVICE_ROLE_KEY,
+    branchAlertSmsEnabled: env.BRANCH_ALERT_SMS_ENABLED,
     idempotencyInProgressTtlMs: env.IDEMPOTENCY_IN_PROGRESS_TTL_MS,
     passwordSetupRedirectUrl: env.PASSWORD_SETUP_REDIRECT_URL || "",
     memberImportRateLimitMax: env.MEMBER_IMPORT_RATE_LIMIT_MAX,
