@@ -8,8 +8,19 @@ const DEFAULT_WINDOW_MINUTES = 60;
 const MAX_WINDOW_MINUTES = 7 * 24 * 60;
 const DEFAULT_LIST_LIMIT = 20;
 const MAX_LIST_LIMIT = 100;
-const METRIC_BATCH_SIZE = 1000;
-const MAX_METRIC_ROWS = 50000;
+const METRIC_BATCH_SIZE = Math.max(
+    200,
+    Number(process.env.PLATFORM_METRICS_BATCH_SIZE || 1000)
+);
+const MAX_METRIC_ROWS = Math.max(
+    METRIC_BATCH_SIZE,
+    Number(process.env.PLATFORM_METRICS_MAX_ROWS || 15000)
+);
+const OVERVIEW_CACHE_TTL_MS = Math.max(
+    0,
+    Number(process.env.PLATFORM_OPERATIONS_OVERVIEW_CACHE_TTL_MS || 15000)
+);
+const operationsOverviewCache = new Map();
 
 function isMissingRelationError(error) {
     const code = String(error?.code || "");
@@ -111,6 +122,53 @@ async function fetchMetricRows({ columns, fromIso, tenantId }) {
     }
 
     return output;
+}
+
+function buildOverviewCacheKey({
+    tenantId,
+    windowMinutes,
+    sortBy,
+    sortDir,
+    errorsLimit,
+    slowLimit
+}) {
+    return JSON.stringify({
+        tenant_id: tenantId || null,
+        window_minutes: windowMinutes,
+        sort_by: sortBy,
+        sort_dir: sortDir,
+        errors_limit: errorsLimit,
+        slow_limit: slowLimit
+    });
+}
+
+function getCachedOverview(cacheKey) {
+    if (!OVERVIEW_CACHE_TTL_MS) {
+        return null;
+    }
+
+    const cached = operationsOverviewCache.get(cacheKey);
+    if (!cached) {
+        return null;
+    }
+
+    if (cached.expiresAt <= Date.now()) {
+        operationsOverviewCache.delete(cacheKey);
+        return null;
+    }
+
+    return cached.value;
+}
+
+function setCachedOverview(cacheKey, value) {
+    if (!OVERVIEW_CACHE_TTL_MS) {
+        return;
+    }
+
+    operationsOverviewCache.set(cacheKey, {
+        value,
+        expiresAt: Date.now() + OVERVIEW_CACHE_TTL_MS
+    });
 }
 
 async function fetchSmsDispatchRows({ fromIso, tenantId }) {
@@ -550,6 +608,20 @@ async function getOperationsOverview(query = {}) {
     const sortDir = normalizeSortDir(query.sort_dir);
     const errorsLimit = normalizeLimit(query.errors_limit, 20);
     const slowLimit = normalizeLimit(query.slow_limit, 10);
+    const cacheKey = buildOverviewCacheKey({
+        tenantId,
+        windowMinutes,
+        sortBy,
+        sortDir,
+        errorsLimit,
+        slowLimit
+    });
+    const cached = getCachedOverview(cacheKey);
+
+    if (cached) {
+        return cached;
+    }
+
     const fromIso = new Date(Date.now() - windowMinutes * 60 * 1000).toISOString();
 
     const [rows, smsRows, recentErrors] = await Promise.all([
@@ -588,7 +660,7 @@ async function getOperationsOverview(query = {}) {
         message: row.message
     }));
 
-    return {
+    const response = {
         window_minutes: windowMinutes,
         scope_tenant_id: tenantId,
         system,
@@ -597,6 +669,9 @@ async function getOperationsOverview(query = {}) {
         slow_endpoints: slowEndpoints,
         errors
     };
+
+    setCachedOverview(cacheKey, response);
+    return response;
 }
 
 module.exports = {
