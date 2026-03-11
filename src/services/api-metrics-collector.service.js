@@ -51,6 +51,7 @@ function shouldSkipEndpoint(endpoint) {
         || path.startsWith("/metrics")
         || path.startsWith("/api/platform/metrics")
         || path.startsWith("/api/platform/errors")
+        || path.startsWith("/api/platform/operations")
     );
 }
 

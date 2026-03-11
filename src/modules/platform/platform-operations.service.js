@@ -24,7 +24,7 @@ const operationsOverviewCache = new Map();
 
 function isMissingRelationError(error) {
     const code = String(error?.code || "");
-    return code === "PGRST205" || code === "42P01" || code === "42703";
+    return code === "PGRST205" || code === "PGRST202" || code === "42P01" || code === "42703" || code === "42883";
 }
 
 function normalizeWindowMinutes(value) {
@@ -61,6 +61,38 @@ function toFixedNumber(value, digits = 3) {
     }
 
     return Number(numeric.toFixed(digits));
+}
+
+function getHostResourceSnapshot() {
+    const cpuLoadPct = toFixedNumber(
+        (Number(os.loadavg()[0] || 0) / Math.max(Number(os.cpus().length || 1), 1)) * 100
+    );
+
+    const totalMem = Number(os.totalmem() || 0);
+    const freeMem = Number(os.freemem() || 0);
+    const memoryPct = totalMem > 0
+        ? toFixedNumber(((totalMem - freeMem) / totalMem) * 100)
+        : 0;
+
+    let diskPct = 0;
+    try {
+        const stat = fs.statfsSync("/");
+        const blocks = Number(stat.blocks || 0);
+        const freeBlocks = Number(stat.bavail || stat.bfree || 0);
+
+        if (blocks > 0) {
+            diskPct = toFixedNumber(((blocks - freeBlocks) / blocks) * 100);
+        }
+    } catch {
+        diskPct = 0;
+    }
+
+    return {
+        cpu_pct: Math.min(Math.max(cpuLoadPct, 0), 100),
+        memory_pct: Math.min(Math.max(memoryPct, 0), 100),
+        disk_pct: Math.min(Math.max(diskPct, 0), 100),
+        sampled_at: new Date().toISOString()
+    };
 }
 
 function percentile(values, point) {
@@ -434,35 +466,14 @@ function buildInfrastructureMetricsFromRows(rows, windowMinutes) {
     const windowSeconds = Math.max(windowMinutes * 60, 1);
     const networkMbps = toFixedNumber((totalBytes * 8) / windowSeconds / 1_000_000);
 
-    const cpuLoadPct = toFixedNumber(
-        (Number(os.loadavg()[0] || 0) / Math.max(Number(os.cpus().length || 1), 1)) * 100
-    );
-
-    const totalMem = Number(os.totalmem() || 0);
-    const freeMem = Number(os.freemem() || 0);
-    const memoryPct = totalMem > 0
-        ? toFixedNumber(((totalMem - freeMem) / totalMem) * 100)
-        : 0;
-
-    let diskPct = 0;
-    try {
-        const stat = fs.statfsSync("/");
-        const blocks = Number(stat.blocks || 0);
-        const freeBlocks = Number(stat.bavail || stat.bfree || 0);
-
-        if (blocks > 0) {
-            diskPct = toFixedNumber(((blocks - freeBlocks) / blocks) * 100);
-        }
-    } catch {
-        diskPct = 0;
-    }
+    const host = getHostResourceSnapshot();
 
     return {
-        cpu_pct: Math.min(Math.max(cpuLoadPct, 0), 100),
-        memory_pct: Math.min(Math.max(memoryPct, 0), 100),
-        disk_pct: Math.min(Math.max(diskPct, 0), 100),
+        cpu_pct: host.cpu_pct,
+        memory_pct: host.memory_pct,
+        disk_pct: host.disk_pct,
         network_mbps: Math.max(networkMbps, 0),
-        sampled_at: new Date().toISOString(),
+        sampled_at: host.sampled_at,
         network_window_minutes: windowMinutes
     };
 }
@@ -622,6 +633,60 @@ async function getOperationsOverview(query = {}) {
         return cached;
     }
 
+    const { data: rpcData, error: rpcError } = await adminSupabase.rpc("platform_operations_overview", {
+        p_tenant_id: tenantId || null,
+        p_window_minutes: windowMinutes,
+        p_sort_by: sortBy,
+        p_sort_dir: sortDir,
+        p_errors_limit: errorsLimit,
+        p_slow_limit: slowLimit
+    });
+
+    if (!rpcError && rpcData && typeof rpcData === "object") {
+        const host = getHostResourceSnapshot();
+        const response = {
+            window_minutes: Number(rpcData.window_minutes || windowMinutes),
+            scope_tenant_id: rpcData.scope_tenant_id || tenantId || null,
+            system: rpcData.system || {
+                requests_per_sec: 0,
+                p95_latency_ms: 0,
+                error_rate_pct: 0,
+                active_users: 0,
+                active_tenants: 0,
+                sms_total_count: 0,
+                sms_sent_count: 0,
+                sms_failed_count: 0,
+                sms_delivery_rate_pct: 0,
+                window_minutes: windowMinutes,
+                timeseries: []
+            },
+            tenants: Array.isArray(rpcData.tenants) ? rpcData.tenants : [],
+            infrastructure: {
+                cpu_pct: host.cpu_pct,
+                memory_pct: host.memory_pct,
+                disk_pct: host.disk_pct,
+                network_mbps: Math.max(Number(rpcData.network_mbps || 0), 0),
+                sampled_at: host.sampled_at,
+                network_window_minutes: windowMinutes
+            },
+            slow_endpoints: Array.isArray(rpcData.slow_endpoints) ? rpcData.slow_endpoints : [],
+            errors: Array.isArray(rpcData.errors) ? rpcData.errors : []
+        };
+
+        setCachedOverview(cacheKey, response);
+        return response;
+    }
+
+    if (rpcError && !isMissingRelationError(rpcError)) {
+        throw new AppError(
+            500,
+            "PLATFORM_METRICS_READ_FAILED",
+            "Unable to load platform operations overview.",
+            rpcError
+        );
+    }
+
+    // Backward-compatible fallback path when RPC isn't available yet.
     const fromIso = new Date(Date.now() - windowMinutes * 60 * 1000).toISOString();
 
     const [rows, smsRows, recentErrors] = await Promise.all([
