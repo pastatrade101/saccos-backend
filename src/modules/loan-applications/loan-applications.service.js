@@ -627,6 +627,11 @@ async function getCachedLoanApplicationsTotal({ actor, query, tenantId, ownMembe
     return task;
 }
 
+function invalidateLoanApplicationsCountCache() {
+    loanApplicationsCountCache.clear();
+    loanApplicationsCountInFlight.clear();
+}
+
 async function createLoanApplication(actor, payload) {
     const tenantId = payload.tenant_id || actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
@@ -686,6 +691,7 @@ async function createLoanApplication(actor, payload) {
         afterData: data
     });
 
+    invalidateLoanApplicationsCountCache();
     return getExpandedApplication(tenantId, data.id);
 }
 
@@ -741,6 +747,7 @@ async function updateLoanApplication(actor, applicationId, payload) {
         afterData: data
     });
 
+    invalidateLoanApplicationsCountCache();
     return getExpandedApplication(tenantId, applicationId);
 }
 
@@ -799,6 +806,7 @@ async function submitLoanApplication(actor, applicationId) {
         afterData: data
     });
 
+    invalidateLoanApplicationsCountCache();
     const expanded = await getExpandedApplication(tenantId, applicationId);
     await notifyLoanOfficersNewApplication({
         actor,
@@ -876,6 +884,7 @@ async function appraiseLoanApplication(actor, applicationId, payload) {
         afterData: data
     });
 
+    invalidateLoanApplicationsCountCache();
     return getExpandedApplication(tenantId, applicationId);
 }
 
@@ -969,6 +978,7 @@ async function approveLoanApplication(actor, applicationId, payload) {
         }
     });
 
+    invalidateLoanApplicationsCountCache();
     const expanded = await getExpandedApplication(tenantId, applicationId);
     if (enoughApprovals) {
         await notifyLoanOfficersApprovedForDisbursement({
@@ -1064,6 +1074,7 @@ async function rejectLoanApplication(actor, applicationId, payload) {
         afterData: data
     });
 
+    invalidateLoanApplicationsCountCache();
     const expanded = await getExpandedApplication(tenantId, applicationId);
     await notifyLoanOfficersReappraisalNeeded({
         actor,
@@ -1167,6 +1178,7 @@ async function disburseLoanApplication(actor, applicationId, payload) {
         }
     });
 
+    invalidateLoanApplicationsCountCache();
     return {
         application: await getExpandedApplication(tenantId, applicationId),
         disbursement: disburseResult
