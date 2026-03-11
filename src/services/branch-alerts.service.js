@@ -2,6 +2,8 @@ const crypto = require("crypto");
 
 const { adminSupabase } = require("../config/supabase");
 const env = require("../config/env");
+const { SMS_TRIGGER_EVENT_TYPES } = require("../modules/notification-settings/notification-settings.constants");
+const { getSubscriptionStatus } = require("./subscription.service");
 const { normalizePhone } = require("./otp.service");
 const { sendTransactionalSms } = require("./sms.service");
 
@@ -30,6 +32,89 @@ function buildReference(eventKey, userId) {
         .slice(0, 10);
 
     return `alert-${hash}`;
+}
+
+const smsTriggerCache = new Map();
+const SMS_TRIGGER_CACHE_TTL_MS = 30 * 1000;
+
+function invalidateSmsTriggerCache(tenantId = null) {
+    if (tenantId) {
+        smsTriggerCache.delete(tenantId);
+        return;
+    }
+    smsTriggerCache.clear();
+}
+
+async function loadSmsTriggerMap(tenantId) {
+    const cached = smsTriggerCache.get(tenantId);
+    if (cached && cached.expiresAt > Date.now()) {
+        return cached.map;
+    }
+
+    const { data, error } = await adminSupabase
+        .from("sms_trigger_settings")
+        .select("event_type, enabled")
+        .eq("tenant_id", tenantId);
+
+    if (error) {
+        if (isMissingRelationError(error)) {
+            return null;
+        }
+        throw error;
+    }
+
+    const map = new Map();
+    for (const row of data || []) {
+        map.set(String(row.event_type), Boolean(row.enabled));
+    }
+    smsTriggerCache.set(tenantId, {
+        map,
+        expiresAt: Date.now() + SMS_TRIGGER_CACHE_TTL_MS
+    });
+
+    return map;
+}
+
+async function isSmsTriggerEnabled(tenantId, eventType) {
+    if (!eventType || !tenantId) {
+        return false;
+    }
+
+    try {
+        const subscription = await getSubscriptionStatus(tenantId);
+        if (!subscription?.isUsable || !subscription?.features?.sms_trigger_controls_enabled) {
+            return false;
+        }
+    } catch (error) {
+        console.warn("[branch-alerts] subscription check failed", {
+            tenantId,
+            message: error?.message || "unknown_error"
+        });
+        return false;
+    }
+
+    if (!SMS_TRIGGER_EVENT_TYPES.includes(eventType)) {
+        return true;
+    }
+
+    try {
+        const map = await loadSmsTriggerMap(tenantId);
+        if (map === null) {
+            return true;
+        }
+        if (!map.has(eventType)) {
+            return true;
+        }
+
+        return Boolean(map.get(eventType));
+    } catch (error) {
+        console.warn("[branch-alerts] sms trigger settings lookup failed", {
+            tenantId,
+            eventType,
+            message: error?.message || "unknown_error"
+        });
+        return true;
+    }
 }
 
 async function loadBranchManagerRecipients({ tenantId, branchId, excludeUserIds = [] }) {
@@ -203,6 +288,11 @@ async function notifyBranchManagers({
         return { enabled: false, delivered: 0, skipped: 0, failed: 0 };
     }
 
+    const muted = !(await isSmsTriggerEnabled(tenantId, eventType));
+    if (muted) {
+        return { enabled: true, muted: true, delivered: 0, skipped: 0, failed: 0 };
+    }
+
     try {
         const recipients = await loadBranchManagerRecipients({
             tenantId,
@@ -288,6 +378,11 @@ async function notifyRoleUsers({
 }) {
     if (!env.branchAlertSmsEnabled) {
         return { enabled: false, delivered: 0, skipped: 0, failed: 0 };
+    }
+
+    const muted = !(await isSmsTriggerEnabled(tenantId, eventType));
+    if (muted) {
+        return { enabled: true, muted: true, delivered: 0, skipped: 0, failed: 0 };
     }
 
     try {
@@ -377,6 +472,11 @@ async function notifyUsersById({
 }) {
     if (!env.branchAlertSmsEnabled) {
         return { enabled: false, delivered: 0, skipped: 0, failed: 0 };
+    }
+
+    const muted = !(await isSmsTriggerEnabled(tenantId, eventType));
+    if (muted) {
+        return { enabled: true, muted: true, delivered: 0, skipped: 0, failed: 0 };
     }
 
     try {
@@ -750,6 +850,7 @@ async function notifyTellerTransactionBlocked({ actor, tenantId, branchId, opera
 }
 
 module.exports = {
+    invalidateSmsTriggerCache,
     notifyApprovalRequestPending,
     notifyDefaultCaseOpened,
     notifyDefaultCaseClaimReady,

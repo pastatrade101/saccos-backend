@@ -49,7 +49,7 @@ const platformMetricsQuerySchema = z.object({
 const platformTenantMetricsQuerySchema = z.object({
     tenant_id: z.string().uuid().optional(),
     window_minutes: z.coerce.number().int().positive().max(1440).default(60),
-    sort_by: z.enum(["traffic", "errors", "latency"]).default("traffic"),
+    sort_by: z.enum(["traffic", "errors", "latency", "sms"]).default("traffic"),
     sort_dir: z.enum(["asc", "desc"]).default("desc")
 });
 

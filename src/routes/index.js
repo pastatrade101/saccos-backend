@@ -19,6 +19,7 @@ const reportRoutes = require("../modules/reports/reports.routes");
 const observabilityRoutes = require("../modules/observability/observability.routes");
 const creditRiskRoutes = require("../modules/credit-risk/credit-risk.routes");
 const approvalRoutes = require("../modules/approvals/approvals.routes");
+const notificationSettingsRoutes = require("../modules/notification-settings/notification-settings.routes");
 
 const router = express.Router();
 
@@ -48,5 +49,6 @@ router.use("/reports", reportRoutes);
 router.use("/observability", observabilityRoutes);
 router.use("/credit-risk", creditRiskRoutes);
 router.use("/approvals", approvalRoutes);
+router.use("/notification-settings", notificationSettingsRoutes);
 
 module.exports = router;

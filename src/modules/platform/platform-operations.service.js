@@ -11,6 +11,11 @@ const MAX_LIST_LIMIT = 100;
 const METRIC_BATCH_SIZE = 1000;
 const MAX_METRIC_ROWS = 50000;
 
+function isMissingRelationError(error) {
+    const code = String(error?.code || "");
+    return code === "PGRST205" || code === "42P01" || code === "42703";
+}
+
 function normalizeWindowMinutes(value) {
     const numeric = Number(value || DEFAULT_WINDOW_MINUTES);
     if (!Number.isFinite(numeric)) {
@@ -100,6 +105,46 @@ async function fetchMetricRows({ columns, fromIso, tenantId }) {
     return output;
 }
 
+async function fetchSmsDispatchRows({ fromIso, tenantId }) {
+    let from = 0;
+    const output = [];
+
+    while (from < MAX_METRIC_ROWS) {
+        const to = from + METRIC_BATCH_SIZE - 1;
+        let query = adminSupabase
+            .from("notification_dispatches")
+            .select("tenant_id,status,created_at")
+            .eq("channel", "sms")
+            .gte("created_at", fromIso)
+            .order("created_at", { ascending: true })
+            .range(from, to);
+
+        if (tenantId) {
+            query = query.eq("tenant_id", tenantId);
+        }
+
+        const { data, error } = await query;
+
+        if (error) {
+            if (isMissingRelationError(error)) {
+                return [];
+            }
+            throw new AppError(500, "PLATFORM_SMS_METRICS_READ_FAILED", "Unable to read SMS dispatch metrics.", error);
+        }
+
+        const rows = data || [];
+        output.push(...rows);
+
+        if (rows.length < METRIC_BATCH_SIZE) {
+            break;
+        }
+
+        from += METRIC_BATCH_SIZE;
+    }
+
+    return output;
+}
+
 async function loadTenantNameMap(tenantIds = []) {
     const ids = [...new Set((tenantIds || []).filter(Boolean))];
     if (!ids.length) {
@@ -128,6 +173,10 @@ async function getSystemMetrics(query = {}) {
         fromIso,
         tenantId
     });
+    const smsRows = await fetchSmsDispatchRows({
+        fromIso,
+        tenantId
+    });
 
     const totalRequests = rows.length;
     const windowSeconds = Math.max(windowMinutes * 60, 1);
@@ -136,6 +185,10 @@ async function getSystemMetrics(query = {}) {
     const errorRatePct = totalRequests ? toFixedNumber((serverErrors / totalRequests) * 100) : 0;
     const activeUsers = new Set(rows.map((row) => row.user_id).filter(Boolean)).size;
     const activeTenants = new Set(rows.map((row) => row.tenant_id).filter(Boolean)).size;
+    const smsTotalCount = smsRows.length;
+    const smsSentCount = smsRows.filter((row) => row.status === "sent").length;
+    const smsFailedCount = smsRows.filter((row) => row.status === "failed").length;
+    const smsDeliveryRatePct = smsTotalCount ? toFixedNumber((smsSentCount / smsTotalCount) * 100) : 0;
 
     const bucketMinutes = Math.max(1, Math.ceil(windowMinutes / 20));
     const buckets = new Map();
@@ -176,6 +229,10 @@ async function getSystemMetrics(query = {}) {
         error_rate_pct: errorRatePct,
         active_users: activeUsers,
         active_tenants: activeTenants,
+        sms_total_count: smsTotalCount,
+        sms_sent_count: smsSentCount,
+        sms_failed_count: smsFailedCount,
+        sms_delivery_rate_pct: smsDeliveryRatePct,
         window_minutes: windowMinutes,
         timeseries
     };
@@ -184,7 +241,7 @@ async function getSystemMetrics(query = {}) {
 async function getTenantTrafficMetrics(query = {}) {
     const windowMinutes = normalizeWindowMinutes(query.window_minutes);
     const tenantId = query.tenant_id || null;
-    const sortBy = ["traffic", "errors", "latency"].includes(query.sort_by)
+    const sortBy = ["traffic", "errors", "latency", "sms"].includes(query.sort_by)
         ? query.sort_by
         : "traffic";
     const sortDir = String(query.sort_dir || "desc").toLowerCase() === "asc" ? "asc" : "desc";
@@ -192,6 +249,10 @@ async function getTenantTrafficMetrics(query = {}) {
 
     const rows = await fetchMetricRows({
         columns: "tenant_id,user_id,latency_ms,status_code",
+        fromIso,
+        tenantId
+    });
+    const smsRows = await fetchSmsDispatchRows({
         fromIso,
         tenantId
     });
@@ -223,6 +284,45 @@ async function getTenantTrafficMetrics(query = {}) {
         }
     });
 
+    smsRows.forEach((row) => {
+        if (!row.tenant_id) {
+            return;
+        }
+
+        if (!tenantBuckets.has(row.tenant_id)) {
+            tenantBuckets.set(row.tenant_id, {
+                request_count: 0,
+                error_count: 0,
+                latency_sum: 0,
+                users: new Set(),
+                sms_total_count: 0,
+                sms_sent_count: 0,
+                sms_failed_count: 0
+            });
+        }
+
+        const bucket = tenantBuckets.get(row.tenant_id);
+        bucket.sms_total_count += 1;
+        if (row.status === "sent") {
+            bucket.sms_sent_count += 1;
+        }
+        if (row.status === "failed") {
+            bucket.sms_failed_count += 1;
+        }
+    });
+
+    for (const bucket of tenantBuckets.values()) {
+        if (typeof bucket.sms_total_count !== "number") {
+            bucket.sms_total_count = 0;
+        }
+        if (typeof bucket.sms_sent_count !== "number") {
+            bucket.sms_sent_count = 0;
+        }
+        if (typeof bucket.sms_failed_count !== "number") {
+            bucket.sms_failed_count = 0;
+        }
+    }
+
     const tenantNameMap = await loadTenantNameMap([...tenantBuckets.keys()]);
 
     const data = [...tenantBuckets.entries()].map(([id, bucket]) => ({
@@ -233,7 +333,13 @@ async function getTenantTrafficMetrics(query = {}) {
         avg_latency_ms: bucket.request_count
             ? toFixedNumber(bucket.latency_sum / bucket.request_count)
             : 0,
-        active_users: bucket.users.size
+        active_users: bucket.users.size,
+        sms_total_count: bucket.sms_total_count,
+        sms_sent_count: bucket.sms_sent_count,
+        sms_failed_count: bucket.sms_failed_count,
+        sms_delivery_rate_pct: bucket.sms_total_count
+            ? toFixedNumber((bucket.sms_sent_count / bucket.sms_total_count) * 100)
+            : 0
     }));
 
     data.sort((left, right) => {
@@ -241,13 +347,17 @@ async function getTenantTrafficMetrics(query = {}) {
             ? left.error_count
             : sortBy === "latency"
                 ? left.avg_latency_ms
-                : left.request_count;
+                : sortBy === "sms"
+                    ? left.sms_total_count
+                    : left.request_count;
 
         const rightValue = sortBy === "errors"
             ? right.error_count
             : sortBy === "latency"
                 ? right.avg_latency_ms
-                : right.request_count;
+                : sortBy === "sms"
+                    ? right.sms_total_count
+                    : right.request_count;
 
         if (leftValue === rightValue) {
             return left.tenant_name.localeCompare(right.tenant_name);
