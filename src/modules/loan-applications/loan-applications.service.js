@@ -410,7 +410,7 @@ async function listLoanApplications(actor, query) {
     }
 
     const rows = data || [];
-    const hydratedRows = actor.role === ROLES.BRANCH_MANAGER
+    const hydratedRows = [ROLES.BRANCH_MANAGER, ROLES.LOAN_OFFICER].includes(actor.role)
         ? await enrichLoanApplicationListDetails(rows, tenantId)
         : rows;
     if (hasCursor) {
@@ -757,11 +757,18 @@ async function appraiseLoanApplication(actor, applicationId, payload) {
         throw new AppError(500, "LOAN_APPLICATION_APPRAISAL_FAILED", "Unable to save the loan appraisal.", error);
     }
 
-    await replaceChildren(applicationId, tenantId, payload.guarantors, payload.collateral_items);
+    const nextGuarantors = payload.guarantors ?? existing.loan_guarantors ?? [];
+    const nextCollateralItems = payload.collateral_items ?? existing.collateral_items ?? [];
+    await replaceChildren(applicationId, tenantId, nextGuarantors, nextCollateralItems);
+
+    const guarantorMemberIds = Array.from(new Set([
+        ...(existing.loan_guarantors || []).map((row) => row.member_id).filter(Boolean),
+        ...nextGuarantors.map((row) => row.member_id).filter(Boolean)
+    ]));
 
     await creditRiskService.recomputeGuarantorExposuresForMembers({
         tenantId,
-        memberIds: (payload.guarantors || []).map((row) => row.member_id),
+        memberIds: guarantorMemberIds,
         actorUserId: actor.user.id,
         source: "application_appraisal"
     });

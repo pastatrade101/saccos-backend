@@ -41,8 +41,8 @@ const appraiseLoanApplicationSchema = z.object({
     recommended_repayment_frequency: z.enum(["daily", "weekly", "monthly"]).default("monthly"),
     risk_rating: z.enum(["low", "medium", "high"]).default("medium"),
     appraisal_notes: z.string().trim().min(3).max(1000),
-    guarantors: z.array(guarantorSchema).max(10).optional().default([]),
-    collateral_items: z.array(collateralSchema).max(10).optional().default([])
+    guarantors: z.array(guarantorSchema).max(10).optional(),
+    collateral_items: z.array(collateralSchema).max(10).optional()
 });
 
 const approveLoanApplicationSchema = z.object({
