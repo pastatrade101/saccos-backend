@@ -1,7 +1,8 @@
 -- Phase 5: platform tenant listing indexes
 -- Improves /api/platform/tenants filtering and search at larger tenant counts.
 
-create extension if not exists pg_trgm;
+create schema if not exists extensions;
+create extension if not exists pg_trgm with schema extensions;
 
 create index if not exists tenants_active_created_at_idx
     on public.tenants (created_at desc)
