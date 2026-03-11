@@ -44,13 +44,13 @@ router.patch(
 
 router.post(
     "/:id/submit",
-    authorize([ROLES.BRANCH_MANAGER, ROLES.LOAN_OFFICER, ROLES.TELLER, ROLES.MEMBER], { allowInternalOps: false }),
+    authorize([ROLES.LOAN_OFFICER, ROLES.TELLER, ROLES.MEMBER], { allowInternalOps: false }),
     controller.submit
 );
 
 router.post(
     "/:id/appraise",
-    authorize([ROLES.LOAN_OFFICER, ROLES.BRANCH_MANAGER], { allowInternalOps: false }),
+    authorize([ROLES.LOAN_OFFICER], { allowInternalOps: false }),
     validate(schemas.appraiseLoanApplicationSchema),
     controller.appraise
 );

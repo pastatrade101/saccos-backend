@@ -459,8 +459,8 @@ function applyLoanApplicationListFilters(builder, { actor, query, tenantId, ownM
     if (query.status) {
         scoped = scoped.eq("status", query.status);
     } else if (actor.role === ROLES.BRANCH_MANAGER) {
-        // Branch managers need visibility from submitted (guarantor pending) through checker/disbursement flow.
-        scoped = scoped.in("status", ["submitted", "appraised", "approved", "disbursed", "rejected"]);
+        // Branch managers should process active checker queue only, not rejected rework items.
+        scoped = scoped.in("status", ["submitted", "appraised", "approved", "disbursed"]);
     }
     if (query.member_id) scoped = scoped.eq("member_id", query.member_id);
     if (query.branch_id) {
@@ -662,6 +662,10 @@ async function updateLoanApplication(actor, applicationId, payload) {
 }
 
 async function submitLoanApplication(actor, applicationId) {
+    if (actor.role === ROLES.BRANCH_MANAGER) {
+        throw new AppError(403, "FORBIDDEN", "Branch managers cannot submit loan applications.");
+    }
+
     const tenantId = actor.tenantId;
     const existing = await getExpandedApplication(tenantId, applicationId);
 
