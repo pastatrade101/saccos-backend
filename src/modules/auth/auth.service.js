@@ -14,7 +14,6 @@ const { assertRateLimit } = require("../../services/rate-limit.service");
 const SIGNIN_PROFILE_CACHE_TTL_MS = Math.max(0, Number(process.env.AUTH_SIGNIN_PROFILE_CACHE_TTL_MS || 30000));
 const SIGNIN_LAST_LOGIN_MIN_INTERVAL_MS = Math.max(0, Number(process.env.AUTH_SIGNIN_LAST_LOGIN_MIN_INTERVAL_MS || 300000));
 const SIGNIN_PROFILE_SELECT = [
-    "id",
     "user_id",
     "tenant_id",
     "branch_id",
@@ -200,7 +199,7 @@ async function getSignInProfile(userId) {
                 .maybeSingle();
 
             if (error) {
-                throw new AppError(500, "USER_PROFILE_LOOKUP_FAILED", "Unable to load user profile.");
+                throw new AppError(500, "USER_PROFILE_LOOKUP_FAILED", "Unable to load user profile.", error);
             }
 
             const resolved = data || null;
