@@ -11,6 +11,27 @@ const { normalizePhone, sendOtpChallenge, verifyOtpChallenge } = require("../../
 const { sendOtpSms } = require("../../services/sms.service");
 const { assertRateLimit } = require("../../services/rate-limit.service");
 
+const SIGNIN_PROFILE_CACHE_TTL_MS = Math.max(0, Number(process.env.AUTH_SIGNIN_PROFILE_CACHE_TTL_MS || 30000));
+const SIGNIN_LAST_LOGIN_MIN_INTERVAL_MS = Math.max(0, Number(process.env.AUTH_SIGNIN_LAST_LOGIN_MIN_INTERVAL_MS || 300000));
+const SIGNIN_PROFILE_SELECT = [
+    "id",
+    "user_id",
+    "tenant_id",
+    "branch_id",
+    "member_id",
+    "full_name",
+    "phone",
+    "role",
+    "is_active",
+    "must_change_password",
+    "first_login_at",
+    "last_login_at",
+    "deleted_at"
+].join(",");
+const signInProfileCache = new Map();
+const signInProfileInFlight = new Map();
+const lastLoginWriteCache = new Map();
+
 function generateTemporaryPassword() {
     const lowers = "abcdefghjkmnpqrstuvwxyz";
     const uppers = "ABCDEFGHJKLMNPQRSTUVWXYZ";
@@ -92,6 +113,138 @@ function buildPasswordSetupUrl({ redirectTo, hashedToken, actionLink }) {
 function isUserNotFoundError(error) {
     const message = String(error?.message || "").toLowerCase();
     return message.includes("user not found") || message.includes("not found");
+}
+
+function getCachedSignInProfile(userId) {
+    if (!SIGNIN_PROFILE_CACHE_TTL_MS) {
+        return null;
+    }
+
+    const cached = signInProfileCache.get(userId);
+    if (!cached) {
+        return null;
+    }
+
+    if (cached.expiresAt <= Date.now()) {
+        signInProfileCache.delete(userId);
+        return null;
+    }
+
+    return cached.value;
+}
+
+function setCachedSignInProfile(userId, value) {
+    if (!SIGNIN_PROFILE_CACHE_TTL_MS) {
+        return;
+    }
+
+    signInProfileCache.set(userId, {
+        value,
+        expiresAt: Date.now() + SIGNIN_PROFILE_CACHE_TTL_MS
+    });
+
+    if (signInProfileCache.size > 5000) {
+        const now = Date.now();
+        for (const [cachedUserId, cached] of signInProfileCache.entries()) {
+            if (cached.expiresAt <= now) {
+                signInProfileCache.delete(cachedUserId);
+            }
+        }
+    }
+}
+
+function invalidateSignInProfileCache(userId) {
+    if (!userId) {
+        signInProfileCache.clear();
+        signInProfileInFlight.clear();
+        lastLoginWriteCache.clear();
+        return;
+    }
+
+    signInProfileCache.delete(userId);
+    signInProfileInFlight.delete(userId);
+    lastLoginWriteCache.delete(userId);
+}
+
+function pruneLastLoginWriteCache() {
+    if (lastLoginWriteCache.size < 5000) {
+        return;
+    }
+
+    const cutoff = Date.now() - Math.max(SIGNIN_LAST_LOGIN_MIN_INTERVAL_MS * 2, 600000);
+    for (const [userId, timestamp] of lastLoginWriteCache.entries()) {
+        if (timestamp < cutoff) {
+            lastLoginWriteCache.delete(userId);
+        }
+    }
+}
+
+async function getSignInProfile(userId) {
+    const cached = getCachedSignInProfile(userId);
+    if (cached !== null) {
+        return cached;
+    }
+
+    const existing = signInProfileInFlight.get(userId);
+    if (existing) {
+        return existing;
+    }
+
+    const loadTask = (async () => {
+        try {
+            const { data, error } = await adminSupabase
+                .from("user_profiles")
+                .select(SIGNIN_PROFILE_SELECT)
+                .eq("user_id", userId)
+                .is("deleted_at", null)
+                .maybeSingle();
+
+            if (error) {
+                throw new AppError(500, "USER_PROFILE_LOOKUP_FAILED", "Unable to load user profile.");
+            }
+
+            const resolved = data || null;
+            setCachedSignInProfile(userId, resolved);
+            return resolved;
+        } finally {
+            signInProfileInFlight.delete(userId);
+        }
+    })();
+
+    signInProfileInFlight.set(userId, loadTask);
+    return loadTask;
+}
+
+function touchLastLoginAt(userId) {
+    if (!userId) {
+        return;
+    }
+
+    const nowMs = Date.now();
+    const lastWrite = lastLoginWriteCache.get(userId) || 0;
+    if (SIGNIN_LAST_LOGIN_MIN_INTERVAL_MS > 0 && (nowMs - lastWrite) < SIGNIN_LAST_LOGIN_MIN_INTERVAL_MS) {
+        return;
+    }
+
+    lastLoginWriteCache.set(userId, nowMs);
+    pruneLastLoginWriteCache();
+
+    void adminSupabase
+        .from("user_profiles")
+        .update({
+            last_login_at: new Date(nowMs).toISOString()
+        })
+        .eq("user_id", userId)
+        .then(({ error }) => {
+            if (error) {
+                lastLoginWriteCache.delete(userId);
+                console.warn("[auth-signin] last_login_at update failed", { userId });
+            }
+        })
+        .catch(() => {
+            lastLoginWriteCache.delete(userId);
+            console.warn("[auth-signin] last_login_at update failed", { userId });
+        });
 }
 
 async function sendPasswordSetupLink(payload) {
@@ -210,12 +363,7 @@ async function signIn(payload) {
         });
     }
 
-    await adminSupabase
-        .from("user_profiles")
-        .update({
-            last_login_at: new Date().toISOString()
-        })
-        .eq("user_id", auth.user.id);
+    touchLastLoginAt(auth.user.id);
 
     return {
         session: auth.session,
@@ -285,9 +433,9 @@ async function authenticatePassword(payload) {
         throw new AppError(401, "SIGNIN_FAILED", "Invalid email or password.");
     }
 
-    const profile = await getUserProfile(data.user.id);
     const platformRole = data.user.app_metadata?.platform_role;
     const isInternalOps = platformRole === "internal_ops" || platformRole === "platform_admin";
+    const profile = isInternalOps ? null : await getSignInProfile(data.user.id);
 
     if (!profile && !isInternalOps) {
         throw new AppError(403, "PROFILE_NOT_FOUND", "User profile is not provisioned.");
@@ -337,6 +485,7 @@ async function persistOtpEnrollmentPhone(auth, phoneInput) {
     }
 
     invalidateUserContextCache(auth.user.id);
+    invalidateSignInProfileCache(auth.user.id);
     return normalizedPhone;
 }
 
@@ -431,6 +580,7 @@ async function inviteUser({ actor, payload }) {
     }
 
     invalidateUserContextCache(data.user.id);
+    invalidateSignInProfileCache(data.user.id);
 
     let destinationHint = null;
     if (payload.send_invite && useSmsSetupLink) {
