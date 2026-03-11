@@ -168,6 +168,35 @@ async function replaceChildren(applicationId, tenantId, guarantors = [], collate
     }
 }
 
+function getGuarantorMember(row) {
+    if (!row?.members) {
+        return null;
+    }
+
+    return Array.isArray(row.members) ? (row.members[0] || null) : row.members;
+}
+
+function attachGuarantorConsentReference(application) {
+    const guarantors = Array.isArray(application?.loan_guarantors) ? application.loan_guarantors : [];
+    const normalizedGuarantors = guarantors.map((row) => {
+        const member = getGuarantorMember(row);
+        return {
+            ...row,
+            guarantor_name: member?.full_name || row?.guarantor_name || null
+        };
+    });
+
+    return {
+        ...application,
+        loan_guarantors: normalizedGuarantors,
+        guarantor_consent_reference: normalizedGuarantors.map((row) => ({
+            member_id: row.member_id,
+            guarantor_name: row.guarantor_name || null,
+            consent_status: row.consent_status || "pending"
+        }))
+    };
+}
+
 async function getExpandedApplication(tenantId, applicationId) {
     const { data, error } = await adminSupabase
         .from("loan_applications")
@@ -176,7 +205,7 @@ async function getExpandedApplication(tenantId, applicationId) {
             members(id, full_name, phone, email, member_no, branch_id, user_id),
             loan_products(id, code, name),
             loan_approvals(*),
-            loan_guarantors(*),
+            loan_guarantors(*, members(id, full_name, member_no)),
             collateral_items(*)
         `)
         .eq("tenant_id", tenantId)
@@ -187,7 +216,7 @@ async function getExpandedApplication(tenantId, applicationId) {
         throw new AppError(404, "LOAN_APPLICATION_NOT_FOUND", "Loan application was not found.");
     }
 
-    return data;
+    return attachGuarantorConsentReference(data);
 }
 
 function ensureApplicationEditAllowed(actor, application) {
@@ -365,7 +394,7 @@ async function enrichLoanApplicationListDetails(rows, tenantId) {
         collateralByApplication.set(row.application_id, existing);
     }
 
-    return (rows || []).map((row) => ({
+    return (rows || []).map((row) => attachGuarantorConsentReference({
         ...row,
         loan_guarantors: guarantorsByApplication.get(row.id) || [],
         collateral_items: collateralByApplication.get(row.id) || []
