@@ -4,6 +4,7 @@ const env = require("./env");
 const { observeDbQuery } = require("../services/observability.service");
 const RETRYABLE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 const RETRYABLE_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 525, 526, 527]);
+const AUTH_SIGNIN_PATH = "/auth/v1/token";
 
 function extractTenantIdFromFilter(rawValue) {
     if (!rawValue) {
@@ -56,8 +57,13 @@ function resolveMethod(input, init) {
     return "GET";
 }
 
-function canRetryRequest(method) {
-    return RETRYABLE_METHODS.has(method);
+function canRetryRequest(method, pathname) {
+    if (RETRYABLE_METHODS.has(method)) {
+        return true;
+    }
+
+    // Password sign-in is safe to retry on transient network failures.
+    return method === "POST" && pathname === AUTH_SIGNIN_PATH;
 }
 
 function isRetryableStatus(statusCode) {
@@ -72,12 +78,11 @@ function isRetryableNetworkError(error) {
     const name = String(error.name || "").toLowerCase();
     const message = String(error.message || "").toLowerCase();
 
-    if (name === "aborterror") {
-        return false;
-    }
-
     return (
-        name === "typeerror"
+        name === "supabasefetchtimeouterror"
+        || name === "aborterror"
+        || name === "typeerror"
+        || message.includes("timeout")
         || message.includes("fetch failed")
         || message.includes("networkerror")
         || message.includes("network error")
@@ -87,10 +92,10 @@ function isRetryableNetworkError(error) {
     );
 }
 
-function computeRetryDelayMs(attemptIndex) {
-    const maxAttempts = Math.max(1, Number(env.supabaseFetchRetryMaxAttempts || 1));
-    const baseMs = Math.max(1, Number(env.supabaseFetchRetryBaseMs || 100));
-    const maxMs = Math.max(baseMs, Number(env.supabaseFetchRetryMaxMs || 1000));
+function computeRetryDelayMs(attemptIndex, options = {}) {
+    const maxAttempts = Math.max(1, Number(options.maxAttempts || env.supabaseFetchRetryMaxAttempts || 1));
+    const baseMs = Math.max(1, Number(options.baseMs || env.supabaseFetchRetryBaseMs || 100));
+    const maxMs = Math.max(baseMs, Number(options.maxMs || env.supabaseFetchRetryMaxMs || 1000));
     const exponent = Math.max(0, Math.min(attemptIndex - 1, 8));
     const rawDelay = Math.min(maxMs, baseMs * (2 ** exponent));
     const jitter = Math.floor(Math.random() * Math.max(1, Math.floor(rawDelay * 0.3)));
@@ -105,8 +110,60 @@ async function sleep(ms) {
     });
 }
 
+function resolvePathname(inputUrl) {
+    try {
+        return new URL(inputUrl).pathname || "";
+    } catch {
+        return "";
+    }
+}
+
+async function executeFetchWithOptionalTimeout(input, init, timeoutMs = 0) {
+    if (!timeoutMs || timeoutMs <= 0) {
+        return fetch(input, init);
+    }
+
+    const controller = new AbortController();
+    const upstreamSignal = init?.signal;
+    let clearAbortBridge = null;
+
+    if (upstreamSignal) {
+        if (upstreamSignal.aborted) {
+            controller.abort();
+        } else {
+            const relayAbort = () => controller.abort();
+            upstreamSignal.addEventListener("abort", relayAbort, { once: true });
+            clearAbortBridge = () => upstreamSignal.removeEventListener("abort", relayAbort);
+        }
+    }
+
+    const timeoutHandle = setTimeout(() => {
+        controller.abort();
+    }, timeoutMs);
+
+    try {
+        return await fetch(input, {
+            ...(init || {}),
+            signal: controller.signal
+        });
+    } catch (error) {
+        const isAbortError = String(error?.name || "").toLowerCase() === "aborterror";
+        if (!isAbortError) {
+            throw error;
+        }
+
+        const timeoutError = new Error(`Supabase fetch timeout after ${timeoutMs}ms`);
+        timeoutError.name = "SupabaseFetchTimeoutError";
+        timeoutError.code = "SUPABASE_FETCH_TIMEOUT";
+        throw timeoutError;
+    } finally {
+        clearTimeout(timeoutHandle);
+        clearAbortBridge?.();
+    }
+}
+
 function createInstrumentedFetch(clientName) {
-    return async (input, init) => {
+    return async (input, init, runtimeOptions = {}) => {
         const startedAtNs = process.hrtime.bigint();
         const method = resolveMethod(input, init);
         const inputUrl = resolveInputUrl(input);
@@ -140,7 +197,11 @@ function createInstrumentedFetch(clientName) {
         let statusCode = 0;
 
         try {
-            response = await fetch(input, init);
+            response = await executeFetchWithOptionalTimeout(
+                input,
+                init,
+                Number(runtimeOptions.timeoutMs || 0)
+            );
             statusCode = response.status;
             return response;
         } finally {
@@ -161,8 +222,26 @@ function createRetriableSupabaseFetch(clientName) {
     return async (input, init) => {
         const method = resolveMethod(input, init);
         const inputUrl = resolveInputUrl(input);
-        const maxAttempts = Math.max(1, Number(env.supabaseFetchRetryMaxAttempts || 1));
-        const retryEnabled = canRetryRequest(method) && maxAttempts > 1;
+        const pathname = resolvePathname(inputUrl);
+        const isAuthSignin = method === "POST" && pathname === AUTH_SIGNIN_PATH;
+        const maxAttempts = isAuthSignin
+            ? Math.max(1, Number(env.supabaseAuthRetryMaxAttempts || 1))
+            : Math.max(1, Number(env.supabaseFetchRetryMaxAttempts || 1));
+        const retryEnabled = canRetryRequest(method, pathname) && maxAttempts > 1;
+        const timeoutMs = isAuthSignin
+            ? Math.max(0, Number(env.supabaseAuthTimeoutMs || 0))
+            : 0;
+        const retryTiming = isAuthSignin
+            ? {
+                maxAttempts,
+                baseMs: Math.max(1, Number(env.supabaseAuthRetryBaseMs || 120)),
+                maxMs: Math.max(1, Number(env.supabaseAuthRetryMaxMs || 700))
+            }
+            : {
+                maxAttempts,
+                baseMs: Math.max(1, Number(env.supabaseFetchRetryBaseMs || 100)),
+                maxMs: Math.max(1, Number(env.supabaseFetchRetryMaxMs || 1000))
+            };
 
         let attempt = 0;
         let lastNetworkError = null;
@@ -171,12 +250,12 @@ function createRetriableSupabaseFetch(clientName) {
             attempt += 1;
 
             try {
-                const response = await instrumentedFetch(input, init);
+                const response = await instrumentedFetch(input, init, { timeoutMs });
                 if (!retryEnabled || !isRetryableStatus(response.status) || attempt >= maxAttempts) {
                     return response;
                 }
 
-                const delayMs = computeRetryDelayMs(attempt);
+                const delayMs = computeRetryDelayMs(attempt, retryTiming);
                 console.warn("[supabase-fetch] transient response, retrying", {
                     client: clientName,
                     method,
@@ -184,7 +263,8 @@ function createRetriableSupabaseFetch(clientName) {
                     status: response.status,
                     attempt,
                     maxAttempts,
-                    delayMs
+                    delayMs,
+                    timeoutMs: timeoutMs || null
                 });
                 await sleep(delayMs);
             } catch (error) {
@@ -193,7 +273,7 @@ function createRetriableSupabaseFetch(clientName) {
                     throw error;
                 }
 
-                const delayMs = computeRetryDelayMs(attempt);
+                const delayMs = computeRetryDelayMs(attempt, retryTiming);
                 console.warn("[supabase-fetch] network error, retrying", {
                     client: clientName,
                     method,
@@ -201,6 +281,7 @@ function createRetriableSupabaseFetch(clientName) {
                     attempt,
                     maxAttempts,
                     delayMs,
+                    timeoutMs: timeoutMs || null,
                     message: String(error?.message || error)
                 });
                 await sleep(delayMs);
