@@ -182,9 +182,19 @@ function attachGuarantorConsentReference(application) {
         const member = getGuarantorMember(row);
         return {
             ...row,
-            guarantor_name: member?.full_name || row?.guarantor_name || null
+            guarantor_name: member?.full_name || row?.guarantor_name || null,
+            guarantorName: member?.full_name || row?.guarantor_name || null
         };
     });
+    const acceptedCount = normalizedGuarantors.filter((row) => row.consent_status === "accepted").length;
+    const rejectedCount = normalizedGuarantors.filter((row) => row.consent_status === "rejected").length;
+    const pendingCount = normalizedGuarantors.filter((row) => row.consent_status !== "accepted" && row.consent_status !== "rejected").length;
+    const totalCount = normalizedGuarantors.length;
+    const referenceNames = normalizedGuarantors
+        .map((row) => row.guarantor_name)
+        .filter(Boolean);
+    const referenceLabel = referenceNames.length ? referenceNames.join(", ") : "No guarantors";
+    const consentSummary = `${acceptedCount}/${totalCount} accepted - ${referenceLabel}`;
 
     return {
         ...application,
@@ -192,8 +202,27 @@ function attachGuarantorConsentReference(application) {
         guarantor_consent_reference: normalizedGuarantors.map((row) => ({
             member_id: row.member_id,
             guarantor_name: row.guarantor_name || null,
+            guarantorName: row.guarantor_name || null,
+            member_name: row.guarantor_name || null,
             consent_status: row.consent_status || "pending"
-        }))
+        })),
+        guarantor_consent_summary: consentSummary,
+        guarantor_consent: consentSummary,
+        guarantorConsent: consentSummary,
+        guarantor_reference_names: referenceNames,
+        guarantorReferenceNames: referenceNames,
+        guarantor_consent_counts: {
+            accepted: acceptedCount,
+            rejected: rejectedCount,
+            pending: pendingCount,
+            total: totalCount
+        },
+        guarantorConsentCounts: {
+            accepted: acceptedCount,
+            rejected: rejectedCount,
+            pending: pendingCount,
+            total: totalCount
+        }
     };
 }
 
