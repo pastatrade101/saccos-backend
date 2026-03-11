@@ -226,6 +226,28 @@ function attachGuarantorConsentReference(application) {
     };
 }
 
+function toTimestamp(value) {
+    if (!value) {
+        return null;
+    }
+
+    const parsed = Date.parse(String(value));
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
+function getCurrentCycleApprovals(application) {
+    const rows = Array.isArray(application?.loan_approvals) ? application.loan_approvals : [];
+    const submittedAtMs = toTimestamp(application?.submitted_at);
+    if (!submittedAtMs) {
+        return rows;
+    }
+
+    return rows.filter((row) => {
+        const createdAtMs = toTimestamp(row?.created_at);
+        return createdAtMs !== null && createdAtMs >= submittedAtMs;
+    });
+}
+
 async function getExpandedApplication(tenantId, applicationId) {
     const { data, error } = await adminSupabase
         .from("loan_applications")
@@ -740,7 +762,12 @@ async function submitLoanApplication(actor, applicationId) {
             submitted_at: new Date().toISOString(),
             rejection_reason: null,
             rejected_at: null,
-            rejected_by: null
+            rejected_by: null,
+            approval_count: 0,
+            approval_notes: null,
+            approved_by: null,
+            approved_at: null,
+            disbursement_ready_at: null
         })
         .eq("tenant_id", tenantId)
         .eq("id", applicationId)
@@ -876,33 +903,34 @@ async function approveLoanApplication(actor, applicationId, payload) {
         source: "application_approval"
     });
 
-    const { data: existingApproval } = await adminSupabase
-        .from("loan_approvals")
-        .select("id")
-        .eq("application_id", applicationId)
-        .eq("approver_id", actor.user.id)
-        .maybeSingle();
-
-    if (existingApproval) {
+    const cycleApprovals = getCurrentCycleApprovals(existing);
+    const actorDecision = cycleApprovals.find((row) => row.approver_id === actor.user.id) || null;
+    if (actorDecision?.decision === "approved") {
         throw new AppError(400, "LOAN_APPLICATION_ALREADY_APPROVED", "You already recorded an approval for this application.");
     }
 
+    if (actorDecision?.decision === "rejected") {
+        throw new AppError(400, "LOAN_APPLICATION_ALREADY_REJECTED", "You already recorded a rejection for this application.");
+    }
+
+    const currentCycleApprovedCount = cycleApprovals.filter((row) => row.decision === "approved").length;
     const { error: approvalError } = await adminSupabase
         .from("loan_approvals")
-        .insert({
+        .upsert({
             application_id: applicationId,
             tenant_id: tenantId,
             approver_id: actor.user.id,
-            approval_level: existing.approval_count + 1,
+            approval_level: currentCycleApprovedCount + 1,
             decision: "approved",
-            notes: payload.notes || null
-        });
+            notes: payload.notes || null,
+            created_at: new Date().toISOString()
+        }, { onConflict: "application_id,approver_id" });
 
     if (approvalError) {
         throw new AppError(500, "LOAN_APPLICATION_APPROVAL_LOG_FAILED", "Unable to record the loan approval.", approvalError);
     }
 
-    const nextApprovalCount = existing.approval_count + 1;
+    const nextApprovalCount = currentCycleApprovedCount + 1;
     const enoughApprovals = nextApprovalCount >= existing.required_approval_count;
 
     const { data, error } = await adminSupabase
@@ -967,16 +995,28 @@ async function rejectLoanApplication(actor, applicationId, payload) {
         throw new AppError(400, "MAKER_CHECKER_VIOLATION", "The application maker cannot reject the same application.");
     }
 
+    const cycleApprovals = getCurrentCycleApprovals(existing);
+    const actorDecision = cycleApprovals.find((row) => row.approver_id === actor.user.id) || null;
+    if (actorDecision?.decision === "rejected") {
+        throw new AppError(400, "LOAN_APPLICATION_ALREADY_REJECTED", "You already recorded a rejection for this application.");
+    }
+
+    if (actorDecision?.decision === "approved") {
+        throw new AppError(400, "LOAN_APPLICATION_ALREADY_APPROVED", "You already recorded an approval for this application.");
+    }
+
+    const currentCycleApprovedCount = cycleApprovals.filter((row) => row.decision === "approved").length;
     const { error: approvalError } = await adminSupabase
         .from("loan_approvals")
-        .insert({
+        .upsert({
             application_id: applicationId,
             tenant_id: tenantId,
             approver_id: actor.user.id,
-            approval_level: existing.approval_count + 1,
+            approval_level: currentCycleApprovedCount + 1,
             decision: "rejected",
-            notes: payload.notes || payload.reason
-        });
+            notes: payload.notes || payload.reason,
+            created_at: new Date().toISOString()
+        }, { onConflict: "application_id,approver_id" });
 
     if (approvalError) {
         throw new AppError(500, "LOAN_APPLICATION_REJECTION_LOG_FAILED", "Unable to record the loan rejection.", approvalError);
@@ -990,7 +1030,9 @@ async function rejectLoanApplication(actor, applicationId, payload) {
             rejected_at: new Date().toISOString(),
             rejected_by: actor.user.id,
             approval_notes: payload.notes || null,
-            disbursement_ready_at: null
+            disbursement_ready_at: null,
+            approved_by: null,
+            approved_at: null
         })
         .eq("tenant_id", tenantId)
         .eq("id", applicationId)
