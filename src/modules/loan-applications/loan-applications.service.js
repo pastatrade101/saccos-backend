@@ -384,7 +384,12 @@ function applyLoanApplicationListFilters(builder, { actor, query, tenantId, ownM
         scoped = scoped.in("branch_id", actor.branchIds);
     }
 
-    if (query.status) scoped = scoped.eq("status", query.status);
+    if (query.status) {
+        scoped = scoped.eq("status", query.status);
+    } else if (actor.role === ROLES.BRANCH_MANAGER) {
+        // Branch managers handle checker flow after appraisal.
+        scoped = scoped.in("status", ["appraised", "approved", "disbursed", "rejected"]);
+    }
     if (query.member_id) scoped = scoped.eq("member_id", query.member_id);
     if (query.branch_id) {
         assertBranchAccess({ auth: actor }, query.branch_id);
@@ -640,8 +645,8 @@ async function submitLoanApplication(actor, applicationId) {
 }
 
 async function appraiseLoanApplication(actor, applicationId, payload) {
-    if (![ROLES.LOAN_OFFICER, ROLES.BRANCH_MANAGER].includes(actor.role)) {
-        throw new AppError(403, "FORBIDDEN", "Only loan officers or branch managers can appraise applications.");
+    if (actor.role !== ROLES.LOAN_OFFICER) {
+        throw new AppError(403, "FORBIDDEN", "Only loan officers can appraise applications.");
     }
 
     const tenantId = actor.tenantId;
@@ -811,8 +816,8 @@ async function rejectLoanApplication(actor, applicationId, payload) {
     const tenantId = actor.tenantId;
     const existing = await getExpandedApplication(tenantId, applicationId);
 
-    if (!["submitted", "appraised", "approved"].includes(existing.status)) {
-        throw new AppError(400, "LOAN_APPLICATION_NOT_REJECTABLE", "This application cannot be rejected in its current state.");
+    if (!["appraised", "approved"].includes(existing.status)) {
+        throw new AppError(400, "LOAN_APPLICATION_NOT_REJECTABLE", "Only appraised or approved applications can be rejected.");
     }
 
     assertBranchAccess({ auth: actor }, existing.branch_id);
