@@ -12,6 +12,11 @@ const SUBSCRIPTION_CACHE_TTL_MS = Math.max(0, Number(process.env.SUBSCRIPTION_CA
 const subscriptionStatusCache = new Map();
 const subscriptionStatusInFlight = new Map();
 
+function isMissingRpcError(error) {
+    const code = String(error?.code || "");
+    return code === "PGRST202" || code === "42883";
+}
+
 function getCachedSubscriptionStatus(tenantId) {
     if (!SUBSCRIPTION_CACHE_TTL_MS) {
         return null;
@@ -267,6 +272,36 @@ async function getLatestTenantSubscriptionsByTenantIds(tenantIds) {
         return {};
     }
 
+    const { data: rpcRows, error: rpcError } = await adminSupabase.rpc("latest_tenant_subscriptions", {
+        p_tenant_ids: tenantIds
+    });
+
+    if (!rpcError) {
+        const latestByTenant = {};
+        for (const row of rpcRows || []) {
+            latestByTenant[row.tenant_id] = {
+                id: row.subscription_id,
+                tenant_id: row.tenant_id,
+                plan_id: row.plan_id,
+                status: row.status,
+                start_at: row.start_at,
+                expires_at: row.expires_at,
+                created_at: row.created_at,
+                plans: {
+                    code: row.plan_code || "starter",
+                    name: row.plan_name || null,
+                    description: row.plan_description || null
+                }
+            };
+        }
+        return latestByTenant;
+    }
+
+    if (!isMissingRpcError(rpcError)) {
+        throw new AppError(500, "SUBSCRIPTION_LOOKUP_FAILED", "Unable to load tenant subscriptions.", rpcError);
+    }
+
+    // Backward compatibility path before migration is applied.
     const { data, error } = await adminSupabase
         .from("tenant_subscriptions")
         .select("id, tenant_id, plan_id, status, start_at, expires_at, created_at, plans(id, code, name, description)")

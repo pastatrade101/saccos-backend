@@ -1,192 +1,412 @@
 # Backend Context
 
-This document describes the backend as it is currently implemented in `src/`.
+Last updated: March 11, 2026
 
-## Runtime Entry Points
+This document is a full backend context snapshot for `saccos-backend` as currently implemented.
 
-- `src/server.js`: boots HTTP server
-- `src/app.js`: Express app, security middleware, health endpoints
-- `src/routes/index.js`: API route mounting under `/api`
+## 1) Purpose and scope
 
-Request flow:
+`saccos-backend` is a multi-tenant SACCOS API and worker system for:
 
-1. `request-context` attaches request metadata
-2. security middleware (`helmet`, `cors`, parsing) runs
-3. route-level auth and RBAC middleware executes
-4. controller calls service layer
-5. service layer uses Supabase admin client + RPC procedures
-6. errors are normalized by global error handler
+- tenant lifecycle and subscription governance
+- member onboarding and portal access
+- savings, shares, loans, and teller operations
+- maker-checker controls for high-risk operations
+- credit-risk controls (default detection, collections, guarantor exposure/claims)
+- dividend cycles
+- report exports (sync and async worker)
+- platform observability and operations telemetry
+- branch/staff SMS operational alerts with tenant-level trigger controls
 
-## Security and Access Model
+Core stack:
 
-Core middleware:
+- Node.js + Express
+- Supabase Postgres + Auth + Storage
+- Zod request validation
+- JWT auth + RBAC + RLS-aware data access patterns
 
-- `src/middleware/auth.js`: validates Supabase JWT, loads profile + branch assignments
-- `src/middleware/authorize.js`: enforces RBAC
-- `src/middleware/require-subscription.js` and `require-subscription-active.js`: blocks inactive tenants
-- `src/middleware/require-feature.js`: plan feature gating
-- `src/middleware/enforce-limit.js`: plan limits (`max_users`, `max_members`, `max_branches`)
-- `src/middleware/idempotency.js`: duplicate financial-post prevention using `Idempotency-Key`
-- `src/middleware/rate-limit.js`: endpoint-specific throttling (imports/auth-sensitive paths)
+## 2) Runtime architecture
 
-## Domain Modules
+### Entry points
 
-### Auth
+- `src/server.js`
+  - starts HTTP server
+  - starts default-detection scheduler
+  - starts API metrics collector flusher
+- `src/app.js`
+  - middleware chain, health endpoints, `/metrics`, API router
+- `src/worker.js`
+  - report export background loop (`report-export-worker`)
 
-- `src/modules/auth/*`
-- Endpoints:
-  - `POST /api/auth/signin`
-  - `POST /api/auth/otp/send`
-  - `POST /api/auth/otp/verify`
-  - `POST /api/auth/signup`
+### Request pipeline
 
-### Me
+1. `request-context` adds request metadata/request id
+2. observability middleware starts timers
+3. security middleware: `helmet`, `cors`, body parsing
+4. route-level middleware: auth, subscription checks, feature gates, RBAC, validation, rate limits, idempotency
+5. controller -> service -> Supabase (table/RPC/storage/auth admin)
+6. centralized not-found + error-handler response normalization
 
-- `src/modules/me/*`
-- Endpoints:
-  - `GET /api/me/subscription`
+## 3) Source layout
 
-### Platform (SaaS owner)
+- `src/config`
+  - `env.js` typed env parsing (zod)
+  - `supabase.js` retriable + instrumented Supabase clients (`adminSupabase`, `publicSupabase`)
+- `src/constants`
+  - roles, plans/features/limits
+- `src/middleware`
+  - auth, authorize, require-subscription, require-feature, idempotency, rate-limit, observability, validation
+- `src/modules`
+  - domain modules (controllers/routes/schemas/services by bounded context)
+- `src/services`
+  - cross-domain services (audit, subscription, sms, alerts, otp, observability, metrics collector, etc.)
+- `src/routes/index.js`
+  - all API route mounting under `/api`
+- `supabase/sql`
+  - schema and additive migrations
+- `scripts`
+  - bootstrap, seed, reset, load test tools
+- `test`
+  - API, procedures, smoke, and helpers
 
-- `src/modules/platform/*`
-- Endpoints:
-  - `GET /api/platform/plans`
-  - `PATCH /api/platform/plans/:planId/features`
-  - `GET /api/platform/tenants`
-  - `POST /api/platform/tenants/:tenantId/subscription`
-  - `DELETE /api/platform/tenants/:tenantId`
-- Role: `platform_admin` only
+## 4) Access control and safety model
 
-### Tenants and Branches
+### Roles
 
-- `src/modules/tenants/*`
-- `src/modules/branches/*`
-- Tenant creation seeds defaults (COA, products, posting rules, subscription, default branch)
+Defined in `src/constants/roles.js`:
 
-### Users and Team Access
+- `platform_admin`, `platform_owner`
+- tenant roles: `super_admin`, `branch_manager`, `loan_officer`, `teller`, `auditor`, `member`
 
-- `src/modules/users/*`
-- Key enforcement:
-  - `super_admin` can provision `branch_manager` only
-  - `branch_manager` can provision `loan_officer`, `teller`, `auditor`
-  - member credentials and temp credential visibility are scoped by role
+### Subscription and feature gates
 
-### Members and Member Applications
+- `require-subscription` blocks inactive/past-grace tenants
+- `require-feature("<key>")` enforces plan entitlements
+- Plan defaults (`src/constants/plans.js`):
+  - `starter` has key features disabled (loans/dividends/contributions/maker-checker/sms trigger controls)
+  - `growth` and `enterprise` enable major controls
 
-- `src/modules/members/*`
-- `src/modules/member-applications/*`
-- Current lifecycle:
-  - Branch manager creates and submits application
-  - Super admin approves/rejects
-  - Approval creates/links member and ensures sub-accounts
+### Critical safety controls
 
-### Loan Workflow
+- idempotency middleware on mutation-heavy flows
+- maker-checker guardrails in loan approval and approval engine
+- role/tenant scoped queries and strict validation
+- audit logs for sensitive operations
+- closed-period mutation guardrail for journal entries (Phase 3)
 
-- `src/modules/loan-applications/*`
-- Workflow states: `draft -> submitted -> appraised -> approved/rejected -> disbursed`
-- Rules:
-  - appraisal by `loan_officer`
-  - approval/rejection by `branch_manager`
-  - maker-checker: request maker cannot approve/reject
-  - disbursement only by `loan_officer` or `teller`
-  - disbursement cannot execute twice (`loan_id` guard + finance idempotency key support)
+## 5) API module map
 
-### Finance and Accounting
+All routes are mounted in `src/routes/index.js`.
 
-- `src/modules/finance/*`
-- High-value endpoints:
-  - `POST /api/deposit`
-  - `POST /api/withdraw`
-  - `POST /api/transfer`
-  - `POST /api/share-contribution`
-  - `POST /api/loan/disburse`
-  - `POST /api/loan/repay`
-  - `GET /api/loan/portfolio`
-  - `GET /api/loan/schedules`
-  - `GET /api/loan/transactions`
-  - `GET /api/statements`
-  - `GET /api/ledger`
+### Auth and identity
 
-### Cash Control and Receipts
+- `/api/auth`
+  - signin, OTP send/verify, password setup link send, invite/signup
+- `/api/users`
+  - me/profile, password-changed marker, staff CRUD, temp credential retrieval
+- `/api/me/subscription`
+  - current tenant subscription + feature entitlements
 
-- `src/modules/cash-control/*`
-- Includes:
-  - teller session open/close/review
-  - receipt policy (tenant and optional branch override)
-  - signed upload/confirm receipt flow
-  - daily cash summary and CSV exports
+### Platform owner operations
+
+- `/api/platform`
+  - plans + feature overrides
+  - platform tenant list, subscription assignment, hard tenant delete
+  - system metrics, tenant metrics, infrastructure metrics, slow endpoints, error feed
+- Allowed roles: `platform_admin`, `platform_owner`
+
+### Tenant administration
+
+- `/api/tenants`
+  - tenant CRUD (tenant super-admin context)
+- `/api/branches`
+  - branch list/create with plan-limit enforcement
+- `/api/products`
+  - bootstrap + product/rule catalogs (savings, loans, shares, fees, penalties, posting rules)
+
+### Members and onboarding
+
+- `/api/member-applications`
+  - lifecycle: create/update/submit/review/approve/reject
+- `/api/members`
+  - member CRUD, account list, member login create/reset, temp credential fetch, bulk delete
+
+### Loans and finance
+
+- `/api/loan-applications`
+  - lifecycle: list/detail/create/update/submit/appraise/approve/reject/disburse
+  - guarantor request list (`member` role) and guarantor consent endpoint
+  - supports multiple guarantors per application
+- finance endpoints are mounted at API root:
+  - `/api/deposit`
+  - `/api/withdraw`
+  - `/api/transfer`
+  - `/api/share-contribution`
+  - `/api/dividend-allocation`
+  - `/api/loan/disburse`
+  - `/api/loan/repay`
+  - `/api/loan/portfolio`
+  - `/api/loan/schedules`
+  - `/api/loan/transactions`
+  - `/api/statements`
+  - `/api/ledger`
+  - `/api/interest-accrual`
+  - `/api/close-period`
+
+### Cash control
+
+- `/api/cash-control`
+  - teller sessions: open/close/review/current/list
+  - receipt policy
+  - receipt upload init/confirm/download and journal receipt list
+  - daily summary and CSV exports
 
 ### Dividends
 
-- `src/modules/dividends/*`
-- Branch manager prepares/submits cycle
-- Super admin approves/rejects/pays/closes cycle
+- `/api/dividends`
+  - cycle setup/update/freeze/allocate/submit
+  - approve/reject/pay/close
 
-### Auditor
+### Credit risk (Phase 1)
 
-- `src/modules/auditor/*`
-- Strict GET-only route surface
-- Read-only exception-first reporting and CSV exports
+- `/api/credit-risk`
+  - default cases: list/detail/create/transition
+  - collection actions: list/create/update/complete/escalate
+  - default detection: manual run
+  - guarantor exposures: list/recompute
+  - guarantor claims: list/detail/create/submit/approve/reject/post/settle/waive
 
-### Reports
+### Approvals (Phase 2)
 
-- `src/modules/reports/*`
-- Management and accounting exports:
-  - trial balance
-  - cash position
-  - member statements
-  - loan portfolio summary
-  - member balances summary
-  - PAR
-  - loan aging
-  - audit exceptions report
-- list endpoints across members/finance/loan-applications support optional `page` + `limit` query params
+- `/api/approvals`
+  - approval policies list/update
+  - approval requests queue/detail
+  - approve/reject actions
+- Gate: `maker_checker_enabled`
+
+### Notification settings (SMS trigger controls)
+
+- `/api/notification-settings/sms-triggers`
+  - tenant super admin reads/updates per-event SMS trigger toggles
+- Gates:
+  - active subscription
+  - `sms_trigger_controls_enabled` (Growth/Enterprise)
+
+### Reports and exports
+
+- `/api/reports`
+  - export jobs detail/download
+  - report exports: member statements, trial balance, balance sheet, income statement, cash position, PAR, loan aging, portfolio summary, member balances summary, audit exceptions
+  - supports sync and async (`async=true`) flows
 
 ### Imports
 
-- `src/modules/imports/*`
-- CSV member import with:
-  - row-level validation and error capture
-  - optional portal provisioning
-  - generated temporary passwords
-  - signed credentials export URL
-  - opening balances and optional historical loan/repayment migration
+- `/api/imports/members`
+  - preview/import jobs and row-level failure inspection
+  - failure CSV and generated credential download URL
 
-## Loan Workflow API (Current)
+### Auditor and observability
 
-- `GET /api/loan-applications`
-- `POST /api/loan-applications`
-- `PATCH /api/loan-applications/:id`
-- `POST /api/loan-applications/:id/submit`
-- `POST /api/loan-applications/:id/appraise`
-- `POST /api/loan-applications/:id/approve`
-- `POST /api/loan-applications/:id/reject`
-- `POST /api/loan-applications/:id/disburse`
+- `/api/auditor`
+  - read-only audit summaries, exceptions, journals, audit logs, CSV packs
+- `/api/observability`
+  - in-process app observability summary, tenant dashboards, SLO view, reset
 
-## Database and Migrations
+## 6) Key workflows and state models
 
-Primary migration location: `supabase/sql/`.
+### Member application lifecycle
 
-Latest major additive migrations:
+- `draft -> submitted -> approved/rejected`
+- approval creates/links member and member accounts
 
-- `019_idempotency_keys.sql`
-- `020_dividend_submission_handoff.sql`
-- `021_loan_workflow.sql`
-- `022_loan_workflow_rls.sql`
-- `023_performance_reliability.sql`
-- `025_auth_otp_challenges.sql`
+### Loan application lifecycle
 
-## Operational Scripts
+- `draft -> submitted -> appraised -> approved/rejected -> disbursed`
+- maker-checker enforced on approval path
+- disbursement can yield approval request if high-value policy triggers
+- guarantor consent flow:
+  - guarantors can accept/decline via member endpoint
+  - unresolved guarantor consent blocks progression checks where required
 
-- `npm run bootstrap:internal-ops`: create/ensure platform owner bootstrap user
-- `npm run seed:demo`: populate realistic demo tenant data
-- `npm run reset:tenants`: delete tenant data safely (tenant-scoped)
-- `npm run reset:members`: clear member-domain data safely
+### Credit-risk lifecycle (default and claim)
 
-## Testing
+- default case statuses include operational progression such as:
+  - `delinquent -> in_recovery -> claim_ready -> (restructured/writeoff/recovered path)`
+- collection actions are independently tracked and auditable
+- guarantor claim workflow:
+  - `draft -> submitted -> approved/rejected -> posted -> settled/waived`
 
-- `npm run test`
+### Maker-checker lifecycle
+
+- operations (currently high-value `finance.withdraw` and `finance.loan_disburse`) can create approval requests
+- states include pending/approved/rejected/expired
+- maker cannot self-check
+- policy-driven threshold and required checker count
+
+## 7) Notifications and SMS architecture
+
+### Dispatch
+
+- `src/services/branch-alerts.service.js`
+  - sends transactional SMS to branch managers, loan officers, tellers, or direct user ids
+  - writes delivery audit rows to `notification_dispatches`
+
+### Trigger controls
+
+- catalog in `src/modules/notification-settings/notification-settings.constants.js`
+- per-tenant settings in `sms_trigger_settings`
+- controls are managed by tenant `super_admin`
+- feature availability is plan-gated to Growth/Enterprise
+- runtime sends are also plan-checked to prevent starter-plan SMS dispatch
+
+### SMS-worthy event families implemented
+
+- loan officer events (submission/rejection/ready-for-disbursement/guarantor-decline/default flag)
+- teller events (approval-required, approval outcomes, cash mismatch, posting failure, policy block)
+- branch manager events (approval pending, default opened, claim-ready, guarantor claim submitted)
+
+## 8) Platform telemetry and incident monitoring
+
+### Instrumentation tables
+
+- `api_metrics`
+  - endpoint, latency, status, bytes, tenant/user dimensions
+- `api_errors`
+  - API errors for incident feed
+- `notification_dispatches`
+  - SMS dispatch status data
+
+### Platform metrics endpoints
+
+- system metrics now include:
+  - RPS, p95 latency, error rate, active users/tenants
+  - SMS totals/sent/failed/delivery rate
+- tenant metrics now include:
+  - request/error/latency/active users
+  - SMS totals/sent/failed/delivery rate
+  - sortable by traffic/errors/latency/sms
+
+### Exclusions
+
+API metrics collector intentionally ignores:
+
+- `/health`
+- `/api/health`
+- `/metrics`
+- `/api/platform/metrics*`
+- `/api/platform/errors*`
+
+## 9) Database and migration context
+
+Primary migration directory: `supabase/sql/`.
+
+### Foundational sequence
+
+- `001_*` through `034_*` establish schema, RLS, procedures, products, imports, OTP, reporting worker, and distributed rate limits.
+
+### Phase-focused migrations
+
+- Phase 1 credit risk:
+  - `035_phase1_credit_risk_controls.sql`
+  - `036_phase1_credit_risk_controls_rls.sql`
+  - `037_phase1_default_detection_policy.sql`
+  - `038_phase1_guarantor_exposure_policy.sql`
+- Phase 2 maker-checker:
+  - `039_phase2_maker_checker_engine.sql`
+  - `040_phase2_maker_checker_engine_rls.sql`
+- Phase 3 financial statements:
+  - `041_phase3_financial_statements.sql`
+  - `042_phase3_financial_statements_rls.sql`
+- Platform operations telemetry:
+  - `043_platform_operations_metrics.sql`
+- Tenant deletion guardrail:
+  - `044_tenant_purge_guardrail.sql`
+- Branch alert dispatch audit:
+  - `045_branch_alert_notification_dispatches.sql`
+- SMS trigger settings:
+  - `046_sms_trigger_settings.sql`
+
+### Tenant hard-delete behavior
+
+`platform.service.deleteTenant` performs:
+
+1. confirmation + scope discovery
+2. storage cleanup (`receipts`, `imports`)
+3. explicit delete ordering across tenant tables (including loans, credit-risk, approvals, dispatches, metrics)
+4. dynamic fallback RPC `purge_tenant_scoped_rows`
+5. Supabase auth user cleanup (excluding internal ops platform users)
+6. final tenant row delete
+
+## 10) Environment and config context
+
+`src/config/env.js` validates and exposes:
+
+- server/network: `PORT`, `HOST`, `API_PREFIX`, `CORS_ORIGINS`, `SSL_ENABLED`
+- Supabase: URL, anon/service keys, retry tuning
+- auth/otp/sms: OTP TTL/attempts/rates/provider credentials, OTP enforcement switch
+- subscriptions and policy thresholds: grace days, high-value amount, out-of-hours window
+- imports/auth rate limits
+- reporting branding
+- observability and SLO thresholds
+- credit risk scheduler + policy parameters
+- branch alert SMS global switch
+
+## 11) Operational scripts
+
+From `package.json` / `scripts/`:
+
+- `npm run dev`
+- `npm start`
+- `npm run start:worker`
+- `npm run bootstrap:internal-ops`
+- `npm run seed:demo`
+- `npm run reset:tenants`
+- `npm run reset:members`
+- `npm run cleanup:report-exports`
+- `npm run load:baseline`
+- `npm run load:scale`
+
+## 12) Test coverage map
+
+`test/` includes:
+
+- API:
+  - RBAC/security
+  - tenant isolation
+  - receipts and reports
+- procedures:
+  - financial postings
+  - dividends
+  - seed/products
+- smoke:
+  - end-to-end platform + tenant critical flow
+
+Commands:
+
+- `npm test`
 - `npm run test:watch`
 - `npm run test:smoke`
 
-Test helpers and smoke flow live in `test/`.
+## 13) Current phase status reference
+
+Authoritative remediation plan and status are tracked in:
+
+- `docs/saccos-gap-remediation-phases.md`
+
+Current state summary:
+
+- Phase 0: artifacts complete
+- Phase 1: backend critical credit-risk scope implemented
+- Phase 2: backend engine implemented and actively used by disbursement/withdraw flows
+- Phase 3: balance sheet/income statement + period guardrails implemented
+- Phase 4+: ongoing hardening/notification/regulatory/DR/readiness work
+
+## 14) Notes for contributors
+
+- Treat migrations as additive in non-empty environments.
+- Preserve tenant isolation assumptions in every new query path.
+- New high-risk mutations should use:
+  - idempotency where applicable
+  - approval engine checks where applicable
+  - audit logging and before/after payloads
+- Any tenant-scoped new table should be included in explicit tenant delete ordering, even with the dynamic purge guardrail present.

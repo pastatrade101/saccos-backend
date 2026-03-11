@@ -19,6 +19,11 @@ const MISSING_SUBSCRIPTION = {
 
 const DEFAULT_LIST_LIMIT = 50;
 const MAX_LIST_LIMIT = 100;
+const PLATFORM_TENANTS_CACHE_TTL_MS = Math.max(
+    0,
+    Number(process.env.PLATFORM_TENANTS_CACHE_TTL_MS || 15000)
+);
+const platformTenantsCache = new Map();
 
 function normalizePagination(query = {}) {
     const page = Math.max(Number(query.page || 1), 1);
@@ -26,6 +31,90 @@ function normalizePagination(query = {}) {
     const from = (page - 1) * limit;
     const to = from + limit - 1;
     return { page, limit, from, to };
+}
+
+function isMissingRpcError(error) {
+    const code = String(error?.code || "");
+    return code === "PGRST202" || code === "42883";
+}
+
+function buildPlatformTenantsCacheKey({ page, limit, statusFilter, search }) {
+    return JSON.stringify({
+        page,
+        limit,
+        status: statusFilter || "",
+        search: search || ""
+    });
+}
+
+function getCachedPlatformTenants(cacheKey) {
+    if (!PLATFORM_TENANTS_CACHE_TTL_MS) {
+        return null;
+    }
+
+    const cached = platformTenantsCache.get(cacheKey);
+    if (!cached) {
+        return null;
+    }
+
+    if (cached.expiresAt <= Date.now()) {
+        platformTenantsCache.delete(cacheKey);
+        return null;
+    }
+
+    return cached.value;
+}
+
+function setCachedPlatformTenants(cacheKey, value) {
+    if (!PLATFORM_TENANTS_CACHE_TTL_MS) {
+        return;
+    }
+
+    platformTenantsCache.set(cacheKey, {
+        value,
+        expiresAt: Date.now() + PLATFORM_TENANTS_CACHE_TTL_MS
+    });
+}
+
+function clearPlatformTenantsCache() {
+    platformTenantsCache.clear();
+}
+
+async function getBranchCountsByTenantIds(tenantIds = []) {
+    if (!tenantIds.length) {
+        return {};
+    }
+
+    const { data: rpcRows, error: rpcError } = await adminSupabase.rpc("tenant_branch_counts", {
+        p_tenant_ids: tenantIds
+    });
+
+    if (!rpcError) {
+        return (rpcRows || []).reduce((accumulator, row) => {
+            accumulator[row.tenant_id] = Number(row.branch_count || 0);
+            return accumulator;
+        }, {});
+    }
+
+    if (!isMissingRpcError(rpcError)) {
+        throw new AppError(500, "PLATFORM_BRANCHES_LIST_FAILED", "Unable to load platform branch counts.", rpcError);
+    }
+
+    // Backward compatibility fallback before migration is applied.
+    const { data: branches, error: branchError } = await adminSupabase
+        .from("branches")
+        .select("tenant_id")
+        .is("deleted_at", null)
+        .in("tenant_id", tenantIds.length ? tenantIds : [EMPTY_UUID]);
+
+    if (branchError) {
+        throw new AppError(500, "PLATFORM_BRANCHES_LIST_FAILED", "Unable to load platform branch counts.", branchError);
+    }
+
+    return (branches || []).reduce((accumulator, branch) => {
+        accumulator[branch.tenant_id] = (accumulator[branch.tenant_id] || 0) + 1;
+        return accumulator;
+    }, {});
 }
 
 async function listPlans(query = {}) {
@@ -97,10 +186,21 @@ async function listPlatformTenants(query = {}) {
     const statusFilter = typeof query.status === "string" ? query.status.trim() : "";
     const rawSearch = typeof query.search === "string" ? query.search.trim() : "";
     const search = rawSearch.replace(/[^a-zA-Z0-9._\s-]/g, "").trim();
+    const cacheKey = buildPlatformTenantsCacheKey({
+        page,
+        limit,
+        statusFilter,
+        search
+    });
+
+    const cached = getCachedPlatformTenants(cacheKey);
+    if (cached) {
+        return cached;
+    }
 
     let tenantsQuery = adminSupabase
         .from("tenants")
-        .select("*", { count: "exact" })
+        .select("*", { count: "planned" })
         .is("deleted_at", null);
 
     if (statusFilter) {
@@ -120,23 +220,10 @@ async function listPlatformTenants(query = {}) {
     }
 
     const tenantIds = (tenants || []).map((tenant) => tenant.id);
-
-    const { data: branches, error: branchError } = await adminSupabase
-        .from("branches")
-        .select("tenant_id")
-        .is("deleted_at", null)
-        .in("tenant_id", tenantIds.length ? tenantIds : [EMPTY_UUID]);
-
-    if (branchError) {
-        throw new AppError(500, "PLATFORM_BRANCHES_LIST_FAILED", "Unable to load platform branch counts.", branchError);
-    }
-
-    const branchCounts = (branches || []).reduce((accumulator, branch) => {
-        accumulator[branch.tenant_id] = (accumulator[branch.tenant_id] || 0) + 1;
-        return accumulator;
-    }, {});
-
-    const subscriptionsByTenant = await getSubscriptionStatusesForTenants(tenantIds);
+    const [branchCounts, subscriptionsByTenant] = await Promise.all([
+        getBranchCountsByTenantIds(tenantIds),
+        getSubscriptionStatusesForTenants(tenantIds)
+    ]);
 
     const enriched = (tenants || []).map((tenant) => ({
         ...tenant,
@@ -144,7 +231,7 @@ async function listPlatformTenants(query = {}) {
         subscription: subscriptionsByTenant[tenant.id] || MISSING_SUBSCRIPTION
     }));
 
-    return {
+    const response = {
         data: enriched,
         pagination: {
             page,
@@ -152,6 +239,9 @@ async function listPlatformTenants(query = {}) {
             total: count || 0
         }
     };
+
+    setCachedPlatformTenants(cacheKey, response);
+    return response;
 }
 
 async function assignSubscription(actor, tenantId, payload) {
@@ -181,6 +271,8 @@ async function assignSubscription(actor, tenantId, payload) {
         action: "assign_tenant_subscription",
         afterData: { tenant_id: tenantId, ...subscription }
     });
+
+    clearPlatformTenantsCache();
 
     return {
         tenant,
@@ -570,6 +662,7 @@ async function deleteTenant(actor, tenantId, payload) {
 
     await deleteAuthUsers(scope.authUserIds);
     await deleteIn("tenants", "id", scope.tenantIds);
+    clearPlatformTenantsCache();
 
     return {
         deleted: true,
