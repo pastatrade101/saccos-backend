@@ -5,7 +5,7 @@ const { adminSupabase } = require("../../config/supabase");
 const AppError = require("../../utils/app-error");
 
 const DEFAULT_WINDOW_MINUTES = 60;
-const MAX_WINDOW_MINUTES = 24 * 60;
+const MAX_WINDOW_MINUTES = 7 * 24 * 60;
 const DEFAULT_LIST_LIMIT = 20;
 const MAX_LIST_LIMIT = 100;
 const METRIC_BATCH_SIZE = 1000;
@@ -67,6 +67,14 @@ function bucketStartIso(timestamp, bucketMinutes) {
     const sizeMs = bucketMinutes * 60 * 1000;
     const bucketMs = Math.floor(rawMs / sizeMs) * sizeMs;
     return new Date(bucketMs).toISOString();
+}
+
+function normalizeSortBy(value) {
+    return ["traffic", "errors", "latency", "sms"].includes(value) ? value : "traffic";
+}
+
+function normalizeSortDir(value) {
+    return String(value || "desc").toLowerCase() === "asc" ? "asc" : "desc";
 }
 
 async function fetchMetricRows({ columns, fromIso, tenantId }) {
@@ -163,21 +171,7 @@ async function loadTenantNameMap(tenantIds = []) {
     return new Map((data || []).map((row) => [row.id, row.name]));
 }
 
-async function getSystemMetrics(query = {}) {
-    const windowMinutes = normalizeWindowMinutes(query.window_minutes);
-    const tenantId = query.tenant_id || null;
-    const fromIso = new Date(Date.now() - windowMinutes * 60 * 1000).toISOString();
-
-    const rows = await fetchMetricRows({
-        columns: "tenant_id,user_id,latency_ms,status_code,created_at",
-        fromIso,
-        tenantId
-    });
-    const smsRows = await fetchSmsDispatchRows({
-        fromIso,
-        tenantId
-    });
-
+function buildSystemMetricsFromRows(rows, smsRows, windowMinutes) {
     const totalRequests = rows.length;
     const windowSeconds = Math.max(windowMinutes * 60, 1);
     const p95LatencyMs = percentile(rows.map((row) => Number(row.latency_ms || 0)), 95);
@@ -238,25 +232,7 @@ async function getSystemMetrics(query = {}) {
     };
 }
 
-async function getTenantTrafficMetrics(query = {}) {
-    const windowMinutes = normalizeWindowMinutes(query.window_minutes);
-    const tenantId = query.tenant_id || null;
-    const sortBy = ["traffic", "errors", "latency", "sms"].includes(query.sort_by)
-        ? query.sort_by
-        : "traffic";
-    const sortDir = String(query.sort_dir || "desc").toLowerCase() === "asc" ? "asc" : "desc";
-    const fromIso = new Date(Date.now() - windowMinutes * 60 * 1000).toISOString();
-
-    const rows = await fetchMetricRows({
-        columns: "tenant_id,user_id,latency_ms,status_code",
-        fromIso,
-        tenantId
-    });
-    const smsRows = await fetchSmsDispatchRows({
-        fromIso,
-        tenantId
-    });
-
+function buildTenantMetricsFromRows(rows, smsRows, tenantNameMap, sortBy, sortDir) {
     const tenantBuckets = new Map();
 
     rows.forEach((row) => {
@@ -269,7 +245,10 @@ async function getTenantTrafficMetrics(query = {}) {
                 request_count: 0,
                 error_count: 0,
                 latency_sum: 0,
-                users: new Set()
+                users: new Set(),
+                sms_total_count: 0,
+                sms_sent_count: 0,
+                sms_failed_count: 0
             });
         }
 
@@ -310,20 +289,6 @@ async function getTenantTrafficMetrics(query = {}) {
             bucket.sms_failed_count += 1;
         }
     });
-
-    for (const bucket of tenantBuckets.values()) {
-        if (typeof bucket.sms_total_count !== "number") {
-            bucket.sms_total_count = 0;
-        }
-        if (typeof bucket.sms_sent_count !== "number") {
-            bucket.sms_sent_count = 0;
-        }
-        if (typeof bucket.sms_failed_count !== "number") {
-            bucket.sms_failed_count = 0;
-        }
-    }
-
-    const tenantNameMap = await loadTenantNameMap([...tenantBuckets.keys()]);
 
     const data = [...tenantBuckets.entries()].map(([id, bucket]) => ({
         tenant_id: id,
@@ -369,17 +334,40 @@ async function getTenantTrafficMetrics(query = {}) {
     return data;
 }
 
-async function getInfrastructureMetrics(query = {}) {
-    const tenantId = query.tenant_id || null;
-    const windowMinutes = normalizeWindowMinutes(query.window_minutes || 1);
-    const fromIso = new Date(Date.now() - windowMinutes * 60 * 1000).toISOString();
+function buildSlowEndpointsFromRows(rows, limit) {
+    const endpointMap = new Map();
 
-    const rows = await fetchMetricRows({
-        columns: "request_bytes,response_bytes",
-        fromIso,
-        tenantId
+    rows.forEach((row) => {
+        const endpoint = String(row.endpoint || "unknown");
+
+        if (!endpointMap.has(endpoint)) {
+            endpointMap.set(endpoint, {
+                calls: 0,
+                latency_sum: 0
+            });
+        }
+
+        const bucket = endpointMap.get(endpoint);
+        bucket.calls += 1;
+        bucket.latency_sum += Number(row.latency_ms || 0);
     });
 
+    return [...endpointMap.entries()]
+        .map(([endpoint, bucket]) => ({
+            endpoint,
+            avg_latency_ms: bucket.calls ? toFixedNumber(bucket.latency_sum / bucket.calls) : 0,
+            calls: bucket.calls
+        }))
+        .sort((left, right) => {
+            if (right.avg_latency_ms === left.avg_latency_ms) {
+                return right.calls - left.calls;
+            }
+            return right.avg_latency_ms - left.avg_latency_ms;
+        })
+        .slice(0, limit);
+}
+
+function buildInfrastructureMetricsFromRows(rows, windowMinutes) {
     const totalBytes = rows.reduce(
         (sum, row) => sum + Number(row.request_bytes || 0) + Number(row.response_bytes || 0),
         0
@@ -419,6 +407,83 @@ async function getInfrastructureMetrics(query = {}) {
         sampled_at: new Date().toISOString(),
         network_window_minutes: windowMinutes
     };
+}
+
+async function fetchRecentErrors({ tenantId, limit }) {
+    let dbQuery = adminSupabase
+        .from("api_errors")
+        .select("tenant_id,endpoint,status_code,message,created_at")
+        .order("created_at", { ascending: false })
+        .limit(limit);
+
+    if (tenantId) {
+        dbQuery = dbQuery.eq("tenant_id", tenantId);
+    }
+
+    const { data, error } = await dbQuery;
+
+    if (error) {
+        throw new AppError(500, "PLATFORM_ERRORS_READ_FAILED", "Unable to load platform errors.", error);
+    }
+
+    return data || [];
+}
+
+async function getSystemMetrics(query = {}) {
+    const windowMinutes = normalizeWindowMinutes(query.window_minutes);
+    const tenantId = query.tenant_id || null;
+    const fromIso = new Date(Date.now() - windowMinutes * 60 * 1000).toISOString();
+
+    const rows = await fetchMetricRows({
+        columns: "tenant_id,user_id,latency_ms,status_code,created_at",
+        fromIso,
+        tenantId
+    });
+    const smsRows = await fetchSmsDispatchRows({
+        fromIso,
+        tenantId
+    });
+
+    return buildSystemMetricsFromRows(rows, smsRows, windowMinutes);
+}
+
+async function getTenantTrafficMetrics(query = {}) {
+    const windowMinutes = normalizeWindowMinutes(query.window_minutes);
+    const tenantId = query.tenant_id || null;
+    const sortBy = normalizeSortBy(query.sort_by);
+    const sortDir = normalizeSortDir(query.sort_dir);
+    const fromIso = new Date(Date.now() - windowMinutes * 60 * 1000).toISOString();
+
+    const rows = await fetchMetricRows({
+        columns: "tenant_id,user_id,latency_ms,status_code",
+        fromIso,
+        tenantId
+    });
+    const smsRows = await fetchSmsDispatchRows({
+        fromIso,
+        tenantId
+    });
+
+    const tenantIds = Array.from(new Set([
+        ...rows.map((row) => row.tenant_id).filter(Boolean),
+        ...smsRows.map((row) => row.tenant_id).filter(Boolean)
+    ]));
+    const tenantNameMap = await loadTenantNameMap(tenantIds);
+    return buildTenantMetricsFromRows(rows, smsRows, tenantNameMap, sortBy, sortDir);
+}
+
+async function getInfrastructureMetrics(query = {}) {
+    const tenantId = query.tenant_id || null;
+    const windowMinutes = normalizeWindowMinutes(query.window_minutes || 1);
+    const fromIso = new Date(Date.now() - windowMinutes * 60 * 1000).toISOString();
+
+    const rows = await fetchMetricRows({
+        columns: "request_bytes,response_bytes",
+        fromIso,
+        tenantId
+    });
+
+    return buildInfrastructureMetricsFromRows(rows, windowMinutes);
 }
 
 async function listPlatformErrors(query = {}) {
@@ -475,36 +540,63 @@ async function getSlowEndpoints(query = {}) {
         tenantId
     });
 
-    const endpointMap = new Map();
+    return buildSlowEndpointsFromRows(rows, limit);
+}
 
-    rows.forEach((row) => {
-        const endpoint = String(row.endpoint || "unknown");
+async function getOperationsOverview(query = {}) {
+    const windowMinutes = normalizeWindowMinutes(query.window_minutes);
+    const tenantId = query.tenant_id || null;
+    const sortBy = normalizeSortBy(query.sort_by);
+    const sortDir = normalizeSortDir(query.sort_dir);
+    const errorsLimit = normalizeLimit(query.errors_limit, 20);
+    const slowLimit = normalizeLimit(query.slow_limit, 10);
+    const fromIso = new Date(Date.now() - windowMinutes * 60 * 1000).toISOString();
 
-        if (!endpointMap.has(endpoint)) {
-            endpointMap.set(endpoint, {
-                calls: 0,
-                latency_sum: 0
-            });
-        }
-
-        const bucket = endpointMap.get(endpoint);
-        bucket.calls += 1;
-        bucket.latency_sum += Number(row.latency_ms || 0);
-    });
-
-    return [...endpointMap.entries()]
-        .map(([endpoint, bucket]) => ({
-            endpoint,
-            avg_latency_ms: bucket.calls ? toFixedNumber(bucket.latency_sum / bucket.calls) : 0,
-            calls: bucket.calls
-        }))
-        .sort((left, right) => {
-            if (right.avg_latency_ms === left.avg_latency_ms) {
-                return right.calls - left.calls;
-            }
-            return right.avg_latency_ms - left.avg_latency_ms;
+    const [rows, smsRows, recentErrors] = await Promise.all([
+        fetchMetricRows({
+            columns: "tenant_id,user_id,endpoint,latency_ms,status_code,created_at,request_bytes,response_bytes",
+            fromIso,
+            tenantId
+        }),
+        fetchSmsDispatchRows({
+            fromIso,
+            tenantId
+        }),
+        fetchRecentErrors({
+            tenantId,
+            limit: errorsLimit
         })
-        .slice(0, limit);
+    ]);
+
+    const tenantIds = Array.from(new Set([
+        ...rows.map((row) => row.tenant_id).filter(Boolean),
+        ...smsRows.map((row) => row.tenant_id).filter(Boolean),
+        ...recentErrors.map((row) => row.tenant_id).filter(Boolean)
+    ]));
+    const tenantNameMap = await loadTenantNameMap(tenantIds);
+
+    const system = buildSystemMetricsFromRows(rows, smsRows, windowMinutes);
+    const tenants = buildTenantMetricsFromRows(rows, smsRows, tenantNameMap, sortBy, sortDir);
+    const infrastructure = buildInfrastructureMetricsFromRows(rows, Math.max(Math.min(windowMinutes, 60), 1));
+    const slowEndpoints = buildSlowEndpointsFromRows(rows, slowLimit);
+    const errors = recentErrors.map((row) => ({
+        timestamp: row.created_at,
+        endpoint: row.endpoint,
+        status_code: row.status_code,
+        tenant_id: row.tenant_id,
+        tenant_name: row.tenant_id ? tenantNameMap.get(row.tenant_id) || "Unknown tenant" : "System",
+        message: row.message
+    }));
+
+    return {
+        window_minutes: windowMinutes,
+        scope_tenant_id: tenantId,
+        system,
+        tenants,
+        infrastructure,
+        slow_endpoints: slowEndpoints,
+        errors
+    };
 }
 
 module.exports = {
@@ -512,5 +604,6 @@ module.exports = {
     getTenantTrafficMetrics,
     getInfrastructureMetrics,
     listPlatformErrors,
-    getSlowEndpoints
+    getSlowEndpoints,
+    getOperationsOverview
 };

@@ -9,6 +9,7 @@ const {
     assignSubscriptionSchema,
     deleteTenantSchema,
     platformErrorsQuerySchema,
+    platformOperationsOverviewQuerySchema,
     platformMetricsQuerySchema,
     platformSlowEndpointsQuerySchema,
     platformTenantMetricsQuerySchema,
@@ -33,5 +34,6 @@ router.get("/metrics/tenants", validate(platformTenantMetricsQuerySchema, "query
 router.get("/metrics/infrastructure", validate(platformMetricsQuerySchema, "query"), controller.infrastructureMetrics);
 router.get("/metrics/slow-endpoints", validate(platformSlowEndpointsQuerySchema, "query"), controller.slowEndpoints);
 router.get("/errors", validate(platformErrorsQuerySchema, "query"), controller.platformErrors);
+router.get("/operations/overview", validate(platformOperationsOverviewQuerySchema, "query"), controller.operationsOverview);
 
 module.exports = router;

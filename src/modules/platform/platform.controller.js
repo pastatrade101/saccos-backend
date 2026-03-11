@@ -73,3 +73,9 @@ exports.slowEndpoints = asyncHandler(async (req, res) => {
     applyNoStore(res);
     res.json({ data });
 });
+
+exports.operationsOverview = asyncHandler(async (req, res) => {
+    const data = await platformOperationsService.getOperationsOverview(req.validated.query);
+    applyNoStore(res);
+    res.json({ data });
+});

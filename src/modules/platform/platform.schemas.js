@@ -43,12 +43,12 @@ const listPlatformTenantsQuerySchema = z.object({
 
 const platformMetricsQuerySchema = z.object({
     tenant_id: z.string().uuid().optional(),
-    window_minutes: z.coerce.number().int().positive().max(1440).default(60)
+    window_minutes: z.coerce.number().int().positive().max(10080).default(60)
 });
 
 const platformTenantMetricsQuerySchema = z.object({
     tenant_id: z.string().uuid().optional(),
-    window_minutes: z.coerce.number().int().positive().max(1440).default(60),
+    window_minutes: z.coerce.number().int().positive().max(10080).default(60),
     sort_by: z.enum(["traffic", "errors", "latency", "sms"]).default("traffic"),
     sort_dir: z.enum(["asc", "desc"]).default("desc")
 });
@@ -61,8 +61,17 @@ const platformErrorsQuerySchema = z.object({
 
 const platformSlowEndpointsQuerySchema = z.object({
     tenant_id: z.string().uuid().optional(),
-    window_minutes: z.coerce.number().int().positive().max(1440).default(60),
+    window_minutes: z.coerce.number().int().positive().max(10080).default(60),
     limit: z.coerce.number().int().positive().max(100).default(10)
+});
+
+const platformOperationsOverviewQuerySchema = z.object({
+    tenant_id: z.string().uuid().optional(),
+    window_minutes: z.coerce.number().int().positive().max(10080).default(60),
+    sort_by: z.enum(["traffic", "errors", "latency", "sms"]).default("traffic"),
+    sort_dir: z.enum(["asc", "desc"]).default("desc"),
+    errors_limit: z.coerce.number().int().positive().max(100).default(20),
+    slow_limit: z.coerce.number().int().positive().max(100).default(10)
 });
 
 module.exports = {
@@ -74,6 +83,7 @@ module.exports = {
     platformTenantMetricsQuerySchema,
     platformErrorsQuerySchema,
     platformSlowEndpointsQuerySchema,
+    platformOperationsOverviewQuerySchema,
     updatePlanFeaturesSchema,
     assignSubscriptionSchema,
     deleteTenantSchema
