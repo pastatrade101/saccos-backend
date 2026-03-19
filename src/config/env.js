@@ -86,6 +86,14 @@ const envSchema = z.object({
         .string()
         .optional()
         .transform((value) => parseBooleanEnv(value, true)),
+    SCHEMA_CHECK_ENABLED: z
+        .string()
+        .optional()
+        .transform((value) => parseBooleanEnv(value, true)),
+    SCHEMA_CHECK_STRICT: z
+        .string()
+        .optional()
+        .transform((value) => parseBooleanEnv(value, isProductionEnv)),
     OBSERVABILITY_SAMPLE_LIMIT: z.coerce.number().int().positive().default(500),
     METRICS_BEARER_TOKEN: z.string().min(8).optional(),
     SLO_LIST_ENDPOINT_P95_MS: z.coerce.number().positive().default(400),
@@ -101,6 +109,21 @@ const envSchema = z.object({
     CREDIT_RISK_DEFAULT_DETECTION_MAX_LOANS_PER_TENANT: z.coerce.number().int().positive().default(500),
     CREDIT_RISK_GUARANTOR_MAX_COMMITMENT_RATIO: z.coerce.number().positive().max(1).default(0.8),
     CREDIT_RISK_GUARANTOR_MIN_AVAILABLE_AMOUNT: z.coerce.number().nonnegative().default(0),
+    AZAMPAY_ENABLED: z
+        .string()
+        .optional()
+        .transform((value) => parseBooleanEnv(value, false)),
+    AZAMPAY_APP_NAME: z.string().optional(),
+    AZAMPAY_CLIENT_ID: z.string().optional(),
+    AZAMPAY_CLIENT_SECRET: z.string().optional(),
+    AZAMPAY_AUTH_URL: z.string().url().default("https://authenticator-sandbox.azampay.co.tz/AppRegistration/GenerateToken"),
+    AZAMPAY_CHECKOUT_URL: z.string().url().default("https://sandbox.azampay.co.tz/azampay/mno/checkout"),
+    AZAMPAY_CURRENCY: z.string().default("TZS"),
+    AZAMPAY_AUTH_TIMEOUT_MS: z.coerce.number().int().positive().default(20000),
+    AZAMPAY_CHECKOUT_TIMEOUT_MS: z.coerce.number().int().positive().default(60000),
+    AZAMPAY_TOKEN_TTL_MS: z.coerce.number().int().positive().default(240000),
+    AZAMPAY_INTENT_TTL_SECONDS: z.coerce.number().int().positive().default(300),
+    AZAMPAY_SOURCE_LABEL: z.string().default("saccos_member_portal"),
     SSL_ENABLED: z
         .string()
         .optional()
@@ -170,6 +193,8 @@ module.exports = {
     reportBrandSubtitle: env.REPORT_BRAND_SUBTITLE,
     reportBrandLogoPath: env.REPORT_BRAND_LOGO_PATH || "",
     observabilityEnabled: env.OBSERVABILITY_ENABLED,
+    schemaCheckEnabled: env.SCHEMA_CHECK_ENABLED,
+    schemaCheckStrict: env.SCHEMA_CHECK_STRICT,
     observabilitySampleLimit: env.OBSERVABILITY_SAMPLE_LIMIT,
     metricsBearerToken: env.METRICS_BEARER_TOKEN || "",
     sloListEndpointP95Ms: env.SLO_LIST_ENDPOINT_P95_MS,
@@ -182,6 +207,18 @@ module.exports = {
     creditRiskDefaultDetectionMaxLoansPerTenant: env.CREDIT_RISK_DEFAULT_DETECTION_MAX_LOANS_PER_TENANT,
     creditRiskGuarantorMaxCommitmentRatio: env.CREDIT_RISK_GUARANTOR_MAX_COMMITMENT_RATIO,
     creditRiskGuarantorMinAvailableAmount: env.CREDIT_RISK_GUARANTOR_MIN_AVAILABLE_AMOUNT,
+    azamPayEnabled: env.AZAMPAY_ENABLED,
+    azamPayAppName: env.AZAMPAY_APP_NAME || "",
+    azamPayClientId: env.AZAMPAY_CLIENT_ID || "",
+    azamPayClientSecret: env.AZAMPAY_CLIENT_SECRET || "",
+    azamPayAuthUrl: env.AZAMPAY_AUTH_URL,
+    azamPayCheckoutUrl: env.AZAMPAY_CHECKOUT_URL,
+    azamPayCurrency: env.AZAMPAY_CURRENCY,
+    azamPayAuthTimeoutMs: env.AZAMPAY_AUTH_TIMEOUT_MS,
+    azamPayCheckoutTimeoutMs: env.AZAMPAY_CHECKOUT_TIMEOUT_MS,
+    azamPayTokenTtlMs: env.AZAMPAY_TOKEN_TTL_MS,
+    azamPayIntentTtlSeconds: env.AZAMPAY_INTENT_TTL_SECONDS,
+    azamPaySourceLabel: env.AZAMPAY_SOURCE_LABEL,
     sslEnabled: env.SSL_ENABLED,
     logLevel: env.LOG_LEVEL
 };

@@ -215,22 +215,6 @@ async function getPlanByCode(planCode) {
     return data || null;
 }
 
-async function getLegacySubscription(tenantId) {
-    const { data, error } = await adminSupabase
-        .from("subscriptions")
-        .select("*")
-        .eq("tenant_id", tenantId)
-        .order("start_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-    if (error) {
-        throw new AppError(500, "SUBSCRIPTION_LOOKUP_FAILED", "Unable to load tenant subscription.", error);
-    }
-
-    return data || null;
-}
-
 async function getFeaturesByPlanId(planId) {
     const { data, error } = await adminSupabase
         .from("plan_features")
@@ -322,46 +306,9 @@ async function getLatestTenantSubscriptionsByTenantIds(tenantIds) {
     return latestByTenant;
 }
 
-async function getLegacySubscriptionsByTenantIds(tenantIds) {
-    if (!tenantIds.length) {
-        return {};
-    }
-
-    const { data, error } = await adminSupabase
-        .from("subscriptions")
-        .select("*")
-        .in("tenant_id", tenantIds)
-        .order("start_at", { ascending: false });
-
-    if (error) {
-        throw new AppError(500, "SUBSCRIPTION_LOOKUP_FAILED", "Unable to load tenant subscriptions.", error);
-    }
-
-    const latestByTenant = {};
-    for (const row of data || []) {
-        if (!latestByTenant[row.tenant_id]) {
-            latestByTenant[row.tenant_id] = row;
-        }
-    }
-
-    return latestByTenant;
-}
-
 async function getTenantEntitlements(tenantId) {
-    const subscription = await getLatestTenantSubscription(tenantId);
-
-    if (!subscription) {
-        const legacy = await getLegacySubscription(tenantId);
-
-        if (!legacy) {
-            return {};
-        }
-
-        return buildEntitlements(legacy.plan, []);
-    }
-
-    const features = await getFeaturesByPlanId(subscription.plan_id);
-    return buildEntitlements(subscription.plans?.code, features);
+    const subscription = await getSubscriptionStatus(tenantId, { bypassCache: true });
+    return subscription.features || {};
 }
 
 async function resolveSubscriptionStatus(tenantId) {
@@ -382,12 +329,11 @@ async function resolveSubscriptionStatuses(tenantIds = []) {
     const planIds = Array.from(new Set(latestSubscriptions.map((row) => row.plan_id).filter(Boolean)));
     const featuresByPlanId = await getFeaturesByPlanIds(planIds);
     const responseByTenant = {};
-    const missingTenantIds = [];
 
     for (const tenantId of uniqueTenantIds) {
         const subscription = latestSubscriptionsByTenant[tenantId];
         if (!subscription) {
-            missingTenantIds.push(tenantId);
+            responseByTenant[tenantId] = buildMissingSubscriptionResponse();
             continue;
         }
 
@@ -397,20 +343,6 @@ async function resolveSubscriptionStatuses(tenantIds = []) {
             normalizeTenantSubscriptionRow(subscription),
             entitlements
         );
-    }
-
-    if (missingTenantIds.length) {
-        const legacyByTenant = await getLegacySubscriptionsByTenantIds(missingTenantIds);
-        for (const tenantId of missingTenantIds) {
-            const legacy = legacyByTenant[tenantId];
-            if (!legacy) {
-                responseByTenant[tenantId] = buildMissingSubscriptionResponse();
-                continue;
-            }
-
-            const entitlements = buildEntitlements(legacy.plan, []);
-            responseByTenant[tenantId] = buildSubscriptionResponse(legacy, entitlements);
-        }
     }
 
     return responseByTenant;
@@ -532,25 +464,6 @@ async function assignTenantSubscription({
 
     if (subscriptionError) {
         throw new AppError(500, "TENANT_SUBSCRIPTION_CREATE_FAILED", "Unable to assign tenant subscription.", subscriptionError);
-    }
-
-    const { error: legacyError } = await adminSupabase
-        .from("subscriptions")
-        .insert({
-            tenant_id: tenantId,
-            plan: plan.code,
-            status: status === "suspended" ? "past_due" : status,
-            start_at: effectiveStartAt,
-            expires_at: effectiveExpiresAt
-        });
-
-    if (legacyError) {
-        throw new AppError(
-            500,
-            "LEGACY_SUBSCRIPTION_SYNC_FAILED",
-            "Unable to synchronize tenant subscription.",
-            legacyError
-        );
     }
 
     clearSubscriptionStatusCache(tenantId);

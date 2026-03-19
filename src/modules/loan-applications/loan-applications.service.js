@@ -43,6 +43,7 @@ const LOAN_APPLICATION_LIST_COLUMNS = `
     recommended_repayment_frequency,
     required_approval_count,
     approval_count,
+    approval_cycle,
     approval_notes,
     approved_by,
     approved_at,
@@ -224,28 +225,6 @@ function attachGuarantorConsentReference(application) {
             total: totalCount
         }
     };
-}
-
-function toTimestamp(value) {
-    if (!value) {
-        return null;
-    }
-
-    const parsed = Date.parse(String(value));
-    return Number.isFinite(parsed) ? parsed : null;
-}
-
-function getCurrentCycleApprovals(application) {
-    const rows = Array.isArray(application?.loan_approvals) ? application.loan_approvals : [];
-    const submittedAtMs = toTimestamp(application?.submitted_at);
-    if (!submittedAtMs) {
-        return rows;
-    }
-
-    return rows.filter((row) => {
-        const createdAtMs = toTimestamp(row?.created_at);
-        return createdAtMs !== null && createdAtMs >= submittedAtMs;
-    });
 }
 
 async function getExpandedApplication(tenantId, applicationId) {
@@ -632,6 +611,211 @@ function invalidateLoanApplicationsCountCache() {
     loanApplicationsCountInFlight.clear();
 }
 
+function toLoanApprovalRpcError(code, message, details) {
+    switch (code) {
+    case "LOAN_APPLICATION_NOT_FOUND":
+        return new AppError(404, code, message, details);
+    case "LOAN_APPLICATION_NOT_APPROVABLE":
+    case "MAKER_CHECKER_VIOLATION":
+    case "LOAN_APPLICATION_ALREADY_APPROVED":
+    case "LOAN_APPLICATION_ALREADY_REJECTED":
+    case "LOAN_APPLICATION_APPROVAL_INPUT_INVALID":
+        return new AppError(400, code, message, details);
+    default:
+        return new AppError(500, code || "LOAN_APPLICATION_APPROVE_FAILED", message || "Unable to approve the loan application.", details);
+    }
+}
+
+async function approveLoanApplicationDecision({ tenantId, applicationId, actorUserId, notes }) {
+    const { data, error } = await adminSupabase.rpc("approve_loan_application", {
+        p_tenant_id: tenantId,
+        p_application_id: applicationId,
+        p_actor_user_id: actorUserId,
+        p_notes: notes || null
+    });
+
+    if (error) {
+        throw new AppError(
+            500,
+            "LOAN_APPLICATION_APPROVE_FAILED",
+            "Unable to approve the loan application.",
+            error
+        );
+    }
+
+    const row = Array.isArray(data) ? (data[0] || null) : data;
+
+    if (!row) {
+        throw new AppError(
+            500,
+            "LOAN_APPLICATION_APPROVE_FAILED",
+            "Loan approval did not return a result."
+        );
+    }
+
+    if (!row.ok) {
+        throw toLoanApprovalRpcError(row.error_code, row.error_message, row);
+    }
+
+    return row;
+}
+
+function toLoanRejectionRpcError(code, message, details) {
+    switch (code) {
+    case "LOAN_APPLICATION_NOT_FOUND":
+        return new AppError(404, code, message, details);
+    case "LOAN_APPLICATION_NOT_REJECTABLE":
+    case "MAKER_CHECKER_VIOLATION":
+    case "LOAN_APPLICATION_ALREADY_APPROVED":
+    case "LOAN_APPLICATION_ALREADY_REJECTED":
+    case "LOAN_APPLICATION_REJECTION_INPUT_INVALID":
+        return new AppError(400, code, message, details);
+    default:
+        return new AppError(500, code || "LOAN_APPLICATION_REJECT_FAILED", message || "Unable to reject the loan application.", details);
+    }
+}
+
+async function rejectLoanApplicationDecision({ tenantId, applicationId, actorUserId, reason, notes }) {
+    const { data, error } = await adminSupabase.rpc("reject_loan_application", {
+        p_tenant_id: tenantId,
+        p_application_id: applicationId,
+        p_actor_user_id: actorUserId,
+        p_reason: reason,
+        p_notes: notes || null
+    });
+
+    if (error) {
+        throw new AppError(
+            500,
+            "LOAN_APPLICATION_REJECT_FAILED",
+            "Unable to reject the loan application.",
+            error
+        );
+    }
+
+    const row = Array.isArray(data) ? (data[0] || null) : data;
+
+    if (!row) {
+        throw new AppError(
+            500,
+            "LOAN_APPLICATION_REJECT_FAILED",
+            "Loan rejection did not return a result."
+        );
+    }
+
+    if (!row.ok) {
+        throw toLoanRejectionRpcError(row.error_code, row.error_message, row);
+    }
+
+    return row;
+}
+
+function toLoanSubmissionRpcError(code, message, details) {
+    switch (code) {
+    case "LOAN_APPLICATION_NOT_FOUND":
+        return new AppError(404, code, message, details);
+    case "LOAN_APPLICATION_NOT_SUBMITTABLE":
+    case "LOAN_APPLICATION_SUBMISSION_INPUT_INVALID":
+        return new AppError(400, code, message, details);
+    default:
+        return new AppError(500, code || "LOAN_APPLICATION_SUBMIT_FAILED", message || "Unable to submit loan application.", details);
+    }
+}
+
+async function submitLoanApplicationDecision({ tenantId, applicationId, actorUserId }) {
+    const { data, error } = await adminSupabase.rpc("submit_loan_application", {
+        p_tenant_id: tenantId,
+        p_application_id: applicationId,
+        p_actor_user_id: actorUserId
+    });
+
+    if (error) {
+        throw new AppError(
+            500,
+            "LOAN_APPLICATION_SUBMIT_FAILED",
+            "Unable to submit loan application.",
+            error
+        );
+    }
+
+    const row = Array.isArray(data) ? (data[0] || null) : data;
+
+    if (!row) {
+        throw new AppError(
+            500,
+            "LOAN_APPLICATION_SUBMIT_FAILED",
+            "Loan submission did not return a result."
+        );
+    }
+
+    if (!row.ok) {
+        throw toLoanSubmissionRpcError(row.error_code, row.error_message, row);
+    }
+
+    return row;
+}
+
+function toLoanAppraisalRpcError(code, message, details) {
+    switch (code) {
+    case "LOAN_APPLICATION_NOT_FOUND":
+        return new AppError(404, code, message, details);
+    case "LOAN_APPLICATION_NOT_APPRAISABLE":
+    case "LOAN_APPLICATION_APPRAISAL_INPUT_INVALID":
+        return new AppError(400, code, message, details);
+    default:
+        return new AppError(500, code || "LOAN_APPLICATION_APPRAISAL_FAILED", message || "Unable to save the loan appraisal.", details);
+    }
+}
+
+async function appraiseLoanApplicationDecision({
+    tenantId,
+    applicationId,
+    actorUserId,
+    appraisalNotes,
+    riskRating,
+    recommendedAmount,
+    recommendedTermCount,
+    recommendedInterestRate,
+    recommendedRepaymentFrequency
+}) {
+    const { data, error } = await adminSupabase.rpc("appraise_loan_application", {
+        p_tenant_id: tenantId,
+        p_application_id: applicationId,
+        p_actor_user_id: actorUserId,
+        p_appraisal_notes: appraisalNotes,
+        p_risk_rating: riskRating,
+        p_recommended_amount: recommendedAmount,
+        p_recommended_term_count: recommendedTermCount,
+        p_recommended_interest_rate: recommendedInterestRate,
+        p_recommended_repayment_frequency: recommendedRepaymentFrequency
+    });
+
+    if (error) {
+        throw new AppError(
+            500,
+            "LOAN_APPLICATION_APPRAISAL_FAILED",
+            "Unable to save the loan appraisal.",
+            error
+        );
+    }
+
+    const row = Array.isArray(data) ? (data[0] || null) : data;
+
+    if (!row) {
+        throw new AppError(
+            500,
+            "LOAN_APPLICATION_APPRAISAL_FAILED",
+            "Loan appraisal did not return a result."
+        );
+    }
+
+    if (!row.ok) {
+        throw toLoanAppraisalRpcError(row.error_code, row.error_message, row);
+    }
+
+    return row;
+}
+
 async function createLoanApplication(actor, payload) {
     const tenantId = payload.tenant_id || actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
@@ -733,7 +917,6 @@ async function updateLoanApplication(actor, applicationId, payload) {
         throw new AppError(500, "LOAN_APPLICATION_UPDATE_FAILED", "Unable to update loan application.", error);
     }
 
-    await adminSupabase.from("loan_approvals").delete().eq("application_id", applicationId);
     await replaceChildren(applicationId, tenantId, payload.guarantors ?? existing.loan_guarantors, payload.collateral_items ?? existing.collateral_items);
 
     await logAudit({
@@ -765,28 +948,11 @@ async function submitLoanApplication(actor, applicationId) {
 
     ensureApplicationEditAllowed(actor, { ...existing, status: "draft" });
 
-    const { data, error } = await adminSupabase
-        .from("loan_applications")
-        .update({
-            status: "submitted",
-            submitted_at: new Date().toISOString(),
-            rejection_reason: null,
-            rejected_at: null,
-            rejected_by: null,
-            approval_count: 0,
-            approval_notes: null,
-            approved_by: null,
-            approved_at: null,
-            disbursement_ready_at: null
-        })
-        .eq("tenant_id", tenantId)
-        .eq("id", applicationId)
-        .select("*")
-        .single();
-
-    if (error || !data) {
-        throw new AppError(500, "LOAN_APPLICATION_SUBMIT_FAILED", "Unable to submit loan application.", error);
-    }
+    const submissionDecision = await submitLoanApplicationDecision({
+        tenantId,
+        applicationId,
+        actorUserId: actor.user.id
+    });
 
     await creditRiskService.recomputeGuarantorExposuresForMembers({
         tenantId,
@@ -803,7 +969,20 @@ async function submitLoanApplication(actor, applicationId) {
         entityType: "loan_application",
         entityId: applicationId,
         beforeData: existing,
-        afterData: data
+        afterData: {
+            application_id: submissionDecision.application_id,
+            status: submissionDecision.status,
+            submitted_at: submissionDecision.submitted_at,
+            approval_count: submissionDecision.approval_count,
+            approval_cycle: submissionDecision.approval_cycle,
+            required_approval_count: submissionDecision.required_approval_count,
+            approved_by: submissionDecision.approved_by,
+            approved_at: submissionDecision.approved_at,
+            rejected_by: submissionDecision.rejected_by,
+            rejected_at: submissionDecision.rejected_at,
+            rejection_reason: submissionDecision.rejection_reason,
+            disbursement_ready_at: submissionDecision.disbursement_ready_at
+        }
     });
 
     invalidateLoanApplicationsCountCache();
@@ -835,27 +1014,17 @@ async function appraiseLoanApplication(actor, applicationId, payload) {
         throw new AppError(400, "LOAN_AMOUNT_OUT_OF_POLICY", "Recommended amount is outside the configured product limits.");
     }
 
-    const { data, error } = await adminSupabase
-        .from("loan_applications")
-        .update({
-            status: "appraised",
-            appraised_by: actor.user.id,
-            appraised_at: new Date().toISOString(),
-            appraisal_notes: payload.appraisal_notes,
-            risk_rating: payload.risk_rating,
-            recommended_amount: payload.recommended_amount,
-            recommended_term_count: payload.recommended_term_count,
-            recommended_interest_rate: payload.recommended_interest_rate,
-            recommended_repayment_frequency: payload.recommended_repayment_frequency
-        })
-        .eq("tenant_id", tenantId)
-        .eq("id", applicationId)
-        .select("*")
-        .single();
-
-    if (error || !data) {
-        throw new AppError(500, "LOAN_APPLICATION_APPRAISAL_FAILED", "Unable to save the loan appraisal.", error);
-    }
+    const appraisalDecision = await appraiseLoanApplicationDecision({
+        tenantId,
+        applicationId,
+        actorUserId: actor.user.id,
+        appraisalNotes: payload.appraisal_notes,
+        riskRating: payload.risk_rating,
+        recommendedAmount: payload.recommended_amount,
+        recommendedTermCount: payload.recommended_term_count,
+        recommendedInterestRate: payload.recommended_interest_rate,
+        recommendedRepaymentFrequency: payload.recommended_repayment_frequency
+    });
 
     const nextGuarantors = payload.guarantors ?? existing.loan_guarantors ?? [];
     const nextCollateralItems = payload.collateral_items ?? existing.collateral_items ?? [];
@@ -881,7 +1050,19 @@ async function appraiseLoanApplication(actor, applicationId, payload) {
         entityType: "loan_application",
         entityId: applicationId,
         beforeData: existing,
-        afterData: data
+        afterData: {
+            application_id: appraisalDecision.application_id,
+            status: appraisalDecision.status,
+            approval_cycle: appraisalDecision.approval_cycle,
+            appraised_by: appraisalDecision.appraised_by,
+            appraised_at: appraisalDecision.appraised_at,
+            appraisal_notes: appraisalDecision.appraisal_notes,
+            risk_rating: appraisalDecision.risk_rating,
+            recommended_amount: appraisalDecision.recommended_amount,
+            recommended_term_count: appraisalDecision.recommended_term_count,
+            recommended_interest_rate: appraisalDecision.recommended_interest_rate,
+            recommended_repayment_frequency: appraisalDecision.recommended_repayment_frequency
+        }
     });
 
     invalidateLoanApplicationsCountCache();
@@ -915,54 +1096,12 @@ async function approveLoanApplication(actor, applicationId, payload) {
         source: "application_approval"
     });
 
-    const cycleApprovals = getCurrentCycleApprovals(existing);
-    const actorDecision = cycleApprovals.find((row) => row.approver_id === actor.user.id) || null;
-    if (actorDecision?.decision === "approved") {
-        throw new AppError(400, "LOAN_APPLICATION_ALREADY_APPROVED", "You already recorded an approval for this application.");
-    }
-
-    if (actorDecision?.decision === "rejected") {
-        throw new AppError(400, "LOAN_APPLICATION_ALREADY_REJECTED", "You already recorded a rejection for this application.");
-    }
-
-    const currentCycleApprovedCount = cycleApprovals.filter((row) => row.decision === "approved").length;
-    const { error: approvalError } = await adminSupabase
-        .from("loan_approvals")
-        .upsert({
-            application_id: applicationId,
-            tenant_id: tenantId,
-            approver_id: actor.user.id,
-            approval_level: currentCycleApprovedCount + 1,
-            decision: "approved",
-            notes: payload.notes || null,
-            created_at: new Date().toISOString()
-        }, { onConflict: "application_id,approver_id" });
-
-    if (approvalError) {
-        throw new AppError(500, "LOAN_APPLICATION_APPROVAL_LOG_FAILED", "Unable to record the loan approval.", approvalError);
-    }
-
-    const nextApprovalCount = currentCycleApprovedCount + 1;
-    const enoughApprovals = nextApprovalCount >= existing.required_approval_count;
-
-    const { data, error } = await adminSupabase
-        .from("loan_applications")
-        .update({
-            approval_count: nextApprovalCount,
-            approval_notes: payload.notes || existing.approval_notes || null,
-            status: enoughApprovals ? "approved" : "appraised",
-            approved_by: enoughApprovals ? actor.user.id : existing.approved_by,
-            approved_at: enoughApprovals ? new Date().toISOString() : existing.approved_at,
-            disbursement_ready_at: enoughApprovals ? new Date().toISOString() : existing.disbursement_ready_at
-        })
-        .eq("tenant_id", tenantId)
-        .eq("id", applicationId)
-        .select("*")
-        .single();
-
-    if (error || !data) {
-        throw new AppError(500, "LOAN_APPLICATION_APPROVE_FAILED", "Unable to approve the loan application.", error);
-    }
+    const approvalDecision = await approveLoanApplicationDecision({
+        tenantId,
+        applicationId,
+        actorUserId: actor.user.id,
+        notes: payload.notes || null
+    });
 
     await logAudit({
         tenantId,
@@ -973,14 +1112,21 @@ async function approveLoanApplication(actor, applicationId, payload) {
         entityId: applicationId,
         beforeData: existing,
         afterData: {
-            ...data,
-            awaiting_additional_approvals: !enoughApprovals
+            application_id: approvalDecision.application_id,
+            status: approvalDecision.status,
+            approval_count: approvalDecision.approval_count,
+            approval_cycle: approvalDecision.approval_cycle,
+            required_approval_count: approvalDecision.required_approval_count,
+            approved_by: approvalDecision.approved_by,
+            approved_at: approvalDecision.approved_at,
+            disbursement_ready_at: approvalDecision.disbursement_ready_at,
+            awaiting_additional_approvals: Boolean(approvalDecision.awaiting_additional_approvals)
         }
     });
 
     invalidateLoanApplicationsCountCache();
     const expanded = await getExpandedApplication(tenantId, applicationId);
-    if (enoughApprovals) {
+    if (!approvalDecision.awaiting_additional_approvals) {
         await notifyLoanOfficersApprovedForDisbursement({
             actor,
             application: expanded
@@ -1008,53 +1154,13 @@ async function rejectLoanApplication(actor, applicationId, payload) {
         throw new AppError(400, "MAKER_CHECKER_VIOLATION", "The application maker cannot reject the same application.");
     }
 
-    const cycleApprovals = getCurrentCycleApprovals(existing);
-    const actorDecision = cycleApprovals.find((row) => row.approver_id === actor.user.id) || null;
-    if (actorDecision?.decision === "rejected") {
-        throw new AppError(400, "LOAN_APPLICATION_ALREADY_REJECTED", "You already recorded a rejection for this application.");
-    }
-
-    if (actorDecision?.decision === "approved") {
-        throw new AppError(400, "LOAN_APPLICATION_ALREADY_APPROVED", "You already recorded an approval for this application.");
-    }
-
-    const currentCycleApprovedCount = cycleApprovals.filter((row) => row.decision === "approved").length;
-    const { error: approvalError } = await adminSupabase
-        .from("loan_approvals")
-        .upsert({
-            application_id: applicationId,
-            tenant_id: tenantId,
-            approver_id: actor.user.id,
-            approval_level: currentCycleApprovedCount + 1,
-            decision: "rejected",
-            notes: payload.notes || payload.reason,
-            created_at: new Date().toISOString()
-        }, { onConflict: "application_id,approver_id" });
-
-    if (approvalError) {
-        throw new AppError(500, "LOAN_APPLICATION_REJECTION_LOG_FAILED", "Unable to record the loan rejection.", approvalError);
-    }
-
-    const { data, error } = await adminSupabase
-        .from("loan_applications")
-        .update({
-            status: "rejected",
-            rejection_reason: payload.reason,
-            rejected_at: new Date().toISOString(),
-            rejected_by: actor.user.id,
-            approval_notes: payload.notes || null,
-            disbursement_ready_at: null,
-            approved_by: null,
-            approved_at: null
-        })
-        .eq("tenant_id", tenantId)
-        .eq("id", applicationId)
-        .select("*")
-        .single();
-
-    if (error || !data) {
-        throw new AppError(500, "LOAN_APPLICATION_REJECT_FAILED", "Unable to reject the loan application.", error);
-    }
+    const rejectionDecision = await rejectLoanApplicationDecision({
+        tenantId,
+        applicationId,
+        actorUserId: actor.user.id,
+        reason: payload.reason,
+        notes: payload.notes || null
+    });
 
     await creditRiskService.recomputeGuarantorExposuresForMembers({
         tenantId,
@@ -1071,7 +1177,17 @@ async function rejectLoanApplication(actor, applicationId, payload) {
         entityType: "loan_application",
         entityId: applicationId,
         beforeData: existing,
-        afterData: data
+        afterData: {
+            application_id: rejectionDecision.application_id,
+            status: rejectionDecision.status,
+            approval_count: rejectionDecision.approval_count,
+            approval_cycle: rejectionDecision.approval_cycle,
+            required_approval_count: rejectionDecision.required_approval_count,
+            rejected_by: rejectionDecision.rejected_by,
+            rejected_at: rejectionDecision.rejected_at,
+            rejection_reason: rejectionDecision.rejection_reason,
+            approval_notes: rejectionDecision.approval_notes
+        }
     });
 
     invalidateLoanApplicationsCountCache();

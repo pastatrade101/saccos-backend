@@ -10,6 +10,7 @@ const notFoundHandler = require("./middleware/not-found");
 const requestContext = require("./middleware/request-context");
 const observabilityMiddleware = require("./middleware/observability");
 const { getPrometheusMetrics } = require("./services/observability.service");
+const { getSchemaCapabilityStatus } = require("./services/schema-capabilities.service");
 const { isOriginAllowed } = require("./utils/cors");
 
 const app = express();
@@ -44,11 +45,14 @@ app.use(
 );
 
 app.get("/health", (req, res) => {
+    const schema = getSchemaCapabilityStatus("api");
+
     res.json({
-        status: "ok",
+        status: schema.ok === false ? "degraded" : "ok",
         uptime: process.uptime(),
         timestamp: new Date().toISOString(),
-        version: process.env.npm_package_version || "1.0.0"
+        version: process.env.npm_package_version || "1.0.0",
+        schema
     });
 });
 

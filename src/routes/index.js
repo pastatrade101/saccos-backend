@@ -20,13 +20,18 @@ const observabilityRoutes = require("../modules/observability/observability.rout
 const creditRiskRoutes = require("../modules/credit-risk/credit-risk.routes");
 const approvalRoutes = require("../modules/approvals/approvals.routes");
 const notificationSettingsRoutes = require("../modules/notification-settings/notification-settings.routes");
+const memberPaymentRoutes = require("../modules/member-payments/member-payments.routes");
+const { getSchemaCapabilityStatus } = require("../services/schema-capabilities.service");
 
 const router = express.Router();
 
 router.get("/health", (req, res) => {
+    const schema = getSchemaCapabilityStatus("api");
+
     res.json({
-        status: "ok",
-        timestamp: new Date().toISOString()
+        status: schema.ok === false ? "degraded" : "ok",
+        timestamp: new Date().toISOString(),
+        schema
     });
 });
 
@@ -42,7 +47,6 @@ router.use("/loan-applications", loanApplicationRoutes);
 router.use("/imports", importRoutes);
 router.use("/products", productRoutes);
 router.use("/cash-control", cashControlRoutes);
-router.use("/", financeRoutes);
 router.use("/dividends", dividendRoutes);
 router.use("/auditor", auditorRoutes);
 router.use("/reports", reportRoutes);
@@ -50,5 +54,7 @@ router.use("/observability", observabilityRoutes);
 router.use("/credit-risk", creditRiskRoutes);
 router.use("/approvals", approvalRoutes);
 router.use("/notification-settings", notificationSettingsRoutes);
+router.use("/member-payments", memberPaymentRoutes);
+router.use("/", financeRoutes);
 
 module.exports = router;

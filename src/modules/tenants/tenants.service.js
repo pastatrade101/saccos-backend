@@ -1,8 +1,23 @@
 const { adminSupabase } = require("../../config/supabase");
 const AppError = require("../../utils/app-error");
 const { logAudit } = require("../../services/audit.service");
-const { assignTenantSubscription } = require("../../services/subscription.service");
+const {
+    assignTenantSubscription,
+    getSubscriptionStatus,
+    getSubscriptionStatusesForTenants
+} = require("../../services/subscription.service");
 const { assertTenantAccess } = require("../../services/user-context.service");
+
+function withTenantSubscription(tenant, subscription) {
+    const normalizedSubscription = subscription && subscription.status !== "missing"
+        ? subscription
+        : null;
+
+    return {
+        ...tenant,
+        subscription: normalizedSubscription
+    };
+}
 
 async function listTenants(actor, query = {}) {
     const page = Number(query.page || 1);
@@ -13,7 +28,7 @@ async function listTenants(actor, query = {}) {
     if (actor.isInternalOps) {
         const { data, error, count } = await adminSupabase
             .from("tenants")
-            .select("*, subscriptions(*)", { count: "exact" })
+            .select("*", { count: "exact" })
             .is("deleted_at", null)
             .order("created_at", { ascending: false })
             .range(from, to);
@@ -22,8 +37,14 @@ async function listTenants(actor, query = {}) {
             throw new AppError(500, "TENANTS_LIST_FAILED", "Unable to load tenants.", error);
         }
 
+        const subscriptionsByTenant = await getSubscriptionStatusesForTenants(
+            (data || []).map((tenant) => tenant.id)
+        );
+
         return {
-            data: data || [],
+            data: (data || []).map((tenant) =>
+                withTenantSubscription(tenant, subscriptionsByTenant[tenant.id] || null)
+            ),
             pagination: {
                 page,
                 limit,
@@ -38,7 +59,7 @@ async function listTenants(actor, query = {}) {
 
     const { data, error } = await adminSupabase
         .from("tenants")
-        .select("*, subscriptions(*)")
+        .select("*")
         .eq("id", actor.tenantId)
         .is("deleted_at", null)
         .single();
@@ -48,7 +69,7 @@ async function listTenants(actor, query = {}) {
     }
 
     return {
-        data: [data],
+        data: [withTenantSubscription(data, await getSubscriptionStatus(actor.tenantId))],
         pagination: {
             page: 1,
             limit: 1,
@@ -141,7 +162,7 @@ async function createTenant(actor, payload) {
         afterData: tenant
     });
 
-    return tenant;
+    return withTenantSubscription(tenant, await getSubscriptionStatus(tenant.id));
 }
 
 async function getTenant(actor, tenantId) {
@@ -149,7 +170,7 @@ async function getTenant(actor, tenantId) {
 
     const { data, error } = await adminSupabase
         .from("tenants")
-        .select("*, subscriptions(*)")
+        .select("*")
         .eq("id", tenantId)
         .is("deleted_at", null)
         .single();
@@ -158,7 +179,7 @@ async function getTenant(actor, tenantId) {
         throw new AppError(404, "TENANT_NOT_FOUND", "Tenant was not found.");
     }
 
-    return data;
+    return withTenantSubscription(data, await getSubscriptionStatus(tenantId));
 }
 
 async function updateTenant(actor, tenantId, payload) {
@@ -194,7 +215,7 @@ async function updateTenant(actor, tenantId, payload) {
         afterData: updated
     });
 
-    return updated;
+    return withTenantSubscription(updated, await getSubscriptionStatus(tenantId));
 }
 
 module.exports = {

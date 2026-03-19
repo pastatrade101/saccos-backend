@@ -315,24 +315,6 @@ async function deleteIn(table, column, values) {
     }
 }
 
-async function deleteByTenant(table, tenantIds) {
-    if (!tenantIds.length) {
-        return;
-    }
-
-    const { error } = await adminSupabase
-        .from(table)
-        .delete()
-        .in("tenant_id", tenantIds);
-
-    if (error) {
-        if (error.code === "PGRST205" || error.code === "42P01" || error.code === "42703") {
-            return;
-        }
-        throw new AppError(500, "TENANT_DELETE_FAILED", `Unable to delete from ${table}.`, error);
-    }
-}
-
 async function updateByTenant(table, tenantIds, patch) {
     if (!tenantIds.length) {
         return;
@@ -400,7 +382,7 @@ async function removeStorageTree(bucketName, prefix) {
 async function deleteRateLimitWindows(scope) {
     const keysToMatch = Array.from(new Set([
         ...(scope?.tenantIds || []),
-        ...(scope?.userIds || [])
+        ...(scope?.authUserIds || [])
     ])).filter(Boolean);
 
     for (const key of keysToMatch) {
@@ -452,7 +434,7 @@ async function listAuthUsersByTenantMetadata(tenantId) {
 }
 
 async function purgeTenantScopedRows(tenantId) {
-    const { error } = await adminSupabase.rpc("purge_tenant_scoped_rows", {
+    const { data, error } = await adminSupabase.rpc("purge_tenant_scoped_rows", {
         p_tenant_id: tenantId
     });
 
@@ -464,6 +446,8 @@ async function purgeTenantScopedRows(tenantId) {
             error
         );
     }
+
+    return data || null;
 }
 
 async function loadTenantDeletionScope(tenantId) {
@@ -537,6 +521,58 @@ async function deleteAuthUsers(userIds) {
     }
 }
 
+async function countTenantRows(table, tenantId) {
+    const { count, error } = await adminSupabase
+        .from(table)
+        .select("*", { count: "exact", head: true })
+        .eq("tenant_id", tenantId);
+
+    if (error) {
+        if (error.code === "PGRST205" || error.code === "42P01" || error.code === "42703") {
+            return 0;
+        }
+        throw new AppError(500, "TENANT_DELETE_FAILED", `Unable to verify remaining rows in ${table}.`, error);
+    }
+
+    return Number(count || 0);
+}
+
+async function assertTenantDataPurged(tenantId) {
+    const verificationTables = [
+        "user_profiles",
+        "members",
+        "member_accounts",
+        "member_applications",
+        "loan_applications",
+        "loans",
+        "loan_accounts",
+        "journal_entries",
+        "branches",
+        "chart_of_accounts",
+        "tenant_subscriptions",
+        "audit_logs",
+        "report_export_jobs"
+    ];
+
+    const checks = await Promise.all(
+        verificationTables.map(async (table) => ({
+            table,
+            count: await countTenantRows(table, tenantId)
+        }))
+    );
+
+    const remaining = checks.filter((entry) => entry.count > 0);
+
+    if (remaining.length) {
+        throw new AppError(
+            500,
+            "TENANT_DELETE_INCOMPLETE",
+            "Tenant deletion left tenant-scoped records behind.",
+            { tenant_id: tenantId, remaining }
+        );
+    }
+}
+
 async function deleteTenant(actor, tenantId, payload) {
     const { data: tenant, error: tenantError } = await adminSupabase
         .from("tenants")
@@ -577,88 +613,18 @@ async function deleteTenant(actor, tenantId, payload) {
     await removeStorageTree(env.receiptsBucket, `tenant/${tenantId}`);
     await removeStorageTree(env.importsBucket, `tenant/${tenantId}`);
 
-    // Break cyclic references before delete order starts.
+    // Break cyclic references before tenant-scoped purge starts.
     await updateByTenant("members", scope.tenantIds, { approved_application_id: null });
     await updateByTenant("member_applications", scope.tenantIds, { approved_member_id: null });
     await updateByTenant("membership_status_history", scope.tenantIds, { application_id: null });
     await updateByTenant("loans", scope.tenantIds, { application_id: null });
+    const purgeResult = await purgeTenantScopedRows(tenantId);
 
-    await deleteIn("credential_handoffs", "member_id", scope.memberIds);
-    await deleteIn("credential_handoffs", "user_id", scope.authUserIds);
-    await deleteByTenant("transaction_receipts", scope.tenantIds);
-    await deleteByTenant("teller_session_transactions", scope.tenantIds);
-    await deleteByTenant("teller_sessions", scope.tenantIds);
-    await deleteByTenant("receipt_policies", scope.tenantIds);
-    await deleteByTenant("cash_control_settings", scope.tenantIds);
-    await deleteByTenant("api_idempotency_requests", scope.tenantIds);
+    // Clean non-tenant-scoped artifacts that are keyed by users or ad-hoc scope strings.
+    await deleteIn("auth_otp_challenges", "user_id", scope.authUserIds);
     await deleteRateLimitWindows(scope);
-    await deleteByTenant("api_metrics", scope.tenantIds);
-    await deleteByTenant("api_errors", scope.tenantIds);
-    await deleteByTenant("sms_trigger_settings", scope.tenantIds);
-    await deleteByTenant("notification_dispatches", scope.tenantIds);
-    await deleteIn("auth_otp_challenges", "user_id", scope.userIds);
-    await deleteByTenant("report_export_jobs", scope.tenantIds);
-    await deleteByTenant("import_job_rows", scope.tenantIds);
-    await deleteByTenant("import_jobs", scope.tenantIds);
-    await deleteByTenant("approval_decisions", scope.tenantIds);
-    await deleteByTenant("approval_steps", scope.tenantIds);
-    await deleteByTenant("approval_requests", scope.tenantIds);
-    await deleteByTenant("approval_policies", scope.tenantIds);
-    await deleteByTenant("member_application_attachments", scope.tenantIds);
-    await deleteByTenant("membership_status_history", scope.tenantIds);
-    await deleteByTenant("member_applications", scope.tenantIds);
 
-    // Credit-risk records reference loans/members and must be removed before loan/member deletes.
-    await deleteByTenant("collection_actions", scope.tenantIds);
-    await deleteByTenant("guarantor_claims", scope.tenantIds);
-    await deleteByTenant("loan_restructures", scope.tenantIds);
-    await deleteByTenant("loan_writeoffs", scope.tenantIds);
-    await deleteByTenant("loan_recoveries", scope.tenantIds);
-    await deleteByTenant("loan_default_cases", scope.tenantIds);
-    await deleteByTenant("guarantor_exposures", scope.tenantIds);
-
-    await deleteByTenant("loan_approvals", scope.tenantIds);
-    await deleteByTenant("loan_guarantors", scope.tenantIds);
-    await deleteByTenant("collateral_items", scope.tenantIds);
-    await deleteByTenant("loan_applications", scope.tenantIds);
-    await deleteByTenant("dividend_payments", scope.tenantIds);
-    await deleteByTenant("dividend_approvals", scope.tenantIds);
-    await deleteByTenant("dividend_allocations", scope.tenantIds);
-    await deleteByTenant("dividend_member_snapshots", scope.tenantIds);
-    await deleteByTenant("dividend_components", scope.tenantIds);
-    await deleteByTenant("dividend_cycles", scope.tenantIds);
-    await deleteByTenant("journal_lines", scope.tenantIds);
-    await deleteByTenant("loan_account_transactions", scope.tenantIds);
-    await deleteByTenant("member_account_transactions", scope.tenantIds);
-    await deleteIn("journal_entries", "id", scope.journalIds);
-    await deleteByTenant("loan_accounts", scope.tenantIds);
-    await deleteByTenant("loan_schedules", scope.tenantIds);
-    await deleteByTenant("loans", scope.tenantIds);
-    await deleteByTenant("member_accounts", scope.tenantIds);
-    await deleteByTenant("financial_snapshot_periods", scope.tenantIds);
-    await deleteByTenant("financial_statement_runs", scope.tenantIds);
-    await deleteByTenant("period_closures", scope.tenantIds);
-    await deleteByTenant("daily_account_snapshots", scope.tenantIds);
-    await deleteByTenant("audit_logs", scope.tenantIds);
-    await deleteByTenant("account_balances", scope.tenantIds);
-    await deleteByTenant("posting_rules", scope.tenantIds);
-    await deleteByTenant("fee_rules", scope.tenantIds);
-    await deleteByTenant("penalty_rules", scope.tenantIds);
-    await deleteByTenant("loan_policy_settings", scope.tenantIds);
-    await deleteByTenant("loan_products", scope.tenantIds);
-    await deleteByTenant("share_products", scope.tenantIds);
-    await deleteByTenant("savings_products", scope.tenantIds);
-    await deleteByTenant("branch_staff_assignments", scope.tenantIds);
-    await deleteByTenant("user_profiles", scope.tenantIds);
-    await deleteByTenant("members", scope.tenantIds);
-    await deleteByTenant("branches", scope.tenantIds);
-    await deleteByTenant("tenant_settings", scope.tenantIds);
-    await deleteByTenant("chart_of_accounts", scope.tenantIds);
-    await deleteByTenant("tenant_subscriptions", scope.tenantIds);
-    await deleteByTenant("subscriptions", scope.tenantIds);
-
-    // Final guardrail sweep for any tenant-scoped rows introduced by newer schema changes.
-    await purgeTenantScopedRows(tenantId);
+    await assertTenantDataPurged(tenantId);
 
     await deleteAuthUsers(scope.authUserIds);
     await deleteIn("tenants", "id", scope.tenantIds);
@@ -667,7 +633,8 @@ async function deleteTenant(actor, tenantId, payload) {
     return {
         deleted: true,
         tenant_id: tenantId,
-        tenant_name: tenant.name
+        tenant_name: tenant.name,
+        purge: purgeResult
     };
 }
 

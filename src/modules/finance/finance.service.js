@@ -394,6 +394,86 @@ async function shareContribution(actor, payload) {
     return result;
 }
 
+async function postGatewayShareContribution(paymentOrder) {
+    const tenantId = paymentOrder.tenant_id;
+    await assertPostingRuleConfigured(tenantId, "share_purchase");
+
+    const { account, member } = await getAccountWithMember(paymentOrder.account_id, "shares");
+    assertTenantAccess({ auth: { tenantId } }, account.tenant_id);
+
+    if (member.id !== paymentOrder.member_id) {
+        throw new AppError(409, "PAYMENT_ORDER_MEMBER_MISMATCH", "Payment order member does not match the selected share account.");
+    }
+
+    const result = await runFinancialFunction("share_contribution", {
+        p_tenant_id: tenantId,
+        p_account_id: paymentOrder.account_id,
+        p_amount: Number(paymentOrder.amount),
+        p_teller_id: paymentOrder.created_by_user_id,
+        p_reference: paymentOrder.provider_ref || paymentOrder.external_id || paymentOrder.id,
+        p_description: paymentOrder.description || "Member portal share contribution via Azam Pay"
+    });
+
+    await logAudit({
+        tenantId,
+        actorUserId: paymentOrder.created_by_user_id,
+        table: "member_account_transactions",
+        entityType: "member_account_transaction",
+        entityId: result.journal_id || null,
+        action: "gateway_share_contribution",
+        afterData: {
+            payment_order_id: paymentOrder.id,
+            account_id: paymentOrder.account_id,
+            member_id: member.id,
+            amount: Number(paymentOrder.amount || 0),
+            journal_id: result.journal_id || null,
+            reference: paymentOrder.provider_ref || paymentOrder.external_id || paymentOrder.id
+        }
+    });
+
+    return result;
+}
+
+async function postGatewaySavingsDeposit(paymentOrder) {
+    const tenantId = paymentOrder.tenant_id;
+    await assertPostingRuleConfigured(tenantId, "deposit");
+
+    const { account, member } = await getAccountWithMember(paymentOrder.account_id, "savings");
+    assertTenantAccess({ auth: { tenantId } }, account.tenant_id);
+
+    if (member.id !== paymentOrder.member_id) {
+        throw new AppError(409, "PAYMENT_ORDER_MEMBER_MISMATCH", "Payment order member does not match the selected savings account.");
+    }
+
+    const result = await runFinancialFunction("deposit", {
+        p_tenant_id: tenantId,
+        p_account_id: paymentOrder.account_id,
+        p_amount: Number(paymentOrder.amount),
+        p_teller_id: paymentOrder.created_by_user_id,
+        p_reference: paymentOrder.provider_ref || paymentOrder.external_id || paymentOrder.id,
+        p_description: paymentOrder.description || "Member portal savings deposit via Azam Pay"
+    });
+
+    await logAudit({
+        tenantId,
+        actorUserId: paymentOrder.created_by_user_id,
+        table: "journal_entries",
+        entityType: "journal_entry",
+        entityId: result.journal_id || null,
+        action: "gateway_savings_deposit",
+        afterData: {
+            payment_order_id: paymentOrder.id,
+            account_id: paymentOrder.account_id,
+            member_id: member.id,
+            amount: Number(paymentOrder.amount || 0),
+            journal_id: result.journal_id || null,
+            reference: paymentOrder.provider_ref || paymentOrder.external_id || paymentOrder.id
+        }
+    });
+
+    return result;
+}
+
 async function dividendAllocation(actor, payload) {
     const tenantId = payload.tenant_id || actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
@@ -1072,6 +1152,8 @@ module.exports = {
     deposit,
     withdraw,
     shareContribution,
+    postGatewayShareContribution,
+    postGatewaySavingsDeposit,
     dividendAllocation,
     transfer,
     loanDisburse,

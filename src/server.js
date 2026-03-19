@@ -6,6 +6,7 @@ const app = require("./app");
 const env = require("./config/env");
 const { startDefaultDetectionScheduler } = require("./modules/credit-risk/default-detection.scheduler");
 const { startApiMetricsCollector } = require("./services/api-metrics-collector.service");
+const { assertRequiredSchemaCapabilities } = require("./services/schema-capabilities.service");
 
 const server = http.createServer(app);
 
@@ -21,13 +22,8 @@ server.on("error", (error) => {
     process.exit(1);
 });
 
-server.listen(env.port, env.host, () => {
-    console.log(`SACCOS backend listening on http://${env.host}:${env.port}`);
-    console.log(`OTP sign-in enforcement: ${env.otpRequiredOnSignIn ? "ENABLED" : "DISABLED"}`);
-});
-
-const stopDefaultDetectionScheduler = startDefaultDetectionScheduler();
-const stopApiMetricsCollector = startApiMetricsCollector();
+let stopDefaultDetectionScheduler = () => {};
+let stopApiMetricsCollector = async () => {};
 
 function shutdown(signal) {
     console.log(`Received ${signal}, shutting down gracefully.`);
@@ -50,3 +46,30 @@ function shutdown(signal) {
 
 process.on("SIGINT", () => shutdown("SIGINT"));
 process.on("SIGTERM", () => shutdown("SIGTERM"));
+
+async function startServer() {
+    const schemaStatus = await assertRequiredSchemaCapabilities({ context: "api" });
+
+    if (!schemaStatus.ok) {
+        console.warn(
+            "[schema-check] API startup continuing with missing capabilities because strict mode is disabled:",
+            schemaStatus.failures.map((failure) => `${failure.kind}:${failure.name}`).join(", ")
+        );
+    }
+
+    server.listen(env.port, env.host, () => {
+        console.log(`SACCOS backend listening on http://${env.host}:${env.port}`);
+        console.log(`OTP sign-in enforcement: ${env.otpRequiredOnSignIn ? "ENABLED" : "DISABLED"}`);
+        console.log(
+            `[schema-check] api ${schemaStatus.ok ? "passed" : "failed"} (strict=${env.schemaCheckStrict ? "true" : "false"})`
+        );
+    });
+
+    stopDefaultDetectionScheduler = startDefaultDetectionScheduler();
+    stopApiMetricsCollector = startApiMetricsCollector();
+}
+
+startServer().catch((error) => {
+    console.error("Backend startup failed:", error);
+    process.exit(1);
+});
