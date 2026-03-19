@@ -7,6 +7,7 @@ const { logAudit } = require("../../services/audit.service");
 const { assertBranchAccess, assertTenantAccess } = require("../../services/user-context.service");
 const { ensureBranchAssignments } = require("../../services/branch-assignment.service");
 const { saveCredentialHandoff, getActiveCredentialByUser } = require("../../services/credential-handoff.service");
+const { sendPasswordSetupLink } = require("../auth/auth.service");
 const MEMBERS_COUNT_CACHE_TTL_MS = Math.max(0, Number(process.env.MEMBERS_COUNT_CACHE_TTL_MS || 15000));
 const membersCountCache = new Map();
 const membersCountInFlight = new Map();
@@ -861,12 +862,17 @@ async function provisionMemberLogin(actor, member, payload) {
     if (!email) {
         throw new AppError(400, "MEMBER_EMAIL_REQUIRED", "Member email is required to create a login.");
     }
+    if (payload.send_invite && !member.phone) {
+        throw new AppError(400, "MEMBER_PHONE_REQUIRED", "Member phone is required to send the SMS setup link.");
+    }
 
     const branchId = payload.branch_id || member.branch_id;
     const mustChangePassword = Boolean(payload.must_change_password);
+    const useSmsSetupLink = Boolean(payload.send_invite);
     const temporaryPassword = !payload.send_invite && !payload.password
         ? generateTemporaryPassword()
         : null;
+    const hiddenInvitePassword = useSmsSetupLink ? generateTemporaryPassword() : null;
 
     const assertAuthUserTenantConsistency = async (authUserId) => {
         const { data: existingProfile, error: existingProfileError } = await adminSupabase
@@ -891,6 +897,7 @@ async function provisionMemberLogin(actor, member, payload) {
 
     const linkExistingAuthUser = async (authUser) => {
         const authUserId = authUser.id;
+        let destinationHint = null;
         await assertAuthUserTenantConsistency(authUserId);
 
         const { data: existingLinkedMember, error: existingLinkedMemberError } = await adminSupabase
@@ -990,6 +997,9 @@ async function provisionMemberLogin(actor, member, payload) {
                 password: temporaryPassword || payload.password,
                 createdBy: actor.user.id
             });
+        } else if (useSmsSetupLink) {
+            const smsResult = await sendPasswordSetupLink({ email });
+            destinationHint = smsResult.destination_hint || null;
         }
 
         return {
@@ -1003,12 +1013,15 @@ async function provisionMemberLogin(actor, member, payload) {
             temporary_password: temporaryPassword || (await getActiveCredentialByUser({
                 tenantId: member.tenant_id,
                 userId: authUserId
-            }))?.temporary_password || null
+            }))?.temporary_password || null,
+            invite_delivery: payload.send_invite ? "sms_link" : "password",
+            destination_hint: destinationHint
         };
     };
 
     if (member.user_id) {
         await assertAuthUserTenantConsistency(member.user_id);
+        let destinationHint = null;
 
         const { data: existingProfile, error: existingProfileError } = await adminSupabase
             .from("user_profiles")
@@ -1096,6 +1109,9 @@ async function provisionMemberLogin(actor, member, payload) {
                 password: temporaryPassword || payload.password,
                 createdBy: actor.user.id
             });
+        } else if (useSmsSetupLink) {
+            const smsResult = await sendPasswordSetupLink({ email });
+            destinationHint = smsResult.destination_hint || null;
         }
 
         return {
@@ -1109,15 +1125,22 @@ async function provisionMemberLogin(actor, member, payload) {
             temporary_password: temporaryPassword || (await getActiveCredentialByUser({
                 tenantId: member.tenant_id,
                 userId: member.user_id
-            }))?.temporary_password || null
+            }))?.temporary_password || null,
+            invite_delivery: payload.send_invite ? "sms_link" : "password",
+            destination_hint: destinationHint
         };
     }
 
     const authOperation = payload.send_invite
-        ? adminSupabase.auth.admin.inviteUserByEmail(email, {
-            data: {
+        ? adminSupabase.auth.admin.createUser({
+            email,
+            password: hiddenInvitePassword,
+            email_confirm: true,
+            user_metadata: {
                 full_name: member.full_name,
                 phone: member.phone,
+            },
+            app_metadata: {
                 tenant_id: member.tenant_id,
                 role: "member",
                 member_id: member.id
@@ -1155,6 +1178,7 @@ async function provisionMemberLogin(actor, member, payload) {
     const authUserId = authData.user.id;
 
     try {
+        let destinationHint = null;
         const profilePayload = {
             user_id: authUserId,
             tenant_id: member.tenant_id,
@@ -1207,6 +1231,9 @@ async function provisionMemberLogin(actor, member, payload) {
                 password: temporaryPassword || payload.password,
                 createdBy: actor.user.id
             });
+        } else if (useSmsSetupLink) {
+            const smsResult = await sendPasswordSetupLink({ email });
+            destinationHint = smsResult.destination_hint || null;
         }
 
         return {
@@ -1216,7 +1243,9 @@ async function provisionMemberLogin(actor, member, payload) {
                 id: authUserId,
                 email: authData.user.email
             },
-            temporary_password: temporaryPassword
+            temporary_password: temporaryPassword,
+            invite_delivery: payload.send_invite ? "sms_link" : "password",
+            destination_hint: destinationHint
         };
     } catch (error) {
         await safeDeleteAuthUser(authUserId);

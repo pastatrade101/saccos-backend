@@ -73,6 +73,14 @@ const createMemberSchema = z.object(memberSchemaFields).superRefine((value, ctx)
             path: ["email"]
         });
     }
+
+    if (value.login?.create_login && value.login?.send_invite && !(value.phone || value.phone_number)) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Phone is required when sending an SMS setup link.",
+            path: ["phone"]
+        });
+    }
 });
 
 const updateMemberSchema = z.object(memberSchemaFields).partial().omit({
