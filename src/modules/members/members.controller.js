@@ -59,6 +59,11 @@ exports.createMemberLogin = asyncHandler(async (req, res) => {
     res.status(201).json({ data: result });
 });
 
+exports.provisionMemberAccount = asyncHandler(async (req, res) => {
+    const result = await memberService.provisionMemberAccount(req.auth, req.params.id, req.validated.body);
+    res.status(201).json({ data: result });
+});
+
 exports.resetMemberPassword = asyncHandler(async (req, res) => {
     const result = await memberService.resetMemberPassword(req.auth, req.params.id, req.validated.body);
     applyNoStore(res);

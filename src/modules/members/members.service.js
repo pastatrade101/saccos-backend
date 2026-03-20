@@ -691,41 +691,89 @@ async function findAuthUserByEmail(email) {
     return (data?.users || []).find((user) => user.email?.toLowerCase() === email.toLowerCase()) || null;
 }
 
-async function getDefaultMemberProducts(tenantId) {
-    const [{ data: savingsProduct, error: savingsError }, { data: shareProduct, error: shareError }] = await Promise.all([
-        adminSupabase
+async function resolveMemberProducts(
+    tenantId,
+    {
+        savingsProductId = null,
+        shareProductId = null,
+        includeSavings = true,
+        includeShares = true
+    } = {}
+) {
+    const resolveSavingsProduct = async () => {
+        let query = adminSupabase
             .from("savings_products")
-            .select("id, code, name")
-            .eq("tenant_id", tenantId)
-            .eq("status", "active")
-            .order("created_at", { ascending: true })
-            .limit(1)
-            .maybeSingle(),
-        adminSupabase
+            .select("id, code, name, status")
+            .eq("tenant_id", tenantId);
+
+        if (savingsProductId) {
+            query = query.eq("id", savingsProductId).maybeSingle();
+        } else {
+            query = query.eq("status", "active").order("created_at", { ascending: true }).limit(1).maybeSingle();
+        }
+
+        const { data, error } = await query;
+
+        if (error) {
+            throw new AppError(500, "SAVINGS_PRODUCT_LOOKUP_FAILED", "Unable to resolve savings product.", error);
+        }
+
+        if (!data) {
+            throw new AppError(
+                savingsProductId ? 400 : 500,
+                savingsProductId ? "SAVINGS_PRODUCT_NOT_AVAILABLE" : "MEMBER_PRODUCTS_NOT_CONFIGURED",
+                savingsProductId
+                    ? "Selected savings product is not available for this tenant."
+                    : "Default savings and share products must be configured before onboarding members."
+            );
+        }
+
+        if (data.status !== "active") {
+            throw new AppError(400, "SAVINGS_PRODUCT_INACTIVE", "Selected savings product must be active before it can be assigned.");
+        }
+
+        return data;
+    };
+
+    const resolveShareProduct = async () => {
+        let query = adminSupabase
             .from("share_products")
-            .select("id, code, name")
-            .eq("tenant_id", tenantId)
-            .eq("status", "active")
-            .order("created_at", { ascending: true })
-            .limit(1)
-            .maybeSingle()
+            .select("id, code, name, status")
+            .eq("tenant_id", tenantId);
+
+        if (shareProductId) {
+            query = query.eq("id", shareProductId).maybeSingle();
+        } else {
+            query = query.eq("status", "active").order("created_at", { ascending: true }).limit(1).maybeSingle();
+        }
+
+        const { data, error } = await query;
+
+        if (error) {
+            throw new AppError(500, "SHARE_PRODUCT_LOOKUP_FAILED", "Unable to resolve share product.", error);
+        }
+
+        if (!data) {
+            throw new AppError(
+                shareProductId ? 400 : 500,
+                shareProductId ? "SHARE_PRODUCT_NOT_AVAILABLE" : "MEMBER_PRODUCTS_NOT_CONFIGURED",
+                shareProductId
+                    ? "Selected share product is not available for this tenant."
+                    : "Default savings and share products must be configured before onboarding members."
+            );
+        }
+
+        if (data.status !== "active") {
+            throw new AppError(400, "SHARE_PRODUCT_INACTIVE", "Selected share product must be active before it can be assigned.");
+        }
+
+        return data;
+    };
+
+    const [savingsProduct, shareProduct] = await Promise.all([
+        includeSavings ? resolveSavingsProduct() : Promise.resolve(null),
+        includeShares ? resolveShareProduct() : Promise.resolve(null)
     ]);
-
-    if (savingsError) {
-        throw new AppError(500, "SAVINGS_PRODUCT_LOOKUP_FAILED", "Unable to resolve savings product.", savingsError);
-    }
-
-    if (shareError) {
-        throw new AppError(500, "SHARE_PRODUCT_LOOKUP_FAILED", "Unable to resolve share product.", shareError);
-    }
-
-    if (!savingsProduct || !shareProduct) {
-        throw new AppError(
-            500,
-            "MEMBER_PRODUCTS_NOT_CONFIGURED",
-            "Default savings and share products must be configured before onboarding members."
-        );
-    }
 
     return {
         savingsProduct,
@@ -733,52 +781,7 @@ async function getDefaultMemberProducts(tenantId) {
     };
 }
 
-async function appendMembershipStatusHistory({ tenantId, memberId, applicationId = null, statusCode, changedBy, notes = null }) {
-    const { error } = await adminSupabase.from("membership_status_history").insert({
-        tenant_id: tenantId,
-        member_id: memberId,
-        application_id: applicationId,
-        status: statusCode,
-        changed_by: changedBy,
-        reason: notes
-    });
-
-    if (error) {
-        throw new AppError(
-            500,
-            "MEMBERSHIP_STATUS_HISTORY_WRITE_FAILED",
-            "Unable to record membership status history.",
-            error
-        );
-    }
-}
-
-async function ensureMemberAccounts({ tenantId, branchId, member }) {
-    let { data: existingAccounts, error: existingAccountsError } = await adminSupabase
-        .from("member_accounts")
-        .select("id, product_type")
-        .eq("tenant_id", tenantId)
-        .eq("member_id", member.id)
-        .is("deleted_at", null);
-
-    if (existingAccountsError && isMissingDeletedAtColumn(existingAccountsError)) {
-        ({ data: existingAccounts, error: existingAccountsError } = await adminSupabase
-            .from("member_accounts")
-            .select("id, product_type")
-            .eq("tenant_id", tenantId)
-            .eq("member_id", member.id));
-    }
-
-    if (existingAccountsError) {
-        throw new AppError(500, "MEMBER_ACCOUNT_LOOKUP_FAILED", "Unable to verify member accounts.", existingAccountsError);
-    }
-
-    const existingByProduct = new Set((existingAccounts || []).map((account) => account.product_type));
-
-    if (existingByProduct.has("savings") && existingByProduct.has("shares")) {
-        return existingAccounts || [];
-    }
-
+async function getMemberAccountControlAccounts(tenantId) {
     const { data: tenantSettings, error: settingsError } = await adminSupabase
         .from("tenant_settings")
         .select("default_member_savings_control_account_id")
@@ -809,7 +812,70 @@ async function ensureMemberAccounts({ tenantId, branchId, member }) {
         );
     }
 
-    const { savingsProduct, shareProduct } = await getDefaultMemberProducts(tenantId);
+    return {
+        savingsControlAccountId: tenantSettings.default_member_savings_control_account_id,
+        shareControlAccountId: shareControlAccount.id
+    };
+}
+
+async function appendMembershipStatusHistory({ tenantId, memberId, applicationId = null, statusCode, changedBy, notes = null }) {
+    const { error } = await adminSupabase.from("membership_status_history").insert({
+        tenant_id: tenantId,
+        member_id: memberId,
+        application_id: applicationId,
+        status: statusCode,
+        changed_by: changedBy,
+        reason: notes
+    });
+
+    if (error) {
+        throw new AppError(
+            500,
+            "MEMBERSHIP_STATUS_HISTORY_WRITE_FAILED",
+            "Unable to record membership status history.",
+            error
+        );
+    }
+}
+
+async function ensureMemberAccounts({
+    tenantId,
+    branchId,
+    member,
+    savingsProductId = null,
+    shareProductId = null
+}) {
+    let { data: existingAccounts, error: existingAccountsError } = await adminSupabase
+        .from("member_accounts")
+        .select("id, product_type")
+        .eq("tenant_id", tenantId)
+        .eq("member_id", member.id)
+        .is("deleted_at", null);
+
+    if (existingAccountsError && isMissingDeletedAtColumn(existingAccountsError)) {
+        ({ data: existingAccounts, error: existingAccountsError } = await adminSupabase
+            .from("member_accounts")
+            .select("id, product_type")
+            .eq("tenant_id", tenantId)
+            .eq("member_id", member.id));
+    }
+
+    if (existingAccountsError) {
+        throw new AppError(500, "MEMBER_ACCOUNT_LOOKUP_FAILED", "Unable to verify member accounts.", existingAccountsError);
+    }
+
+    const existingByProduct = new Set((existingAccounts || []).map((account) => account.product_type));
+
+    if (existingByProduct.has("savings") && existingByProduct.has("shares")) {
+        return existingAccounts || [];
+    }
+
+    const { savingsControlAccountId, shareControlAccountId } = await getMemberAccountControlAccounts(tenantId);
+
+    const { savingsProduct, shareProduct } = await resolveMemberProducts(tenantId, {
+        savingsProductId,
+        shareProductId
+    });
     const accountRows = [];
 
     if (!existingByProduct.has("savings")) {
@@ -822,7 +888,7 @@ async function ensureMemberAccounts({ tenantId, branchId, member }) {
             product_type: "savings",
             savings_product_id: savingsProduct.id,
             status: "active",
-            gl_account_id: tenantSettings.default_member_savings_control_account_id
+            gl_account_id: savingsControlAccountId
         });
     }
 
@@ -836,7 +902,7 @@ async function ensureMemberAccounts({ tenantId, branchId, member }) {
             product_type: "shares",
             share_product_id: shareProduct.id,
             status: "active",
-            gl_account_id: shareControlAccount.id
+            gl_account_id: shareControlAccountId
         });
     }
 
@@ -854,6 +920,124 @@ async function ensureMemberAccounts({ tenantId, branchId, member }) {
         ...(existingAccounts || []),
         ...accountRows
     ];
+}
+
+async function provisionMemberAccount(actor, memberId, payload) {
+    const member = await getMember(actor, memberId);
+    const tenantId = member.tenant_id;
+    const branchId = payload.branch_id || member.branch_id;
+    assertBranchAccess({ auth: actor }, branchId);
+
+    if (payload.product_type === "fixed_deposit") {
+        throw new AppError(
+            400,
+            "FIXED_DEPOSIT_PRODUCTS_NOT_CONFIGURED",
+            "Fixed deposit account provisioning requires a dedicated fixed deposit product catalog, which is not configured yet."
+        );
+    }
+
+    let { data: existingAccounts, error: existingAccountsError } = await adminSupabase
+        .from("member_accounts")
+        .select("id, product_type, status, savings_product_id, share_product_id")
+        .eq("tenant_id", tenantId)
+        .eq("member_id", member.id)
+        .is("deleted_at", null);
+
+    if (existingAccountsError && isMissingDeletedAtColumn(existingAccountsError)) {
+        ({ data: existingAccounts, error: existingAccountsError } = await adminSupabase
+            .from("member_accounts")
+            .select("id, product_type, status, savings_product_id, share_product_id")
+            .eq("tenant_id", tenantId)
+            .eq("member_id", member.id));
+    }
+
+    if (existingAccountsError) {
+        throw new AppError(500, "MEMBER_ACCOUNT_LOOKUP_FAILED", "Unable to verify member accounts.", existingAccountsError);
+    }
+
+    const activeAccounts = (existingAccounts || []).filter((account) => account.status === "active");
+    const { savingsControlAccountId, shareControlAccountId } = await getMemberAccountControlAccounts(tenantId);
+
+    let accountRow;
+
+    if (payload.product_type === "shares") {
+        if (activeAccounts.some((account) => account.product_type === "shares")) {
+            throw new AppError(
+                409,
+                "SHARE_ACCOUNT_ALREADY_EXISTS",
+                "This member already has an active share capital account."
+            );
+        }
+
+        const { shareProduct } = await resolveMemberProducts(tenantId, {
+            shareProductId: payload.share_product_id || null,
+            includeSavings: false,
+            includeShares: true
+        });
+
+        accountRow = {
+            tenant_id: tenantId,
+            member_id: member.id,
+            branch_id: branchId,
+            account_number: `SH-${crypto.randomInt(100000, 999999)}`,
+            account_name: payload.account_name?.trim() || `${member.full_name} Share Capital`,
+            product_type: "shares",
+            share_product_id: shareProduct.id,
+            status: "active",
+            gl_account_id: shareControlAccountId
+        };
+    } else {
+        const { savingsProduct } = await resolveMemberProducts(tenantId, {
+            savingsProductId: payload.savings_product_id || null,
+            includeSavings: true,
+            includeShares: false
+        });
+
+        if (
+            activeAccounts.some(
+                (account) => account.product_type === "savings" && account.savings_product_id === savingsProduct.id
+            )
+        ) {
+            throw new AppError(
+                409,
+                "SAVINGS_PRODUCT_ACCOUNT_ALREADY_EXISTS",
+                "This member already has an active savings account for the selected product."
+            );
+        }
+
+        accountRow = {
+            tenant_id: tenantId,
+            member_id: member.id,
+            branch_id: branchId,
+            account_number: `SV-${crypto.randomInt(100000, 999999)}`,
+            account_name: payload.account_name?.trim() || `${member.full_name} ${savingsProduct.name}`,
+            product_type: "savings",
+            savings_product_id: savingsProduct.id,
+            status: "active",
+            gl_account_id: savingsControlAccountId
+        };
+    }
+
+    const { data: createdAccount, error: createError } = await adminSupabase
+        .from("member_accounts")
+        .insert(accountRow)
+        .select("*")
+        .single();
+
+    if (createError || !createdAccount) {
+        throw new AppError(500, "MEMBER_ACCOUNT_CREATE_FAILED", "Unable to create member account.", createError);
+    }
+
+    await logAudit({
+        tenantId,
+        userId: actor.user.id,
+        table: "member_accounts",
+        action: "provision_member_account",
+        entityId: createdAccount.id,
+        afterData: createdAccount
+    });
+
+    return createdAccount;
 }
 
 async function provisionMemberLogin(actor, member, payload) {
@@ -1310,7 +1494,9 @@ async function createMember(actor, payload) {
     await ensureMemberAccounts({
         tenantId,
         branchId: payload.branch_id,
-        member
+        member,
+        savingsProductId: payload.savings_product_id || null,
+        shareProductId: payload.share_product_id || null
     });
     await appendMembershipStatusHistory({
         tenantId,
@@ -1799,6 +1985,7 @@ module.exports = {
     deleteMember,
     bulkDeleteMembers,
     createMemberLogin,
+    provisionMemberAccount,
     resetMemberPassword,
     ensureMemberAccounts,
     provisionMemberLogin,

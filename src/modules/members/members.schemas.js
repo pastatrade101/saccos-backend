@@ -19,6 +19,8 @@ const loginProvisionSchema = z.object({
 const memberSchemaFields = {
     tenant_id: z.string().uuid().optional(),
     branch_id: z.string().uuid(),
+    savings_product_id: z.string().uuid().optional().nullable(),
+    share_product_id: z.string().uuid().optional().nullable(),
     first_name: z.string().trim().min(2).max(80).optional().nullable(),
     middle_name: z.string().trim().max(80).optional().nullable(),
     last_name: z.string().trim().min(2).max(80).optional().nullable(),
@@ -95,6 +97,30 @@ const createMemberLoginSchema = z.object({
     password: z.string().min(8).max(128).optional().nullable()
 });
 
+const provisionMemberAccountSchema = z.object({
+    branch_id: z.string().uuid().optional().nullable(),
+    product_type: z.enum(["savings", "shares", "fixed_deposit"]),
+    savings_product_id: z.string().uuid().optional().nullable(),
+    share_product_id: z.string().uuid().optional().nullable(),
+    account_name: z.string().trim().min(3).max(120).optional().nullable()
+}).superRefine((value, ctx) => {
+    if (value.product_type === "savings" && !value.savings_product_id) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Select a savings product for the new savings account.",
+            path: ["savings_product_id"]
+        });
+    }
+
+    if (value.product_type === "shares" && !value.share_product_id) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Select a share product for the new share capital account.",
+            path: ["share_product_id"]
+        });
+    }
+});
+
 const resetMemberPasswordSchema = z.object({
     password: z.string().min(8).max(128).optional().nullable()
 });
@@ -131,6 +157,7 @@ module.exports = {
     createMemberSchema,
     updateMemberSchema,
     createMemberLoginSchema,
+    provisionMemberAccountSchema,
     resetMemberPasswordSchema,
     bulkDeleteMembersSchema,
     listMembersQuerySchema,

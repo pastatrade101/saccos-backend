@@ -11,6 +11,7 @@ const {
     createMemberSchema,
     updateMemberSchema,
     createMemberLoginSchema,
+    provisionMemberAccountSchema,
     resetMemberPasswordSchema,
     bulkDeleteMembersSchema,
     listMembersQuerySchema,
@@ -83,6 +84,12 @@ router.post(
     authorize([ROLES.BRANCH_MANAGER], { allowInternalOps: false }),
     validate(createMemberLoginSchema),
     controller.createMemberLogin
+);
+router.post(
+    "/:id/accounts/provision",
+    authorize([ROLES.BRANCH_MANAGER], { allowInternalOps: false }),
+    validate(provisionMemberAccountSchema),
+    controller.provisionMemberAccount
 );
 router.post(
     "/:id/reset-password",
