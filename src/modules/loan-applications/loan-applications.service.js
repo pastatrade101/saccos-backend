@@ -8,6 +8,8 @@ const {
     notifyLoanOfficerGuarantorDeclined,
     notifyMemberLoanApplicationApproved,
     notifyMemberLoanApplicationRejected,
+    notifyMemberLoanDisbursed,
+    notifyBranchManagersLoanDisbursed,
     notifyLoanOfficersApprovedForDisbursement,
     notifyLoanOfficersNewApplication,
     notifyLoanOfficersReappraisalNeeded
@@ -1696,8 +1698,20 @@ async function disburseLoanApplication(actor, applicationId, payload) {
     });
 
     invalidateLoanApplicationsCountCache();
+    const expanded = await getExpandedApplication(tenantId, applicationId);
+    await notifyMemberLoanDisbursed({
+        actor,
+        application: expanded,
+        disbursement: disburseResult
+    });
+    await notifyBranchManagersLoanDisbursed({
+        actor,
+        application: expanded,
+        disbursement: disburseResult
+    });
+
     return {
-        application: await getExpandedApplication(tenantId, applicationId),
+        application: expanded,
         disbursement: disburseResult
     };
 }
