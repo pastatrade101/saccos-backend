@@ -1164,6 +1164,10 @@ async function appraiseLoanApplicationDecision({
 }
 
 async function createLoanApplication(actor, payload) {
+    if (actor.role === ROLES.BRANCH_MANAGER) {
+        throw new AppError(403, "FORBIDDEN", "Branch managers cannot create loan applications on behalf of members.");
+    }
+
     const tenantId = payload.tenant_id || actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
     const sanitizedPayload = sanitizeLoanApplicationPayload(payload);

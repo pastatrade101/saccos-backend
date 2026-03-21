@@ -30,7 +30,7 @@ router.get(
 
 router.post(
     "/",
-    authorize([ROLES.BRANCH_MANAGER, ROLES.LOAN_OFFICER, ROLES.TELLER, ROLES.MEMBER], { allowInternalOps: false }),
+    authorize([ROLES.LOAN_OFFICER, ROLES.TELLER, ROLES.MEMBER], { allowInternalOps: false }),
     validate(schemas.createLoanApplicationSchema),
     controller.create
 );
