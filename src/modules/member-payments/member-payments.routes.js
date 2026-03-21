@@ -3,6 +3,7 @@ const express = require("express");
 const auth = require("../../middleware/auth");
 const authorize = require("../../middleware/authorize");
 const idempotency = require("../../middleware/idempotency");
+const requireFeature = require("../../middleware/require-feature");
 const requireSubscription = require("../../middleware/require-subscription");
 const validate = require("../../middleware/validate");
 const { ROLES } = require("../../constants/roles");
@@ -24,7 +25,7 @@ router.post(
     controller.handleAzamCallback
 );
 
-router.use(auth, requireSubscription());
+router.use(auth, requireSubscription(), requireFeature("contributions_enabled"));
 
 router.post(
     "/contributions/initiate",

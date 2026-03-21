@@ -2,6 +2,9 @@ const { z } = require("zod");
 
 const uuid = z.string().uuid();
 const money = z.coerce.number().positive().multipleOf(0.01);
+const repaymentFrequency = z.enum(["daily", "weekly", "monthly"]);
+const loanPurposePattern = /^[A-Za-z0-9\s,.]+$/;
+const referencePattern = /^[A-Za-z0-9_-]+$/;
 
 const guarantorSchema = z.object({
     member_id: uuid,
@@ -22,11 +25,11 @@ const createLoanApplicationSchema = z.object({
     branch_id: uuid.optional(),
     member_id: uuid.optional(),
     product_id: uuid,
-    external_reference: z.string().max(80).optional().nullable(),
-    purpose: z.string().trim().min(3).max(500),
-    requested_amount: money,
+    external_reference: z.string().trim().max(100).regex(referencePattern, "Reference may contain only letters, numbers, dashes, and underscores.").optional().nullable(),
+    purpose: z.string().trim().min(20).max(500).regex(loanPurposePattern, "Loan purpose may contain only letters, numbers, spaces, commas, and periods."),
+    requested_amount: money.min(10000),
     requested_term_count: z.coerce.number().int().positive(),
-    requested_repayment_frequency: z.enum(["daily", "weekly", "monthly"]).default("monthly"),
+    requested_repayment_frequency: repaymentFrequency.default("monthly"),
     requested_interest_rate: z.coerce.number().min(0).max(100).optional().nullable(),
     guarantors: z.array(guarantorSchema).max(10).optional().default([]),
     collateral_items: z.array(collateralSchema).max(10).optional().default([])
@@ -38,7 +41,7 @@ const appraiseLoanApplicationSchema = z.object({
     recommended_amount: money,
     recommended_term_count: z.coerce.number().int().positive(),
     recommended_interest_rate: z.coerce.number().min(0).max(100),
-    recommended_repayment_frequency: z.enum(["daily", "weekly", "monthly"]).default("monthly"),
+    recommended_repayment_frequency: repaymentFrequency.default("monthly"),
     risk_rating: z.enum(["low", "medium", "high"]).default("medium"),
     appraisal_notes: z.string().trim().min(3).max(1000),
     guarantors: z.array(guarantorSchema).max(10).optional(),

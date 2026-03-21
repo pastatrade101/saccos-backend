@@ -114,6 +114,10 @@ create index if not exists loan_applications_member_idx
 create index if not exists loan_applications_branch_idx
     on public.loan_applications (tenant_id, branch_id, created_at desc);
 
+create unique index if not exists loan_applications_tenant_external_reference_key
+    on public.loan_applications (tenant_id, external_reference)
+    where external_reference is not null;
+
 create unique index if not exists loan_applications_loan_id_key
     on public.loan_applications (loan_id)
     where loan_id is not null;

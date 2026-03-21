@@ -698,12 +698,12 @@ begin
         return;
     end if;
 
-    if v_application.status not in ('appraised', 'approved') then
+    if v_application.status not in ('submitted', 'appraised', 'approved') then
         return query
         select
             false,
             'LOAN_APPLICATION_NOT_REJECTABLE'::text,
-            'Only appraised or approved applications can be rejected.'::text,
+            'Only submitted, appraised, or approved applications can be rejected.'::text,
             v_application.id,
             v_application.status,
             v_application.approval_count,

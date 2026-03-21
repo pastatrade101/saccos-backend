@@ -64,7 +64,7 @@ router.post(
 
 router.post(
     "/:id/reject",
-    authorize([ROLES.BRANCH_MANAGER], { allowInternalOps: false }),
+    authorize([ROLES.BRANCH_MANAGER, ROLES.LOAN_OFFICER], { allowInternalOps: false }),
     validate(schemas.rejectLoanApplicationSchema),
     controller.reject
 );

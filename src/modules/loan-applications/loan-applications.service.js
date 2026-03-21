@@ -1,3 +1,4 @@
+const { randomUUID } = require("crypto");
 const { adminSupabase } = require("../../config/supabase");
 const { ROLES } = require("../../constants/roles");
 const { getSubscriptionStatus } = require("../../services/subscription.service");
@@ -15,6 +16,9 @@ const AppError = require("../../utils/app-error");
 const LOAN_APPLICATIONS_COUNT_CACHE_TTL_MS = Math.max(0, Number(process.env.LOAN_APPLICATIONS_COUNT_CACHE_TTL_MS || 15000));
 const loanApplicationsCountCache = new Map();
 const loanApplicationsCountInFlight = new Map();
+const SUPPORTED_REPAYMENT_FREQUENCIES = ["daily", "weekly", "monthly"];
+const LOAN_PURPOSE_PATTERN = /^[A-Za-z0-9\s,.]+$/;
+const APPLICATION_REFERENCE_PATTERN = /^[A-Za-z0-9_-]+$/;
 
 const LOAN_APPLICATION_LIST_COLUMNS = `
     id,
@@ -59,6 +63,345 @@ const LOAN_APPLICATION_LIST_COLUMNS = `
     members(id, full_name, member_no, branch_id, user_id),
     loan_products(id, code, name)
 `;
+
+function isMissingDeletedAtColumn(error) {
+    const message = error?.message || "";
+    return error?.code === "42703" && message.toLowerCase().includes("deleted_at");
+}
+
+function stripHtml(value) {
+    return String(value || "")
+        .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, " ")
+        .replace(/<[^>]+>/g, " ");
+}
+
+function normalizeWhitespace(value) {
+    return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function sanitizeLoanPurpose(value) {
+    return normalizeWhitespace(stripHtml(value));
+}
+
+function sanitizeApplicationReference(value) {
+    return normalizeWhitespace(stripHtml(value));
+}
+
+function toPositiveNumber(value, fallback = null) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+        return fallback;
+    }
+    return parsed;
+}
+
+function getEligibilityRuleNumber(rules, keys, fallback = null) {
+    for (const key of keys) {
+        if (rules && Object.prototype.hasOwnProperty.call(rules, key)) {
+            const parsed = toPositiveNumber(rules[key], fallback);
+            if (parsed !== null) {
+                return parsed;
+            }
+        }
+    }
+
+    return fallback;
+}
+
+function getEligibilityRuleFrequencies(rules) {
+    const candidates = [
+        rules?.allowed_repayment_frequencies,
+        rules?.allowedRepaymentFrequencies,
+        rules?.repayment_frequencies,
+        rules?.repaymentFrequencies
+    ];
+
+    for (const candidate of candidates) {
+        if (!Array.isArray(candidate)) {
+            continue;
+        }
+
+        const normalized = candidate
+            .map((value) => String(value || "").trim().toLowerCase())
+            .filter((value) => SUPPORTED_REPAYMENT_FREQUENCIES.includes(value));
+
+        if (normalized.length) {
+            return Array.from(new Set(normalized));
+        }
+    }
+
+    return [...SUPPORTED_REPAYMENT_FREQUENCIES];
+}
+
+function resolveLoanProductPolicy(product) {
+    const rules = product?.eligibility_rules_json || {};
+
+    return {
+        allowedRepaymentFrequencies: getEligibilityRuleFrequencies(rules),
+        savingsMultiplier: getEligibilityRuleNumber(rules, [
+            "savings_multiplier",
+            "savingsMultiplier",
+            "savings_balance_multiplier",
+            "savingsBalanceMultiplier",
+            "savings_eligibility_multiplier",
+            "savingsEligibilityMultiplier"
+        ], 1),
+        sharesMultiplier: getEligibilityRuleNumber(rules, [
+            "share_multiplier",
+            "shareMultiplier",
+            "shares_multiplier",
+            "sharesMultiplier",
+            "share_balance_multiplier",
+            "shareBalanceMultiplier",
+            "shares_balance_multiplier",
+            "sharesBalanceMultiplier",
+            "share_eligibility_multiplier",
+            "shareEligibilityMultiplier"
+        ], 1),
+        baseEligibilityAmount: getEligibilityRuleNumber(rules, [
+            "base_eligibility_amount",
+            "baseEligibilityAmount"
+        ], 0),
+        eligibilityCapAmount: getEligibilityRuleNumber(rules, [
+            "eligibility_cap_amount",
+            "eligibilityCapAmount",
+            "max_eligible_amount",
+            "maxEligibleAmount"
+        ], null)
+    };
+}
+
+async function getMemberEligibilityBalances(tenantId, memberId) {
+    let { data, error } = await adminSupabase
+        .from("member_accounts")
+        .select("product_type, available_balance")
+        .eq("tenant_id", tenantId)
+        .eq("member_id", memberId)
+        .eq("status", "active")
+        .is("deleted_at", null);
+
+    if (error && isMissingDeletedAtColumn(error)) {
+        ({ data, error } = await adminSupabase
+            .from("member_accounts")
+            .select("product_type, available_balance")
+            .eq("tenant_id", tenantId)
+            .eq("member_id", memberId)
+            .eq("status", "active"));
+    }
+
+    if (error) {
+        throw new AppError(500, "MEMBER_ACCOUNTS_LOOKUP_FAILED", "Unable to load member accounts for loan eligibility.", error);
+    }
+
+    return (data || []).reduce((summary, account) => {
+        const balance = Number(account.available_balance || 0);
+        if (account.product_type === "savings") {
+            summary.savingsBalance += balance;
+        } else if (account.product_type === "shares") {
+            summary.sharesBalance += balance;
+        }
+
+        return summary;
+    }, { savingsBalance: 0, sharesBalance: 0 });
+}
+
+function calculateEligibleLoanAmount(product, balances) {
+    const policy = resolveLoanProductPolicy(product);
+    let eligibleAmount = Number(policy.baseEligibilityAmount || 0)
+        + Number(balances.savingsBalance || 0) * Number(policy.savingsMultiplier || 0)
+        + Number(balances.sharesBalance || 0) * Number(policy.sharesMultiplier || 0);
+
+    if (policy.eligibilityCapAmount !== null) {
+        eligibleAmount = Math.min(eligibleAmount, policy.eligibilityCapAmount);
+    }
+
+    if (product.max_amount) {
+        eligibleAmount = Math.min(eligibleAmount, Number(product.max_amount));
+    }
+
+    return {
+        eligibleAmount: Math.max(0, eligibleAmount),
+        policy
+    };
+}
+
+async function assertNoProblemLoans(tenantId, memberId) {
+    const { count, error } = await adminSupabase
+        .from("loans")
+        .select("id", { head: true, count: "exact" })
+        .eq("tenant_id", tenantId)
+        .eq("member_id", memberId)
+        .in("status", ["in_arrears", "written_off"]);
+
+    if (error) {
+        throw new AppError(500, "LOAN_STATUS_LOOKUP_FAILED", "Unable to verify existing loan performance.", error);
+    }
+
+    if ((count || 0) > 0) {
+        throw new AppError(
+            409,
+            "MEMBER_HAS_DEFAULTED_LOANS",
+            "Members with defaulted or in-arrears loans cannot submit a new loan application."
+        );
+    }
+}
+
+async function assertNoOpenApplicationForSameProduct(tenantId, memberId, productId, excludeApplicationId = null) {
+    let builder = adminSupabase
+        .from("loan_applications")
+        .select("id", { head: true, count: "exact" })
+        .eq("tenant_id", tenantId)
+        .eq("member_id", memberId)
+        .eq("product_id", productId)
+        .in("status", ["submitted", "appraised", "approved"]);
+
+    if (excludeApplicationId) {
+        builder = builder.neq("id", excludeApplicationId);
+    }
+
+    const { count, error } = await builder;
+
+    if (error) {
+        throw new AppError(500, "LOAN_APPLICATION_CONFLICT_LOOKUP_FAILED", "Unable to verify other loan applications for this product.", error);
+    }
+
+    if ((count || 0) > 0) {
+        throw new AppError(
+            409,
+            "PENDING_LOAN_APPLICATION_EXISTS",
+            "You already have another pending loan application for this loan product."
+        );
+    }
+}
+
+async function assertLoanApplicationPolicy({
+    tenantId,
+    member,
+    product,
+    applicationId = null,
+    requestedAmount,
+    requestedTermCount,
+    requestedRepaymentFrequency,
+    enforceSubmissionGuards = false
+}) {
+    if (member.status !== "active") {
+        throw new AppError(409, "MEMBER_NOT_ACTIVE", "Only active members can apply for loans.");
+    }
+
+    const minimumAmount = Math.max(10000, Number(product.min_amount || 0));
+    if (Number(requestedAmount) < minimumAmount) {
+        throw new AppError(400, "LOAN_AMOUNT_BELOW_MINIMUM", `Requested amount must be at least TZS ${minimumAmount.toLocaleString("en-TZ")}.`);
+    }
+
+    if (product.max_amount && Number(requestedAmount) > Number(product.max_amount)) {
+        throw new AppError(400, "LOAN_AMOUNT_ABOVE_MAXIMUM", "Requested amount exceeds maximum allowed for this loan product.");
+    }
+
+    const minimumTerm = Math.max(1, Number(product.min_term_count || 1));
+    const maximumTerm = product.max_term_count ? Number(product.max_term_count) : null;
+    if (Number(requestedTermCount) < minimumTerm || (maximumTerm && Number(requestedTermCount) > maximumTerm)) {
+        throw new AppError(
+            400,
+            "LOAN_TERM_OUT_OF_RANGE",
+            maximumTerm
+                ? `Loan term must be between ${minimumTerm} and ${maximumTerm} months.`
+                : `Loan term must be at least ${minimumTerm} months.`
+        );
+    }
+
+    const { allowedRepaymentFrequencies } = resolveLoanProductPolicy(product);
+    if (!allowedRepaymentFrequencies.includes(requestedRepaymentFrequency)) {
+        throw new AppError(
+            400,
+            "LOAN_REPAYMENT_FREQUENCY_INVALID",
+            "Selected repayment frequency is not available for this loan product.",
+            { allowed_repayment_frequencies: allowedRepaymentFrequencies }
+        );
+    }
+
+    const balances = await getMemberEligibilityBalances(tenantId, member.id);
+    const { eligibleAmount, policy } = calculateEligibleLoanAmount(product, balances);
+
+    if (Number(requestedAmount) > eligibleAmount) {
+        throw new AppError(
+            400,
+            "LOAN_ELIGIBILITY_LIMIT_EXCEEDED",
+            "Requested amount exceeds the member's current savings and shares eligibility limit.",
+            {
+                eligible_amount: eligibleAmount,
+                savings_balance: balances.savingsBalance,
+                shares_balance: balances.sharesBalance,
+                savings_multiplier: policy.savingsMultiplier,
+                shares_multiplier: policy.sharesMultiplier
+            }
+        );
+    }
+
+    if (enforceSubmissionGuards) {
+        await assertNoProblemLoans(tenantId, member.id);
+        await assertNoOpenApplicationForSameProduct(tenantId, member.id, product.id, applicationId);
+    }
+
+    return {
+        balances,
+        eligibleAmount,
+        allowedRepaymentFrequencies,
+        minimumAmount,
+        minimumTerm,
+        maximumTerm
+    };
+}
+
+function sanitizeLoanApplicationPayload(payload = {}) {
+    const purpose = sanitizeLoanPurpose(payload.purpose);
+    if (purpose.length < 20) {
+        throw new AppError(400, "LOAN_PURPOSE_TOO_SHORT", "Loan purpose must be at least 20 characters.");
+    }
+
+    if (purpose.length > 500) {
+        throw new AppError(400, "LOAN_PURPOSE_TOO_LONG", "Loan purpose cannot exceed 500 characters.");
+    }
+
+    if (!LOAN_PURPOSE_PATTERN.test(purpose)) {
+        throw new AppError(400, "LOAN_PURPOSE_INVALID", "Loan purpose may contain only letters, numbers, spaces, commas, and periods.");
+    }
+
+    const externalReference = payload.external_reference ? sanitizeApplicationReference(payload.external_reference) : null;
+    if (externalReference && externalReference.length > 100) {
+        throw new AppError(400, "APPLICATION_REFERENCE_TOO_LONG", "Application reference cannot exceed 100 characters.");
+    }
+
+    if (externalReference && !APPLICATION_REFERENCE_PATTERN.test(externalReference)) {
+        throw new AppError(400, "APPLICATION_REFERENCE_INVALID", "Application reference may contain only letters, numbers, dashes, and underscores.");
+    }
+
+    return {
+        ...payload,
+        purpose,
+        external_reference: externalReference || null
+    };
+}
+
+async function generateUniqueLoanApplicationReference(tenantId) {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+        const candidate = `LAPP-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase()}`;
+        const { count, error } = await adminSupabase
+            .from("loan_applications")
+            .select("id", { head: true, count: "exact" })
+            .eq("tenant_id", tenantId)
+            .eq("external_reference", candidate);
+
+        if (error) {
+            throw new AppError(500, "LOAN_APPLICATION_REFERENCE_LOOKUP_FAILED", "Unable to generate a unique loan application reference.", error);
+        }
+
+        if ((count || 0) === 0) {
+            return candidate;
+        }
+    }
+
+    throw new AppError(500, "LOAN_APPLICATION_REFERENCE_GENERATION_FAILED", "Unable to generate a unique loan application reference.");
+}
 
 async function getActiveLoanProduct(tenantId, productId) {
     const { data, error } = await adminSupabase
@@ -518,8 +861,8 @@ function applyLoanApplicationListFilters(builder, { actor, query, tenantId, ownM
     if (query.status) {
         scoped = scoped.eq("status", query.status);
     } else if (actor.role === ROLES.BRANCH_MANAGER) {
-        // Branch managers should process active checker queue only, not rejected rework items.
-        scoped = scoped.in("status", ["submitted", "appraised", "approved", "disbursed"]);
+        // Branch managers should only work the approval queue after loan officers finish appraisal.
+        scoped = scoped.eq("status", "appraised");
     } else if (actor.role === ROLES.TELLER) {
         // Teller queue should only show loans pending disbursement.
         scoped = scoped.eq("status", "approved");
@@ -819,23 +1162,36 @@ async function appraiseLoanApplicationDecision({
 async function createLoanApplication(actor, payload) {
     const tenantId = payload.tenant_id || actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
+    const sanitizedPayload = sanitizeLoanApplicationPayload(payload);
 
     let member;
     if (actor.role === ROLES.MEMBER) {
         member = await getMemberByUser(tenantId, actor.user.id);
     } else {
-        if (!payload.member_id) {
+        if (!sanitizedPayload.member_id) {
             throw new AppError(400, "MEMBER_ID_REQUIRED", "Member is required for staff-originated loan applications.");
         }
-        member = await getMemberRecord(tenantId, payload.member_id);
+        member = await getMemberRecord(tenantId, sanitizedPayload.member_id);
     }
 
-    const product = await getActiveLoanProduct(tenantId, payload.product_id);
-    const branchId = actor.role === ROLES.MEMBER ? member.branch_id : payload.branch_id || member.branch_id;
+    const product = await getActiveLoanProduct(tenantId, sanitizedPayload.product_id);
+    const branchId = actor.role === ROLES.MEMBER ? member.branch_id : sanitizedPayload.branch_id || member.branch_id;
 
     if (actor.role !== ROLES.MEMBER) {
         assertBranchAccess({ auth: actor }, branchId);
     }
+
+    const applicationReference = await generateUniqueLoanApplicationReference(tenantId);
+    await assertLoanApplicationPolicy({
+        tenantId,
+        member,
+        product,
+        requestedAmount: sanitizedPayload.requested_amount,
+        requestedTermCount: sanitizedPayload.requested_term_count,
+        requestedRepaymentFrequency: sanitizedPayload.requested_repayment_frequency,
+        enforceSubmissionGuards: false
+    });
+
     const approvalRequirement = await getApprovalRequirement(tenantId);
 
     const { data, error } = await adminSupabase
@@ -845,12 +1201,12 @@ async function createLoanApplication(actor, payload) {
             branch_id: branchId,
             member_id: member.id,
             product_id: product.id,
-            external_reference: payload.external_reference || null,
-            purpose: payload.purpose,
-            requested_amount: payload.requested_amount,
-            requested_term_count: payload.requested_term_count,
-            requested_repayment_frequency: payload.requested_repayment_frequency,
-            requested_interest_rate: payload.requested_interest_rate ?? product.annual_interest_rate,
+            external_reference: applicationReference,
+            purpose: sanitizedPayload.purpose,
+            requested_amount: sanitizedPayload.requested_amount,
+            requested_term_count: sanitizedPayload.requested_term_count,
+            requested_repayment_frequency: sanitizedPayload.requested_repayment_frequency,
+            requested_interest_rate: product.annual_interest_rate,
             created_via: actor.role === ROLES.MEMBER ? "member_portal" : "staff",
             requested_by: actor.user.id,
             requested_on_behalf_by: actor.role === ROLES.MEMBER ? null : actor.user.id,
@@ -863,7 +1219,7 @@ async function createLoanApplication(actor, payload) {
         throw new AppError(500, "LOAN_APPLICATION_CREATE_FAILED", "Unable to create loan application.", error);
     }
 
-    await replaceChildren(data.id, tenantId, payload.guarantors, payload.collateral_items);
+    await replaceChildren(data.id, tenantId, sanitizedPayload.guarantors, sanitizedPayload.collateral_items);
 
     await logAudit({
         tenantId,
@@ -883,16 +1239,38 @@ async function updateLoanApplication(actor, applicationId, payload) {
     const tenantId = actor.tenantId;
     const existing = await getExpandedApplication(tenantId, applicationId);
     ensureApplicationEditAllowed(actor, existing);
+    const sanitizedPayload = sanitizeLoanApplicationPayload({
+        ...existing,
+        ...payload
+    });
 
-    const nextProductId = payload.product_id || existing.product_id;
-    await getActiveLoanProduct(tenantId, nextProductId);
-    const nextBranchId = payload.branch_id || existing.branch_id;
+    const nextProductId = sanitizedPayload.product_id || existing.product_id;
+    const product = await getActiveLoanProduct(tenantId, nextProductId);
+    const nextBranchId = sanitizedPayload.branch_id || existing.branch_id;
     assertBranchAccess({ auth: actor }, nextBranchId);
+    const applicationReference = existing.external_reference || await generateUniqueLoanApplicationReference(tenantId);
+
+    const member = await getMemberRecord(tenantId, existing.member_id);
+    await assertLoanApplicationPolicy({
+        tenantId,
+        member,
+        product,
+        applicationId,
+        requestedAmount: sanitizedPayload.requested_amount,
+        requestedTermCount: sanitizedPayload.requested_term_count,
+        requestedRepaymentFrequency: sanitizedPayload.requested_repayment_frequency,
+        enforceSubmissionGuards: false
+    });
 
     const updatePayload = {
-        ...payload,
+        purpose: sanitizedPayload.purpose,
+        external_reference: applicationReference,
+        requested_amount: sanitizedPayload.requested_amount,
+        requested_term_count: sanitizedPayload.requested_term_count,
+        requested_repayment_frequency: sanitizedPayload.requested_repayment_frequency,
+        requested_interest_rate: product.annual_interest_rate,
         branch_id: nextBranchId,
-        member_id: payload.member_id || existing.member_id,
+        member_id: existing.member_id,
         product_id: nextProductId,
         status: "draft",
         rejection_reason: null,
@@ -947,6 +1325,19 @@ async function submitLoanApplication(actor, applicationId) {
     }
 
     ensureApplicationEditAllowed(actor, { ...existing, status: "draft" });
+
+    const member = await getMemberRecord(tenantId, existing.member_id);
+    const product = await getActiveLoanProduct(tenantId, existing.product_id);
+    await assertLoanApplicationPolicy({
+        tenantId,
+        member,
+        product,
+        applicationId,
+        requestedAmount: existing.requested_amount,
+        requestedTermCount: existing.requested_term_count,
+        requestedRepaymentFrequency: existing.requested_repayment_frequency,
+        enforceSubmissionGuards: true
+    });
 
     const submissionDecision = await submitLoanApplicationDecision({
         tenantId,
@@ -1137,15 +1528,15 @@ async function approveLoanApplication(actor, applicationId, payload) {
 }
 
 async function rejectLoanApplication(actor, applicationId, payload) {
-    if (actor.role !== ROLES.BRANCH_MANAGER) {
-        throw new AppError(403, "FORBIDDEN", "Only branch managers can reject loan applications.");
+    if (![ROLES.BRANCH_MANAGER, ROLES.LOAN_OFFICER].includes(actor.role)) {
+        throw new AppError(403, "FORBIDDEN", "Only branch managers or loan officers can reject loan applications.");
     }
 
     const tenantId = actor.tenantId;
     const existing = await getExpandedApplication(tenantId, applicationId);
 
-    if (!["appraised", "approved"].includes(existing.status)) {
-        throw new AppError(400, "LOAN_APPLICATION_NOT_REJECTABLE", "Only appraised or approved applications can be rejected.");
+    if (!["submitted", "appraised", "approved"].includes(existing.status)) {
+        throw new AppError(400, "LOAN_APPLICATION_NOT_REJECTABLE", "Only submitted, appraised, or approved applications can be rejected.");
     }
 
     assertBranchAccess({ auth: actor }, existing.branch_id);

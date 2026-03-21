@@ -167,13 +167,22 @@ async function updatePlanFeatures(actor, planId, payload) {
         throw new AppError(500, "PLAN_FEATURE_UPDATE_FAILED", "Unable to update plan features.", error);
     }
 
-    await logAudit({
-        tenantId: null,
-        userId: actor.user.id,
-        table: "plan_features",
-        action: "update_plan_features",
-        afterData: { plan_id: planId, features: rows }
-    });
+    const auditTenantId = actor?.tenantId || actor?.profile?.tenant_id || null;
+
+    if (auditTenantId) {
+        await logAudit({
+            tenantId: auditTenantId,
+            userId: actor.user.id,
+            table: "plan_features",
+            action: "update_plan_features",
+            afterData: { plan_id: planId, features: rows }
+        });
+    } else {
+        console.warn("[platform] skipped tenant-scoped audit log for global plan feature update", {
+            actorUserId: actor?.user?.id || null,
+            planId
+        });
+    }
 
     return (await listPlans({ page: 1, limit: MAX_LIST_LIMIT })).data;
 }
