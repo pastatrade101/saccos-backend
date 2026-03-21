@@ -15,6 +15,16 @@ const SMS_TRIGGER_CATALOG = [
         description: "Notify loan officers when approvals are complete and disbursement can proceed."
     },
     {
+        event_type: "member_loan_application_approved",
+        label: "Member loan approved",
+        description: "Notify member when their loan application is approved and moved to disbursement readiness."
+    },
+    {
+        event_type: "member_loan_application_rejected",
+        label: "Member loan rejected",
+        description: "Notify member when their loan application is rejected, including the rejection reason."
+    },
+    {
         event_type: "loan_guarantor_declined",
         label: "Guarantor declined",
         description: "Notify appraising loan officer when any guarantor rejects the guarantee request."

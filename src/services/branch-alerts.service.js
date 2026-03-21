@@ -683,6 +683,61 @@ async function notifyLoanOfficersApprovedForDisbursement({ actor, application })
     });
 }
 
+async function notifyMemberLoanApplicationApproved({ actor, application }) {
+    const memberUserId = application?.members?.user_id;
+    if (!memberUserId) {
+        return { enabled: env.branchAlertSmsEnabled, delivered: 0, skipped: 0, failed: 0 };
+    }
+
+    const amount = formatAmount(application?.recommended_amount || application?.requested_amount || 0);
+    const reference = application?.external_reference || shortId(application?.id);
+    const message = `Dear ${application?.members?.full_name || "member"}, your loan application ${reference} for TZS ${amount} has been approved and is ready for disbursement processing.`;
+
+    return notifyUsersById({
+        tenantId: application?.tenant_id || actor?.tenantId,
+        branchId: application?.branch_id || null,
+        userIds: [memberUserId],
+        eventType: "member_loan_application_approved",
+        eventKey: `member_loan_application_approved:${application?.id}:${application?.approved_at || Date.now()}`,
+        message: message.slice(0, 300),
+        metadata: {
+            loan_application_id: application?.id,
+            member_id: application?.member_id,
+            external_reference: application?.external_reference || null,
+            approved_at: application?.approved_at || null
+        }
+    });
+}
+
+async function notifyMemberLoanApplicationRejected({ actor, application }) {
+    const memberUserId = application?.members?.user_id;
+    if (!memberUserId) {
+        return { enabled: env.branchAlertSmsEnabled, delivered: 0, skipped: 0, failed: 0 };
+    }
+
+    const reference = application?.external_reference || shortId(application?.id);
+    const reason = String(application?.rejection_reason || "").trim() || "Please review the branch feedback and update the application.";
+    const notes = String(application?.approval_notes || "").trim();
+    const details = notes ? `${reason}. Notes: ${notes}` : reason;
+    const message = `Dear ${application?.members?.full_name || "member"}, your loan application ${reference} was not approved. Reason: ${details}`;
+
+    return notifyUsersById({
+        tenantId: application?.tenant_id || actor?.tenantId,
+        branchId: application?.branch_id || null,
+        userIds: [memberUserId],
+        eventType: "member_loan_application_rejected",
+        eventKey: `member_loan_application_rejected:${application?.id}:${application?.rejected_at || Date.now()}`,
+        message: message.slice(0, 300),
+        metadata: {
+            loan_application_id: application?.id,
+            member_id: application?.member_id,
+            external_reference: application?.external_reference || null,
+            rejection_reason: application?.rejection_reason || null,
+            approval_notes: application?.approval_notes || null
+        }
+    });
+}
+
 async function notifyLoanOfficerGuarantorDeclined({ actor, application, guarantorMemberId = null }) {
     if (!application?.appraised_by) {
         return { enabled: env.branchAlertSmsEnabled, delivered: 0, skipped: 0, failed: 0 };
@@ -858,6 +913,8 @@ module.exports = {
     notifyLoanOfficersNewApplication,
     notifyLoanOfficersReappraisalNeeded,
     notifyLoanOfficersApprovedForDisbursement,
+    notifyMemberLoanApplicationApproved,
+    notifyMemberLoanApplicationRejected,
     notifyLoanOfficerGuarantorDeclined,
     notifyLoanOfficersDefaultFlag,
     notifyTellerWithdrawalApprovalRequired,

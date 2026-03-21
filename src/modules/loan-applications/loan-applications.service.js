@@ -6,6 +6,8 @@ const { assertBranchAccess, assertTenantAccess } = require("../../services/user-
 const { logAudit } = require("../../services/audit.service");
 const {
     notifyLoanOfficerGuarantorDeclined,
+    notifyMemberLoanApplicationApproved,
+    notifyMemberLoanApplicationRejected,
     notifyLoanOfficersApprovedForDisbursement,
     notifyLoanOfficersNewApplication,
     notifyLoanOfficersReappraisalNeeded
@@ -1522,6 +1524,10 @@ async function approveLoanApplication(actor, applicationId, payload) {
             actor,
             application: expanded
         });
+        await notifyMemberLoanApplicationApproved({
+            actor,
+            application: expanded
+        });
     }
 
     return expanded;
@@ -1587,6 +1593,10 @@ async function rejectLoanApplication(actor, applicationId, payload) {
         actor,
         application: expanded,
         reason: payload.reason || payload.notes || ""
+    });
+    await notifyMemberLoanApplicationRejected({
+        actor,
+        application: expanded
     });
 
     return expanded;
