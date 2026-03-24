@@ -1,6 +1,6 @@
 # SACCOS Platform Monorepo
 
-Enterprise multi-tenant SACCOS system for real-money operations.
+Single-tenant SACCOS system now focused on a single tenant workspace governed by a super-admin; previous multi-tenant/subscription flows were removed in this iteration.
 
 ## Stack
 

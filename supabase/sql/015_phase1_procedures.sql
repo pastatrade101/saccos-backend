@@ -16,6 +16,7 @@ declare
     v_withdrawal_fee_income_account_id uuid;
     v_loan_fee_income_account_id uuid;
     v_penalty_income_account_id uuid;
+    v_penalty_receivable_account_id uuid;
 begin
     select
         default_cash_account_id,
@@ -60,7 +61,8 @@ begin
         (p_tenant_id, '4020', 'Membership Fee Income', 'income', 'membership_fee_income', true),
         (p_tenant_id, '4030', 'Withdrawal Fee Income', 'income', 'withdrawal_fee_income', true),
         (p_tenant_id, '4040', 'Loan Fee Income', 'income', 'loan_fee_income', true),
-        (p_tenant_id, '4050', 'Penalty Income', 'income', 'penalty_income', true)
+        (p_tenant_id, '4050', 'Penalty Income', 'income', 'penalty_income', true),
+        (p_tenant_id, '1305', 'Penalty Receivable', 'asset', 'penalty_receivable', true)
     on conflict (tenant_id, account_code)
     where deleted_at is null
     do update
@@ -95,6 +97,13 @@ begin
       from public.chart_of_accounts
      where tenant_id = p_tenant_id
        and system_tag = 'penalty_income'
+       and deleted_at is null
+     limit 1;
+
+    select id into v_penalty_receivable_account_id
+      from public.chart_of_accounts
+     where tenant_id = p_tenant_id
+       and system_tag = 'penalty_receivable'
        and deleted_at is null
      limit 1;
 
@@ -198,17 +207,37 @@ begin
         calculation_method,
         flat_amount,
         percentage_value,
-        income_account_id
+        income_account_id,
+        grace_period_days,
+        penalty_frequency,
+        calculation_base,
+        max_penalty_amount,
+        max_penalty_percent,
+        compound_penalty,
+        penalty_receivable_account_id,
+        effective_from,
+        effective_to,
+        penalty_waivable
     )
     values (
         p_tenant_id,
         'LATE_REPAYMENT',
         'Late Repayment Penalty',
         'late_repayment',
-        'percentage_per_period',
+        'percentage',
         0,
         2,
-        v_penalty_income_account_id
+        v_penalty_income_account_id,
+        0,
+        'per_repayment_period',
+        'overdue_instalment',
+        null,
+        null,
+        false,
+        v_penalty_receivable_account_id,
+        null,
+        null,
+        true
     )
     on conflict (tenant_id, code)
     where deleted_at is null
@@ -219,6 +248,16 @@ begin
             flat_amount = excluded.flat_amount,
             percentage_value = excluded.percentage_value,
             income_account_id = excluded.income_account_id,
+            grace_period_days = excluded.grace_period_days,
+            penalty_frequency = excluded.penalty_frequency,
+            calculation_base = excluded.calculation_base,
+            max_penalty_amount = excluded.max_penalty_amount,
+            max_penalty_percent = excluded.max_penalty_percent,
+            compound_penalty = excluded.compound_penalty,
+            penalty_receivable_account_id = excluded.penalty_receivable_account_id,
+            effective_from = excluded.effective_from,
+            effective_to = excluded.effective_to,
+            penalty_waivable = excluded.penalty_waivable,
             updated_at = now();
 
     insert into public.posting_rules (

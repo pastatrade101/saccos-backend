@@ -2,8 +2,6 @@ const express = require("express");
 
 const auth = require("../../middleware/auth");
 const authorize = require("../../middleware/authorize");
-const enforceLimit = require("../../middleware/enforce-limit");
-const requireSubscription = require("../../middleware/require-subscription");
 const validate = require("../../middleware/validate");
 const { ROLES } = require("../../constants/roles");
 const controller = require("./branches.controller");
@@ -27,9 +25,7 @@ router.get(
 );
 router.post(
     "/",
-    requireSubscription(),
     authorize([ROLES.SUPER_ADMIN]),
-    enforceLimit("max_branches", null, { tableName: "branches" }),
     validate(createBranchSchema),
     controller.createBranch
 );

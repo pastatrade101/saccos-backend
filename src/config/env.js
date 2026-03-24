@@ -128,7 +128,8 @@ const envSchema = z.object({
         .string()
         .optional()
         .transform((value) => parseBooleanEnv(value, false)),
-    LOG_LEVEL: z.string().default("info")
+    LOG_LEVEL: z.string().default("info"),
+    SINGLE_TENANT_ID: z.string().uuid().optional()
 });
 
 const parsedEnv = envSchema.safeParse(process.env);
@@ -220,5 +221,6 @@ module.exports = {
     azamPayIntentTtlSeconds: env.AZAMPAY_INTENT_TTL_SECONDS,
     azamPaySourceLabel: env.AZAMPAY_SOURCE_LABEL,
     sslEnabled: env.SSL_ENABLED,
-    logLevel: env.LOG_LEVEL
+    logLevel: env.LOG_LEVEL,
+    singleTenantId: env.SINGLE_TENANT_ID || null
 };

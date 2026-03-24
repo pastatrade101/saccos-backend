@@ -3,7 +3,6 @@ const express = require("express");
 const auth = require("../../middleware/auth");
 const authorize = require("../../middleware/authorize");
 const idempotency = require("../../middleware/idempotency");
-const requireSubscription = require("../../middleware/require-subscription");
 const validate = require("../../middleware/validate");
 const { ROLES } = require("../../constants/roles");
 const controller = require("./member-applications.controller");
@@ -11,7 +10,13 @@ const schemas = require("./member-applications.schemas");
 
 const router = express.Router();
 
-router.use(auth, requireSubscription());
+router.use(auth);
+
+router.get(
+    "/me",
+    authorize([ROLES.MEMBER], { allowInternalOps: false }),
+    controller.getMyApplication
+);
 
 router.get(
     "/",

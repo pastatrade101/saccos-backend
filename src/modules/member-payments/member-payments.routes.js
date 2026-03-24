@@ -3,14 +3,14 @@ const express = require("express");
 const auth = require("../../middleware/auth");
 const authorize = require("../../middleware/authorize");
 const idempotency = require("../../middleware/idempotency");
-const requireFeature = require("../../middleware/require-feature");
-const requireSubscription = require("../../middleware/require-subscription");
 const validate = require("../../middleware/validate");
 const { ROLES } = require("../../constants/roles");
 const controller = require("./member-payments.controller");
 const {
     initiateContributionPaymentSchema,
     initiateSavingsPaymentSchema,
+    initiateMembershipFeePaymentSchema,
+    initiateLoanRepaymentPaymentSchema,
     paymentOrderListQuerySchema,
     paymentOrderParamSchema
 } = require("./member-payments.schemas");
@@ -25,7 +25,7 @@ router.post(
     controller.handleAzamCallback
 );
 
-router.use(auth, requireSubscription(), requireFeature("contributions_enabled"));
+router.use(auth);
 
 router.post(
     "/contributions/initiate",
@@ -41,6 +41,22 @@ router.post(
     validate(initiateSavingsPaymentSchema),
     idempotency,
     controller.initiateSavingsPayment
+);
+
+router.post(
+    "/membership-fee/initiate",
+    authorize([ROLES.MEMBER], { allowInternalOps: false }),
+    validate(initiateMembershipFeePaymentSchema),
+    idempotency,
+    controller.initiateMembershipFeePayment
+);
+
+router.post(
+    "/loan-repayments/initiate",
+    authorize([ROLES.MEMBER], { allowInternalOps: false }),
+    validate(initiateLoanRepaymentPaymentSchema),
+    idempotency,
+    controller.initiateLoanRepaymentPayment
 );
 
 router.get(

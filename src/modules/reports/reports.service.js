@@ -59,6 +59,10 @@ function todayIsoDate() {
     return new Date().toISOString().slice(0, 10);
 }
 
+function monthStartIsoDate(value = todayIsoDate()) {
+    return `${String(value).slice(0, 7)}-01`;
+}
+
 function round2(value) {
     return Number(toNumber(value).toFixed(2));
 }
@@ -178,6 +182,423 @@ function normalizeIncomeStatementWindow(query) {
         toDate,
         compareFromDate: query.compare_from_date || null,
         compareToDate: query.compare_to_date || null
+    };
+}
+
+function getRevenueCategoryFlags(accountId, sourceMaps) {
+    return {
+        fee: sourceMaps.feeRuleNamesByAccount.has(accountId),
+        penalty: sourceMaps.penaltyRuleNamesByAccount.has(accountId) || sourceMaps.loanPenaltyProductNamesByAccount.has(accountId),
+        loan_interest: sourceMaps.loanInterestProductNamesByAccount.has(accountId),
+        loan_fee: sourceMaps.loanFeeProductNamesByAccount.has(accountId)
+    };
+}
+
+function classifyRevenueAccount(accountId, sourceMaps) {
+    const flags = getRevenueCategoryFlags(accountId, sourceMaps);
+    const categories = Object.entries(flags)
+        .filter(([, active]) => active)
+        .map(([category]) => category);
+
+    if (categories.length !== 1) {
+        return {
+            revenueType: categories.length ? "mixed" : "fee",
+            categories
+        };
+    }
+
+    return {
+        revenueType: categories[0],
+        categories
+    };
+}
+
+function classifyRevenueRow(row, sourceMaps) {
+    const accountClassification = classifyRevenueAccount(row.account_id, sourceMaps);
+    const sourceType = String(row.source_type || "").trim().toLowerCase();
+    const categories = accountClassification.categories;
+
+    if (sourceType === "loan_repayment" && (categories.includes("loan_interest") || categories.length > 1)) {
+        return {
+            revenueType: "loan_interest",
+            categories
+        };
+    }
+
+    if (sourceType === "loan_disbursement" && categories.includes("loan_fee")) {
+        return {
+            revenueType: "loan_fee",
+            categories
+        };
+    }
+
+    if (sourceType === "membership_fee" && categories.includes("fee")) {
+        return {
+            revenueType: "fee",
+            categories
+        };
+    }
+
+    if (sourceType === "withdrawal" && categories.includes("fee")) {
+        return {
+            revenueType: "fee",
+            categories
+        };
+    }
+
+    return accountClassification;
+}
+
+async function chargeRevenueSummary(actor, query = {}) {
+    const tenantId = query.tenant_id || actor.tenantId;
+    assertTenantAccess({ auth: actor }, tenantId);
+
+    const fromDate = query.from_date || monthStartIsoDate();
+    const toDate = query.to_date || todayIsoDate();
+
+    if (fromDate > toDate) {
+        throw new AppError(
+            400,
+            "INVALID_REPORT_PERIOD",
+            "`from_date` cannot be after `to_date` for charge revenue."
+        );
+    }
+
+    const scopedBranchIds = resolveReportBranchScope(actor, query);
+
+    const [feeRulesResult, penaltyRulesResult, loanProductsResult] = await Promise.all([
+        adminSupabase
+            .from("fee_rules")
+            .select("id, name, fee_type, income_account_id")
+            .eq("tenant_id", tenantId)
+            .is("deleted_at", null),
+        adminSupabase
+            .from("penalty_rules")
+            .select("id, name, penalty_type, income_account_id")
+            .eq("tenant_id", tenantId)
+            .is("deleted_at", null),
+        adminSupabase
+            .from("loan_products")
+            .select("id, name, interest_income_account_id, fee_income_account_id, penalty_income_account_id")
+            .eq("tenant_id", tenantId)
+            .is("deleted_at", null)
+    ]);
+
+    if (feeRulesResult.error) {
+        throw new AppError(500, "CHARGE_REVENUE_RULES_FAILED", "Unable to load fee rules.", feeRulesResult.error);
+    }
+
+    if (penaltyRulesResult.error) {
+        throw new AppError(500, "CHARGE_REVENUE_RULES_FAILED", "Unable to load penalty rules.", penaltyRulesResult.error);
+    }
+
+    if (loanProductsResult.error) {
+        throw new AppError(500, "CHARGE_REVENUE_RULES_FAILED", "Unable to load loan products.", loanProductsResult.error);
+    }
+
+    const feeRules = (feeRulesResult.data || []).filter((row) => row.income_account_id);
+    const penaltyRules = (penaltyRulesResult.data || []).filter((row) => row.income_account_id);
+    const loanProducts = loanProductsResult.data || [];
+
+    const feeRuleNamesByAccount = new Map();
+    feeRules.forEach((rule) => {
+        const current = feeRuleNamesByAccount.get(rule.income_account_id) || [];
+        current.push(rule.name);
+        feeRuleNamesByAccount.set(rule.income_account_id, current);
+    });
+
+    const penaltyRuleNamesByAccount = new Map();
+    penaltyRules.forEach((rule) => {
+        const current = penaltyRuleNamesByAccount.get(rule.income_account_id) || [];
+        current.push(rule.name);
+        penaltyRuleNamesByAccount.set(rule.income_account_id, current);
+    });
+
+    const loanInterestProductNamesByAccount = new Map();
+    const loanFeeProductNamesByAccount = new Map();
+    const loanPenaltyProductNamesByAccount = new Map();
+
+    loanProducts.forEach((product) => {
+        if (product.interest_income_account_id) {
+            const current = loanInterestProductNamesByAccount.get(product.interest_income_account_id) || [];
+            current.push(product.name);
+            loanInterestProductNamesByAccount.set(product.interest_income_account_id, current);
+        }
+
+        if (product.fee_income_account_id) {
+            const current = loanFeeProductNamesByAccount.get(product.fee_income_account_id) || [];
+            current.push(product.name);
+            loanFeeProductNamesByAccount.set(product.fee_income_account_id, current);
+        }
+
+        if (product.penalty_income_account_id) {
+            const current = loanPenaltyProductNamesByAccount.get(product.penalty_income_account_id) || [];
+            current.push(product.name);
+            loanPenaltyProductNamesByAccount.set(product.penalty_income_account_id, current);
+        }
+    });
+
+    const sourceMaps = {
+        feeRuleNamesByAccount,
+        penaltyRuleNamesByAccount,
+        loanInterestProductNamesByAccount,
+        loanFeeProductNamesByAccount,
+        loanPenaltyProductNamesByAccount
+    };
+
+    const chargeAccountIds = Array.from(new Set([
+        ...Array.from(feeRuleNamesByAccount.keys()),
+        ...Array.from(penaltyRuleNamesByAccount.keys()),
+        ...Array.from(loanInterestProductNamesByAccount.keys()),
+        ...Array.from(loanFeeProductNamesByAccount.keys()),
+        ...Array.from(loanPenaltyProductNamesByAccount.keys())
+    ].filter(Boolean)));
+
+    let chartOfAccountsById = new Map();
+    if (chargeAccountIds.length) {
+        const { data: chargeAccounts, error: chargeAccountsError } = await adminSupabase
+            .from("chart_of_accounts")
+            .select("id, account_code, account_name")
+            .eq("tenant_id", tenantId)
+            .in("id", chargeAccountIds)
+            .is("deleted_at", null);
+
+        if (chargeAccountsError) {
+            throw new AppError(500, "CHARGE_REVENUE_ACCOUNT_LOOKUP_FAILED", "Unable to load charge income accounts.", chargeAccountsError);
+        }
+
+        chartOfAccountsById = new Map((chargeAccounts || []).map((row) => [row.id, row]));
+    }
+
+    const mixedAccounts = chargeAccountIds
+        .filter((accountId) => classifyRevenueAccount(accountId, sourceMaps).categories.length > 1)
+        .map((accountId) => ({
+            account_id: accountId,
+            account_code: chartOfAccountsById.get(accountId)?.account_code || null,
+            account_name: chartOfAccountsById.get(accountId)?.account_name || null,
+            fee_rule_names: feeRuleNamesByAccount.get(accountId) || [],
+            penalty_rule_names: penaltyRuleNamesByAccount.get(accountId) || [],
+            loan_interest_product_names: loanInterestProductNamesByAccount.get(accountId) || [],
+            loan_fee_product_names: loanFeeProductNamesByAccount.get(accountId) || [],
+            loan_penalty_product_names: loanPenaltyProductNamesByAccount.get(accountId) || []
+        }));
+
+    if (!chargeAccountIds.length) {
+        return {
+            scope: {
+                tenant_id: tenantId,
+                from_date: fromDate,
+                to_date: toDate,
+                branch_ids: scopedBranchIds || [],
+                branch_count: scopedBranchIds?.length || 0
+            },
+            totals: {
+                fee_revenue: 0,
+                penalty_revenue: 0,
+                loan_interest_revenue: 0,
+                loan_fee_revenue: 0,
+                mixed_revenue: 0,
+                charge_revenue: 0,
+                loan_revenue: 0,
+                total_revenue: 0,
+                posted_lines: 0,
+                configured_fee_rules: feeRules.length,
+                configured_penalty_rules: penaltyRules.length,
+                configured_loan_products: loanProducts.length
+            },
+            configuration_warnings: mixedAccounts,
+            trend: [],
+            branch_breakdown: [],
+            account_breakdown: []
+        };
+    }
+
+    let ledgerQuery = adminSupabase
+        .from("ledger_entries_view")
+        .select("account_id, account_code, account_name, branch_id, entry_date, source_type, debit, credit")
+        .eq("tenant_id", tenantId)
+        .in("account_id", chargeAccountIds)
+        .gte("entry_date", fromDate)
+        .lte("entry_date", toDate);
+
+    if (scopedBranchIds && scopedBranchIds.length) {
+        ledgerQuery = ledgerQuery.in("branch_id", scopedBranchIds);
+    }
+
+    const { data: ledgerRows, error: ledgerError } = await ledgerQuery;
+
+    if (ledgerError) {
+        throw new AppError(500, "CHARGE_REVENUE_FETCH_FAILED", "Unable to load charge revenue ledger rows.", ledgerError);
+    }
+
+    const rows = ledgerRows || [];
+    const branchIds = Array.from(new Set(rows.map((row) => row.branch_id).filter(Boolean)));
+    let branchNameById = new Map();
+
+    if (branchIds.length) {
+        const { data: branches, error: branchesError } = await adminSupabase
+            .from("branches")
+            .select("id, name, code")
+            .in("id", branchIds);
+
+        if (branchesError) {
+            throw new AppError(500, "CHARGE_REVENUE_BRANCH_LOOKUP_FAILED", "Unable to resolve branch names.", branchesError);
+        }
+
+        branchNameById = new Map((branches || []).map((row) => [row.id, row]));
+    }
+
+    const trendMap = new Map();
+    const branchBreakdownMap = new Map();
+    const accountBreakdownMap = new Map();
+    const totals = {
+        fee_revenue: 0,
+        penalty_revenue: 0,
+        loan_interest_revenue: 0,
+        loan_fee_revenue: 0,
+        mixed_revenue: 0,
+        charge_revenue: 0,
+        loan_revenue: 0,
+        total_revenue: 0,
+        posted_lines: 0,
+        configured_fee_rules: feeRules.length,
+        configured_penalty_rules: penaltyRules.length,
+        configured_loan_products: loanProducts.length
+    };
+
+    rows.forEach((row) => {
+        const amount = round2(toNumber(row.credit) - toNumber(row.debit));
+        if (Math.abs(amount) < 0.0001) {
+            return;
+        }
+
+        const { revenueType } = classifyRevenueRow(row, sourceMaps);
+        const branchKey = row.branch_id || "unassigned";
+        const accountKey = `${row.account_id}:${revenueType}`;
+        const trendKey = row.entry_date;
+
+        totals.total_revenue = round2(totals.total_revenue + amount);
+        totals.posted_lines += 1;
+        if (revenueType === "fee") {
+            totals.fee_revenue = round2(totals.fee_revenue + amount);
+        } else if (revenueType === "penalty") {
+            totals.penalty_revenue = round2(totals.penalty_revenue + amount);
+        } else if (revenueType === "loan_interest") {
+            totals.loan_interest_revenue = round2(totals.loan_interest_revenue + amount);
+        } else if (revenueType === "loan_fee") {
+            totals.loan_fee_revenue = round2(totals.loan_fee_revenue + amount);
+        } else {
+            totals.mixed_revenue = round2(totals.mixed_revenue + amount);
+        }
+        totals.charge_revenue = round2(totals.fee_revenue + totals.penalty_revenue);
+        totals.loan_revenue = round2(totals.loan_interest_revenue + totals.loan_fee_revenue);
+
+        const trendPoint = trendMap.get(trendKey) || {
+            entry_date: trendKey,
+            fee_revenue: 0,
+            penalty_revenue: 0,
+            loan_interest_revenue: 0,
+            loan_fee_revenue: 0,
+            mixed_revenue: 0,
+            charge_revenue: 0,
+            loan_revenue: 0,
+            total_revenue: 0
+        };
+        trendPoint.total_revenue = round2(trendPoint.total_revenue + amount);
+        if (revenueType === "fee") {
+            trendPoint.fee_revenue = round2(trendPoint.fee_revenue + amount);
+        } else if (revenueType === "penalty") {
+            trendPoint.penalty_revenue = round2(trendPoint.penalty_revenue + amount);
+        } else if (revenueType === "loan_interest") {
+            trendPoint.loan_interest_revenue = round2(trendPoint.loan_interest_revenue + amount);
+        } else if (revenueType === "loan_fee") {
+            trendPoint.loan_fee_revenue = round2(trendPoint.loan_fee_revenue + amount);
+        } else {
+            trendPoint.mixed_revenue = round2(trendPoint.mixed_revenue + amount);
+        }
+        trendPoint.charge_revenue = round2(
+            trendPoint.fee_revenue + trendPoint.penalty_revenue
+        );
+        trendPoint.loan_revenue = round2(
+            trendPoint.loan_interest_revenue + trendPoint.loan_fee_revenue
+        );
+        trendMap.set(trendKey, trendPoint);
+
+        const branchPoint = branchBreakdownMap.get(branchKey) || {
+            branch_id: row.branch_id || null,
+            branch_name: branchNameById.get(row.branch_id)?.name || (row.branch_id ? null : "Unassigned"),
+            branch_code: branchNameById.get(row.branch_id)?.code || null,
+            fee_revenue: 0,
+            penalty_revenue: 0,
+            loan_interest_revenue: 0,
+            loan_fee_revenue: 0,
+            mixed_revenue: 0,
+            charge_revenue: 0,
+            loan_revenue: 0,
+            total_revenue: 0
+        };
+        branchPoint.total_revenue = round2(branchPoint.total_revenue + amount);
+        if (revenueType === "fee") {
+            branchPoint.fee_revenue = round2(branchPoint.fee_revenue + amount);
+        } else if (revenueType === "penalty") {
+            branchPoint.penalty_revenue = round2(branchPoint.penalty_revenue + amount);
+        } else if (revenueType === "loan_interest") {
+            branchPoint.loan_interest_revenue = round2(branchPoint.loan_interest_revenue + amount);
+        } else if (revenueType === "loan_fee") {
+            branchPoint.loan_fee_revenue = round2(branchPoint.loan_fee_revenue + amount);
+        } else {
+            branchPoint.mixed_revenue = round2(branchPoint.mixed_revenue + amount);
+        }
+        branchPoint.charge_revenue = round2(
+            branchPoint.fee_revenue + branchPoint.penalty_revenue
+        );
+        branchPoint.loan_revenue = round2(
+            branchPoint.loan_interest_revenue + branchPoint.loan_fee_revenue
+        );
+        branchBreakdownMap.set(branchKey, branchPoint);
+
+        const accountPoint = accountBreakdownMap.get(accountKey) || {
+            revenue_type: revenueType,
+            account_id: row.account_id,
+            account_code: row.account_code,
+            account_name: row.account_name,
+            amount: 0,
+            posted_lines: 0,
+            last_entry_date: row.entry_date,
+            configured_rule_names: Array.from(new Set([
+                ...(feeRuleNamesByAccount.get(row.account_id) || []),
+                ...(penaltyRuleNamesByAccount.get(row.account_id) || []),
+                ...(loanInterestProductNamesByAccount.get(row.account_id) || []),
+                ...(loanFeeProductNamesByAccount.get(row.account_id) || []),
+                ...(loanPenaltyProductNamesByAccount.get(row.account_id) || [])
+            ])),
+            fee_rule_names: feeRuleNamesByAccount.get(row.account_id) || [],
+            penalty_rule_names: penaltyRuleNamesByAccount.get(row.account_id) || [],
+            loan_interest_product_names: loanInterestProductNamesByAccount.get(row.account_id) || [],
+            loan_fee_product_names: loanFeeProductNamesByAccount.get(row.account_id) || [],
+            loan_penalty_product_names: loanPenaltyProductNamesByAccount.get(row.account_id) || []
+        };
+        accountPoint.amount = round2(accountPoint.amount + amount);
+        accountPoint.posted_lines += 1;
+        if (row.entry_date > accountPoint.last_entry_date) {
+            accountPoint.last_entry_date = row.entry_date;
+        }
+        accountBreakdownMap.set(accountKey, accountPoint);
+    });
+
+    return {
+        scope: {
+            tenant_id: tenantId,
+            from_date: fromDate,
+            to_date: toDate,
+            branch_ids: scopedBranchIds || [],
+            branch_count: scopedBranchIds?.length || 0
+        },
+        totals,
+        configuration_warnings: mixedAccounts,
+        trend: Array.from(trendMap.values()).sort((left, right) => left.entry_date.localeCompare(right.entry_date)),
+        branch_breakdown: Array.from(branchBreakdownMap.values()).sort((left, right) => right.total_revenue - left.total_revenue),
+        account_breakdown: Array.from(accountBreakdownMap.values()).sort((left, right) => right.amount - left.amount)
     };
 }
 
@@ -1132,6 +1553,7 @@ module.exports = {
     trialBalance,
     balanceSheet,
     incomeStatement,
+    chargeRevenueSummary,
     cashPosition,
     parReport,
     loanAging,

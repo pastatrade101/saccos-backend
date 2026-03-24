@@ -3,7 +3,6 @@ const multer = require("multer");
 
 const auth = require("../../middleware/auth");
 const authorize = require("../../middleware/authorize");
-const requireSubscription = require("../../middleware/require-subscription");
 const validate = require("../../middleware/validate");
 const rateLimit = require("../../middleware/rate-limit");
 const env = require("../../config/env");
@@ -20,7 +19,7 @@ const upload = multer({
 
 const router = express.Router();
 
-router.use(auth, requireSubscription());
+router.use(auth);
 
 router.post(
     "/members/preview",

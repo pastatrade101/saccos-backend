@@ -2,7 +2,6 @@ const express = require("express");
 
 const authRoutes = require("../modules/auth/auth.routes");
 const meRoutes = require("../modules/me/me.routes");
-const tenantRoutes = require("../modules/tenants/tenants.routes");
 const branchRoutes = require("../modules/branches/branches.routes");
 const userRoutes = require("../modules/users/users.routes");
 const memberRoutes = require("../modules/members/members.routes");
@@ -13,7 +12,6 @@ const financeRoutes = require("../modules/finance/finance.routes");
 const cashControlRoutes = require("../modules/cash-control/cash-control.routes");
 const dividendRoutes = require("../modules/dividends/dividends.routes");
 const productRoutes = require("../modules/products/products.routes");
-const platformRoutes = require("../modules/platform/platform.routes");
 const auditorRoutes = require("../modules/auditor/auditor.routes");
 const reportRoutes = require("../modules/reports/reports.routes");
 const observabilityRoutes = require("../modules/observability/observability.routes");
@@ -37,8 +35,6 @@ router.get("/health", (req, res) => {
 
 router.use("/auth", authRoutes);
 router.use("/me", meRoutes);
-router.use("/platform", platformRoutes);
-router.use("/tenants", tenantRoutes);
 router.use("/branches", branchRoutes);
 router.use("/users", userRoutes);
 router.use("/members", memberRoutes);

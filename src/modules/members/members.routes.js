@@ -2,8 +2,6 @@ const express = require("express");
 
 const auth = require("../../middleware/auth");
 const authorize = require("../../middleware/authorize");
-const enforceLimit = require("../../middleware/enforce-limit");
-const requireSubscription = require("../../middleware/require-subscription");
 const validate = require("../../middleware/validate");
 const { ROLES } = require("../../constants/roles");
 const controller = require("./members.controller");
@@ -20,7 +18,7 @@ const {
 
 const router = express.Router();
 
-router.use(auth, requireSubscription());
+router.use(auth);
 
 router.get(
     "/",
@@ -51,7 +49,6 @@ router.get(
 router.post(
     "/",
     authorize([ROLES.BRANCH_MANAGER], { allowInternalOps: false }),
-    enforceLimit("max_members", null, { tableName: "members" }),
     validate(createMemberSchema),
     controller.createMember
 );

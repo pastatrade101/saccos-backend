@@ -85,6 +85,10 @@ begin
             default_interest_income_account_id = excluded.default_interest_income_account_id,
             default_retained_earnings_account_id = excluded.default_retained_earnings_account_id;
 
+    insert into public.branches (tenant_id, name, code, address_line1, city, state, country)
+    values (p_tenant_id, 'Main Branch', 'MAIN', 'Head Office', 'Dar es Salaam', 'Dar es Salaam', 'Tanzania')
+    on conflict (tenant_id, code) do nothing;
+
     return jsonb_build_object(
         'tenant_id', p_tenant_id,
         'cash_account_id', v_cash_account_id,

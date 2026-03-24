@@ -3,6 +3,7 @@ const { adminSupabase } = require("../../config/supabase");
 const { sendExport, assertExportQuota } = require("../../services/export.service");
 const { logAudit } = require("../../services/audit.service");
 const { runObservedJob } = require("../../services/observability.service");
+const { getSubscriptionStatus } = require("../../services/subscription.service");
 const reportService = require("./reports.service");
 const reportExportJobsService = require("./report-export-jobs.service");
 
@@ -27,6 +28,7 @@ async function resolveTenantName(tenantId) {
 
 async function runExport(req, res, loader, action) {
     const tenantId = req.validated?.query?.tenant_id || req.tenantId || req.auth.tenantId;
+    const subscription = await getSubscriptionStatus(tenantId);
     const requestQuery = { ...(req.validated?.query || {}) };
     const useAsyncExport = Boolean(requestQuery.async);
     delete requestQuery.async;
@@ -36,7 +38,7 @@ async function runExport(req, res, loader, action) {
             actor: req.auth,
             query: requestQuery,
             reportKey: action.replace(/^export_/, ""),
-            subscription: req.subscription
+            subscription
         });
         return res.status(202).json({ data: job });
     }
@@ -46,7 +48,7 @@ async function runExport(req, res, loader, action) {
         const rowCount = Array.isArray(report?.rows) ? report.rows.length : 0;
         const tenantName = await resolveTenantName(tenantId);
 
-        await assertExportQuota(req.subscription, tenantId);
+        await assertExportQuota(subscription, tenantId);
         await logAudit({
             tenantId,
             userId: req.auth.user.id,
@@ -106,6 +108,11 @@ exports.memberBalancesSummary = asyncHandler(async (req, res) =>
 exports.auditExceptions = asyncHandler(async (req, res) =>
     runExport(req, res, reportService.auditExceptionsReport, "export_audit_exceptions")
 );
+
+exports.chargeRevenueSummary = asyncHandler(async (req, res) => {
+    const summary = await reportService.chargeRevenueSummary(req.auth, req.validated.query);
+    res.json({ data: summary });
+});
 
 exports.getExportJob = asyncHandler(async (req, res) => {
     const job = await reportExportJobsService.getReportExportJob(req.auth, req.params.jobId);

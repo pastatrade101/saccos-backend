@@ -1,6 +1,5 @@
 const { adminSupabase } = require("../../config/supabase");
 const AppError = require("../../utils/app-error");
-const { assertPlanLimit } = require("../../services/subscription.service");
 const { logAudit } = require("../../services/audit.service");
 const { assertTenantAccess, invalidateUserContextCache } = require("../../services/user-context.service");
 const { inviteUser } = require("../auth/auth.service");
@@ -203,7 +202,6 @@ async function listUsers(actor, query = {}) {
 async function createUser(actor, payload) {
     const tenantId = payload.tenant_id || actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
-    await assertPlanLimit(tenantId, "staffUsers", "user_profiles");
     assertUserProvisioningPermission(actor, payload.role);
 
     return inviteUser({

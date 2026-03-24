@@ -2,9 +2,7 @@ const express = require("express");
 
 const auth = require("../../middleware/auth");
 const authorize = require("../../middleware/authorize");
-const requireFeature = require("../../middleware/require-feature");
 const idempotency = require("../../middleware/idempotency");
-const requireSubscription = require("../../middleware/require-subscription");
 const validate = require("../../middleware/validate");
 const { ROLES } = require("../../constants/roles");
 const controller = require("./loan-applications.controller");
@@ -12,7 +10,7 @@ const schemas = require("./loan-applications.schemas");
 
 const router = express.Router();
 
-router.use(auth, requireSubscription(), requireFeature("loans_enabled"));
+router.use(auth);
 
 router.get(
     "/",

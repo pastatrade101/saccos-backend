@@ -12,6 +12,11 @@ function applyNoStore(res) {
 }
 
 exports.subscription = asyncHandler(async (req, res) => {
+    if (!req.auth) {
+        applyNoStore(res);
+        return res.json({ data: await getSubscriptionStatus(null) });
+    }
+
     const tenantId = getEffectiveTenantId(req);
     const subscription = await getSubscriptionStatus(tenantId);
     applyNoStore(res);

@@ -13,6 +13,10 @@ exports.getApplication = asyncHandler(async (req, res) => {
     res.json({ data: await service.getApplication(req.auth, req.params.id) });
 });
 
+exports.getMyApplication = asyncHandler(async (req, res) => {
+    res.json({ data: await service.getMyApplication(req.auth) });
+});
+
 exports.createApplication = asyncHandler(async (req, res) => {
     res.status(201).json({ data: await service.createApplication(req.auth, req.validated.body) });
 });

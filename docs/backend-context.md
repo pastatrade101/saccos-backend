@@ -6,7 +6,7 @@ This document is a full backend context snapshot for `saccos-backend` as current
 
 ## 1) Purpose and scope
 
-`saccos-backend` is a multi-tenant SACCOS API and worker system for:
+`saccos-backend` is a single-tenant SACCOS API and worker system for:
 
 - tenant lifecycle and subscription governance
 - member onboarding and portal access
@@ -43,7 +43,7 @@ Core stack:
 1. `request-context` adds request metadata/request id
 2. observability middleware starts timers
 3. security middleware: `helmet`, `cors`, body parsing
-4. route-level middleware: auth, subscription checks, feature gates, RBAC, validation, rate limits, idempotency
+4. route-level middleware: auth, RBAC, validation, rate limits, idempotency
 5. controller -> service -> Supabase (table/RPC/storage/auth admin)
 6. centralized not-found + error-handler response normalization
 
@@ -53,9 +53,9 @@ Core stack:
   - `env.js` typed env parsing (zod)
   - `supabase.js` retriable + instrumented Supabase clients (`adminSupabase`, `publicSupabase`)
 - `src/constants`
-  - roles, plans/features/limits
+  - roles
 - `src/middleware`
-  - auth, authorize, require-subscription, require-feature, idempotency, rate-limit, observability, validation
+  - auth, authorize, idempotency, rate-limit, observability, validation
 - `src/modules`
   - domain modules (controllers/routes/schemas/services by bounded context)
 - `src/services`
@@ -73,18 +73,11 @@ Core stack:
 
 ### Roles
 
-Defined in `src/constants/roles.js`:
-
-- `platform_admin`, `platform_owner`
-- tenant roles: `super_admin`, `branch_manager`, `loan_officer`, `teller`, `auditor`, `member`
+Defined in `src/constants/roles.js`, the system now relies on tenant-level roles only (`super_admin`, `branch_manager`, `loan_officer`, `teller`, `auditor`, `member`). Platform owner roles remain in the constants for future extensions but are not wired to any active endpoints in this single-tenant deployment.
 
 ### Subscription and feature gates
 
-- `require-subscription` blocks inactive/past-grace tenants
-- `require-feature("<key>")` enforces plan entitlements
-- Plan defaults (`src/constants/plans.js`):
-  - `starter` has key features disabled (loans/dividends/contributions/maker-checker/sms trigger controls)
-  - `growth` and `enterprise` enable major controls
+- Subscription, plan, and feature gating logic has been removed. The backend assumes the single tenant is always active and exposes the entire feature set without plan enforcement.
 
 ### Critical safety controls
 
@@ -109,16 +102,11 @@ All routes are mounted in `src/routes/index.js`.
 
 ### Platform owner operations
 
-- `/api/platform`
-  - plans + feature overrides
-  - platform tenant list, subscription assignment, hard tenant delete
-  - system metrics, tenant metrics, infrastructure metrics, slow endpoints, error feed
-- Allowed roles: `platform_admin`, `platform_owner`
+- Platform-level endpoints have been removed. All operational work is scoped to the single tenant workspace rather than a multi-tenant platform.
 
 ### Tenant administration
 
-- `/api/tenants`
-  - tenant CRUD (tenant super-admin context)
+- `/api/tenants` is no longer exposed; tenant life cycle is assumed static and managed outside this service.
 - `/api/branches`
   - branch list/create with plan-limit enforcement
 - `/api/products`
@@ -278,13 +266,7 @@ All routes are mounted in `src/routes/index.js`.
 
 ### Platform metrics endpoints
 
-- system metrics now include:
-  - RPS, p95 latency, error rate, active users/tenants
-  - SMS totals/sent/failed/delivery rate
-- tenant metrics now include:
-  - request/error/latency/active users
-  - SMS totals/sent/failed/delivery rate
-  - sortable by traffic/errors/latency/sms
+- Platform-level metrics endpoints have been removed. Telemetry still captures system-level metrics for the single tenant via the existing `/metrics` and observability racks.
 
 ### Exclusions
 
@@ -293,8 +275,6 @@ API metrics collector intentionally ignores:
 - `/health`
 - `/api/health`
 - `/metrics`
-- `/api/platform/metrics*`
-- `/api/platform/errors*`
 
 ## 9) Database and migration context
 

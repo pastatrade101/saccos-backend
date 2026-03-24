@@ -16,6 +16,7 @@ const {
 } = require("../../services/branch-alerts.service");
 const financeService = require("../finance/finance.service");
 const creditRiskService = require("../credit-risk/credit-risk.service");
+const { ensureMemberAccounts } = require("../members/members.service");
 const AppError = require("../../utils/app-error");
 const LOAN_APPLICATIONS_COUNT_CACHE_TTL_MS = Math.max(0, Number(process.env.LOAN_APPLICATIONS_COUNT_CACHE_TTL_MS || 15000));
 const loanApplicationsCountCache = new Map();
@@ -71,6 +72,12 @@ const LOAN_APPLICATION_LIST_COLUMNS = `
 function isMissingDeletedAtColumn(error) {
     const message = error?.message || "";
     return error?.code === "42703" && message.toLowerCase().includes("deleted_at");
+}
+
+function isMissingColumnError(error, columnName) {
+    return error?.code === "PGRST204"
+        && typeof error?.message === "string"
+        && error.message.includes(`'${columnName}'`);
 }
 
 function stripHtml(value) {
@@ -176,9 +183,16 @@ function resolveLoanProductPolicy(product) {
 }
 
 async function getMemberEligibilityBalances(tenantId, memberId) {
+    const member = await getMemberRecord(tenantId, memberId);
+    await ensureMemberAccounts({
+        tenantId,
+        branchId: member.branch_id,
+        member
+    });
+
     let { data, error } = await adminSupabase
         .from("member_accounts")
-        .select("product_type, available_balance")
+        .select("id, product_type, available_balance")
         .eq("tenant_id", tenantId)
         .eq("member_id", memberId)
         .eq("status", "active")
@@ -187,7 +201,7 @@ async function getMemberEligibilityBalances(tenantId, memberId) {
     if (error && isMissingDeletedAtColumn(error)) {
         ({ data, error } = await adminSupabase
             .from("member_accounts")
-            .select("product_type, available_balance")
+            .select("id, product_type, available_balance")
             .eq("tenant_id", tenantId)
             .eq("member_id", memberId)
             .eq("status", "active"));
@@ -197,8 +211,41 @@ async function getMemberEligibilityBalances(tenantId, memberId) {
         throw new AppError(500, "MEMBER_ACCOUNTS_LOOKUP_FAILED", "Unable to load member accounts for loan eligibility.", error);
     }
 
-    return (data || []).reduce((summary, account) => {
-        const balance = Number(account.available_balance || 0);
+    const accounts = data || [];
+    const accountIds = accounts.map((account) => account.id).filter(Boolean);
+    const latestRunningBalanceByAccountId = new Map();
+
+    if (accountIds.length) {
+        const { data: transactions, error: transactionError } = await adminSupabase
+            .from("member_account_transactions")
+            .select("member_account_id, running_balance, created_at")
+            .eq("tenant_id", tenantId)
+            .in("member_account_id", accountIds)
+            .order("created_at", { ascending: false });
+
+        if (transactionError) {
+            throw new AppError(
+                500,
+                "MEMBER_ACCOUNT_TRANSACTIONS_LOOKUP_FAILED",
+                "Unable to load member account transactions for loan eligibility.",
+                transactionError
+            );
+        }
+
+        for (const transaction of transactions || []) {
+            if (!latestRunningBalanceByAccountId.has(transaction.member_account_id)) {
+                latestRunningBalanceByAccountId.set(
+                    transaction.member_account_id,
+                    Number(transaction.running_balance || 0)
+                );
+            }
+        }
+    }
+
+    return accounts.reduce((summary, account) => {
+        const balance = latestRunningBalanceByAccountId.has(account.id)
+            ? Number(latestRunningBalanceByAccountId.get(account.id) || 0)
+            : Number(account.available_balance || 0);
         if (account.product_type === "savings") {
             summary.savingsBalance += balance;
         } else if (account.product_type === "shares") {
@@ -441,15 +488,74 @@ async function getMemberRecord(tenantId, memberId) {
 }
 
 async function getMemberByUser(tenantId, userId) {
-    const { data, error } = await adminSupabase
+    let { data: profile, error: profileError } = await adminSupabase
+        .from("user_profiles")
+        .select("member_id")
+        .eq("tenant_id", tenantId)
+        .eq("user_id", userId)
+        .maybeSingle();
+
+    if (profileError) {
+        throw new AppError(500, "MEMBER_PROFILE_LOOKUP_FAILED", "Unable to resolve member linkage for this account.", profileError);
+    }
+
+    if (profile?.member_id) {
+        return getMemberRecord(tenantId, profile.member_id);
+    }
+
+    let { data, error } = await adminSupabase
         .from("members")
         .select("*")
         .eq("tenant_id", tenantId)
         .eq("user_id", userId)
         .is("deleted_at", null)
-        .single();
+        .maybeSingle();
 
-    if (error || !data) {
+    if (error) {
+        throw new AppError(500, "MEMBER_PROFILE_LOOKUP_FAILED", "Unable to resolve member profile for this account.", error);
+    }
+
+    if (data) {
+        return data;
+    }
+
+    let applicationQuery = adminSupabase
+        .from("member_applications")
+        .select("approved_member_id")
+        .eq("tenant_id", tenantId)
+        .eq("auth_user_id", userId)
+        .is("deleted_at", null)
+        .not("approved_member_id", "is", null)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+    ({ data, error } = await applicationQuery);
+
+    if (isMissingColumnError(error, "auth_user_id")) {
+        applicationQuery = adminSupabase
+            .from("member_applications")
+            .select("approved_member_id")
+            .eq("tenant_id", tenantId)
+            .eq("created_by", userId)
+            .is("deleted_at", null)
+            .not("approved_member_id", "is", null)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+        ({ data, error } = await applicationQuery);
+    }
+
+    if (error) {
+        throw new AppError(500, "MEMBER_PROFILE_LOOKUP_FAILED", "Unable to resolve approved member linkage for this account.", error);
+    }
+
+    if (data?.approved_member_id) {
+        return getMemberRecord(tenantId, data.approved_member_id);
+    }
+
+    if (!data) {
         throw new AppError(404, "MEMBER_PROFILE_NOT_FOUND", "Member profile was not found for this account.");
     }
 
@@ -1644,7 +1750,10 @@ async function disburseLoanApplication(actor, applicationId, payload) {
             description: payload.description || `Loan disbursement for application ${applicationId}`,
             receipt_ids: payload.receipt_ids || []
         },
-        { skipWorkflow: true }
+        {
+            skipWorkflow: true,
+            skipApprovalGate: true
+        }
     );
 
     if (disburseResult?.approval_required) {

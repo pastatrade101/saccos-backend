@@ -2,9 +2,11 @@ const crypto = require("crypto");
 
 const { adminSupabase } = require("../../config/supabase");
 const AppError = require("../../utils/app-error");
-const { assertBranchAccess, assertTenantAccess } = require("../../services/user-context.service");
+const { assertBranchAccess, assertTenantAccess, invalidateUserContextCache } = require("../../services/user-context.service");
 const { logAudit } = require("../../services/audit.service");
 const membersService = require("../members/members.service");
+const { sendTransactionalSms } = require("../../services/sms.service");
+const { getBranchName } = require("../../services/branch-name.service");
 
 function generateApplicationNumber() {
     return `APP-${new Date().getFullYear()}-${crypto.randomInt(100000, 999999)}`;
@@ -12,6 +14,108 @@ function generateApplicationNumber() {
 
 function normalizeText(value) {
     return (value || "").trim().toLowerCase();
+}
+
+function formatAmountLabel(amount) {
+    const numeric = Number(amount || 0);
+    if (Number.isNaN(numeric)) {
+        return "0 TZS";
+    }
+    return `${numeric.toLocaleString("en-US")} TZS`;
+}
+
+function isMissingColumnError(error, columnName) {
+    return error?.code === "PGRST204"
+        && typeof error?.message === "string"
+        && error.message.includes(`'${columnName}'`);
+}
+
+async function sendApprovalSms(application) {
+    if (!application?.phone) {
+        return;
+    }
+
+    const branchName = await getBranchName(application.branch_id);
+    const applicantName = application.full_name || "Applicant";
+    const amountLabel = formatAmountLabel(application.membership_fee_amount);
+    const message = `Hello ${applicantName}, your SACCOS membership application for ${branchName || "your branch"} has been approved. Please pay the membership fee of ${amountLabel} to activate your account.`;
+
+    try {
+        await sendTransactionalSms({
+            to: application.phone,
+            text: message,
+            reference: `member-application-approved-${application.id}`
+        });
+    } catch (error) {
+        console.warn("[member-applications] approval SMS failed", {
+            applicationId: application.id,
+            error: error?.message || error
+        });
+    }
+}
+
+async function resolveApplicantAuthUserId(application) {
+    if (application?.auth_user_id) {
+        return application.auth_user_id;
+    }
+
+    if (!application?.created_by) {
+        return null;
+    }
+
+    const { data, error } = await adminSupabase
+        .from("user_profiles")
+        .select("user_id, role")
+        .eq("user_id", application.created_by)
+        .is("deleted_at", null)
+        .maybeSingle();
+
+    if (error) {
+        throw new AppError(500, "APPLICANT_PROFILE_LOOKUP_FAILED", "Unable to resolve the applicant login profile.", error);
+    }
+
+    if (data?.role === "member") {
+        return data.user_id;
+    }
+
+    return null;
+}
+
+async function linkApprovedMemberToApplicant({ tenantId, branchId, authUserId, memberId, fullName, phone }) {
+    if (!authUserId || !memberId) {
+        return;
+    }
+
+    const profilePayload = {
+        user_id: authUserId,
+        tenant_id: tenantId,
+        branch_id: branchId,
+        full_name: fullName,
+        phone: phone || null,
+        role: "member",
+        member_id: memberId,
+        must_change_password: false,
+        is_active: true
+    };
+
+    const { error: profileError } = await adminSupabase
+        .from("user_profiles")
+        .upsert(profilePayload, { onConflict: "user_id" });
+
+    if (profileError) {
+        throw new AppError(500, "MEMBER_PROFILE_LINK_FAILED", "Unable to link the approved member profile.", profileError);
+    }
+
+    const { error: memberError } = await adminSupabase
+        .from("members")
+        .update({ user_id: authUserId })
+        .eq("id", memberId);
+
+    if (memberError) {
+        throw new AppError(500, "MEMBER_USER_LINK_FAILED", "Unable to link the approved member to the applicant login.", memberError);
+    }
+
+    invalidateUserContextCache(authUserId);
 }
 
 async function findRecoverableApprovedMember(application) {
@@ -169,6 +273,65 @@ async function getApplication(actor, applicationId) {
     return data;
 }
 
+async function getMyApplication(actor) {
+    const tenantId = actor.tenantId;
+
+    assertTenantAccess({ auth: actor }, tenantId);
+
+    const userId = actor.user?.id;
+    if (!userId) {
+        throw new AppError(400, "AUTH_USER_REQUIRED", "Authenticated user identifier is missing.");
+    }
+
+    let data;
+    let error;
+
+    ({ data, error } = await adminSupabase
+        .from("member_applications")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .eq("auth_user_id", userId)
+        .is("deleted_at", null)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle());
+
+    if (isMissingColumnError(error, "auth_user_id")) {
+        ({ data, error } = await adminSupabase
+            .from("member_applications")
+            .select("*")
+            .eq("tenant_id", tenantId)
+            .eq("created_by", userId)
+            .is("deleted_at", null)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle());
+    }
+
+    if (error) {
+        throw new AppError(500, "MEMBER_APPLICATION_LOOKUP_FAILED", "Unable to load your membership application.", error);
+    }
+
+    if (!data) {
+        return null;
+    }
+
+    const { data: branch, error: branchError } = await adminSupabase
+        .from("branches")
+        .select("name")
+        .eq("id", data.branch_id)
+        .maybeSingle();
+
+    if (branchError) {
+        throw new AppError(500, "BRANCH_LOOKUP_FAILED", "Unable to load the branch for your application.", branchError);
+    }
+
+    return {
+        ...data,
+        branch_name: branch?.name || null
+    };
+}
+
 async function listApplications(actor, query = {}) {
     const tenantId = actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
@@ -260,7 +423,7 @@ async function createApplication(actor, payload) {
 async function updateApplication(actor, applicationId, payload) {
     const before = await getApplication(actor, applicationId);
 
-    if (["approved", "cancelled"].includes(before.status)) {
+    if (["approved", "approved_pending_payment", "cancelled"].includes(before.status)) {
         throw new AppError(409, "MEMBER_APPLICATION_LOCKED", "This application can no longer be edited.");
     }
 
@@ -352,6 +515,7 @@ async function reviewApplication(actor, applicationId, payload) {
 
 async function approveApplication(actor, applicationId) {
     const application = await getApplication(actor, applicationId);
+    const applicantAuthUserId = await resolveApplicantAuthUserId(application);
 
     if (actor.role !== "super_admin") {
         throw new AppError(403, "FORBIDDEN", "Only a tenant super admin can approve member applications.");
@@ -362,6 +526,12 @@ async function approveApplication(actor, applicationId) {
     }
 
     let approvedMember = await findRecoverableApprovedMember(application);
+
+    const membershipFeeAmount = Number(application.membership_fee_amount || 0);
+    const membershipFeePaid = Number(application.membership_fee_paid || 0);
+    const hasPaidMembershipFee = membershipFeeAmount <= 0 || membershipFeePaid >= membershipFeeAmount;
+    const memberStatus = hasPaidMembershipFee ? "active" : "approved_pending_payment";
+    const applicationStatus = hasPaidMembershipFee ? "approved" : "approved_pending_payment";
 
     if (!approvedMember) {
         const created = await membersService.createMember(actor, {
@@ -387,7 +557,8 @@ async function approveApplication(actor, applicationId) {
             kyc_status: application.kyc_status,
             kyc_reason: application.kyc_reason,
             notes: application.notes,
-            status: "active"
+            status: memberStatus,
+            user_id: applicantAuthUserId
         });
 
         approvedMember = created.member;
@@ -400,12 +571,24 @@ async function approveApplication(actor, applicationId) {
     }
 
     await ensureApprovalMembershipFeePosted(actor, application, approvedMember.id);
+    await linkApprovedMemberToApplicant({
+        tenantId: application.tenant_id,
+        branchId: application.branch_id,
+        authUserId: applicantAuthUserId,
+        memberId: approvedMember.id,
+        fullName: application.full_name,
+        phone: application.phone
+    });
 
-    const approvedApplication = await updateStatus(actor, applicationId, "approved", {
+    const approvedApplication = await updateStatus(actor, applicationId, applicationStatus, {
         approved_by: actor.user.id,
         approved_at: new Date().toISOString(),
         approved_member_id: approvedMember.id
     });
+
+    if (!hasPaidMembershipFee) {
+        void sendApprovalSms(approvedApplication);
+    }
 
     const { error: memberLinkError } = await adminSupabase
         .from("members")
@@ -439,6 +622,7 @@ async function rejectApplication(actor, applicationId, reason) {
 module.exports = {
     listApplications,
     getApplication,
+    getMyApplication,
     createApplication,
     updateApplication,
     submitApplication,

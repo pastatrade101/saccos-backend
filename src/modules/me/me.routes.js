@@ -7,6 +7,8 @@ const controller = require("./me.controller");
 
 const router = express.Router();
 
+router.get("/subscription", auth.optional, controller.subscription);
+
 router.use(
     auth,
     authorize([
@@ -19,7 +21,5 @@ router.use(
         ROLES.MEMBER
     ])
 );
-
-router.get("/subscription", controller.subscription);
 
 module.exports = router;

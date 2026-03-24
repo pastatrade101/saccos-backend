@@ -26,6 +26,26 @@ exports.bootstrapSuperAdmin = asyncHandler(async (req, res) => {
 });
 
 exports.me = asyncHandler(async (req, res) => {
+    if (!req.auth) {
+        res.set({
+            "Cache-Control": "no-store, no-cache, must-revalidate, private",
+            Pragma: "no-cache",
+            Expires: "0",
+            Vary: "Authorization"
+        });
+
+        return res.json({
+            data: {
+                user: null,
+                profile: null,
+                branch_ids: [],
+                tenant: null,
+                branches: [],
+                subscription: null
+            }
+        });
+    }
+
     const tenantId = req.tenantId || req.query?.tenant_id || req.auth.tenantId || null;
     const me = await userService.getMe(req.auth, tenantId);
     const subscription = tenantId ? await getSubscriptionStatus(tenantId) : null;

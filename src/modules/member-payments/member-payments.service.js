@@ -12,10 +12,40 @@ const {
     extractCallbackIdentifiers,
     normalizeCallbackStatus
 } = require("../../services/azampay.service");
+const membersService = require("../members/members.service");
 const {
     postGatewayShareContribution,
-    postGatewaySavingsDeposit
+    postGatewaySavingsDeposit,
+    postGatewayMembershipFee,
+    postGatewayLoanRepayment
 } = require("../finance/finance.service");
+
+function isMissingPaymentOrderRelationError(error) {
+    const code = String(error?.code || "");
+    return code === "PGRST205" || code === "42P01" || code === "42703";
+}
+
+function wrapPaymentOrderError(statusCode, code, fallbackMessage, error) {
+    if (isMissingPaymentOrderRelationError(error)) {
+        return new AppError(
+            503,
+            "PAYMENT_ORDER_SCHEMA_MISSING",
+            "Payment orders are not available because database migration 060_phase5_member_payment_orders.sql has not been applied.",
+            error
+        );
+    }
+
+    if (error?.code === "23502" && typeof error?.message === "string" && error.message.includes("account_id")) {
+        return new AppError(
+            503,
+            "PAYMENT_ORDER_SCHEMA_OUTDATED",
+            "Loan repayment payment orders require database migration 070_member_payment_orders_loan_repayment.sql.",
+            error
+        );
+    }
+
+    return new AppError(statusCode, code, fallbackMessage, error);
+}
 
 function buildExternalId(orderId) {
     return `saccos_azam_${orderId}`;
@@ -29,7 +59,8 @@ function buildOrderView(order) {
         id: order.id,
         tenant_id: order.tenant_id,
         member_id: order.member_id,
-        account_id: order.account_id,
+        account_id: order.account_id || null,
+        loan_id: order.loan_id || null,
         gateway: order.gateway,
         purpose: order.purpose,
         provider: order.provider,
@@ -54,6 +85,7 @@ function buildOrderView(order) {
         account_name: account?.account_name || metadata.account_name || null,
         account_number: account?.account_number || metadata.account_number || null,
         product_type: account?.product_type || metadata.product_type || null,
+        loan_number: metadata.loan_number || null,
         created_at: order.created_at,
         updated_at: order.updated_at
     };
@@ -69,6 +101,98 @@ function resolveListPagination(query = {}) {
         from: (page - 1) * limit,
         to: (page - 1) * limit + limit - 1
     };
+}
+
+function isMissingColumnError(error, columnName) {
+    return error?.code === "PGRST204"
+        && typeof error?.message === "string"
+        && error.message.includes(`'${columnName}'`);
+}
+
+async function resolveActorMember(actor, tenantId) {
+    if (actor.profile?.member_id) {
+        const { data, error } = await adminSupabase
+            .from("members")
+            .select("id, tenant_id, user_id, full_name, branch_id")
+            .eq("tenant_id", tenantId)
+            .eq("id", actor.profile.member_id)
+            .is("deleted_at", null)
+            .maybeSingle();
+
+        if (error) {
+            throw new AppError(500, "PAYMENT_MEMBER_LOOKUP_FAILED", "Unable to resolve the linked member.", error);
+        }
+
+        if (data) {
+            return data;
+        }
+    }
+
+    let { data, error } = await adminSupabase
+        .from("members")
+        .select("id, tenant_id, user_id, full_name, branch_id")
+        .eq("tenant_id", tenantId)
+        .eq("user_id", actor.user.id)
+        .is("deleted_at", null)
+        .maybeSingle();
+
+    if (error) {
+        throw new AppError(500, "PAYMENT_MEMBER_LOOKUP_FAILED", "Unable to resolve the linked member.", error);
+    }
+
+    if (data) {
+        return data;
+    }
+
+    let applicationQuery = adminSupabase
+        .from("member_applications")
+        .select("approved_member_id")
+        .eq("tenant_id", tenantId)
+        .eq("auth_user_id", actor.user.id)
+        .is("deleted_at", null)
+        .not("approved_member_id", "is", null)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+    ({ data, error } = await applicationQuery);
+
+    if (isMissingColumnError(error, "auth_user_id")) {
+        applicationQuery = adminSupabase
+            .from("member_applications")
+            .select("approved_member_id")
+            .eq("tenant_id", tenantId)
+            .eq("created_by", actor.user.id)
+            .is("deleted_at", null)
+            .not("approved_member_id", "is", null)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+        ({ data, error } = await applicationQuery);
+    }
+
+    if (error) {
+        throw new AppError(500, "PAYMENT_MEMBER_LOOKUP_FAILED", "Unable to resolve the approved member record.", error);
+    }
+
+    if (!data?.approved_member_id) {
+        throw new AppError(404, "PAYMENT_MEMBER_NOT_FOUND", "Member was not found for this portal profile.");
+    }
+
+    const { data: member, error: memberError } = await adminSupabase
+        .from("members")
+        .select("id, tenant_id, user_id, full_name, branch_id")
+        .eq("tenant_id", tenantId)
+        .eq("id", data.approved_member_id)
+        .is("deleted_at", null)
+        .maybeSingle();
+
+    if (memberError || !member) {
+        throw new AppError(500, "PAYMENT_MEMBER_LOOKUP_FAILED", "Unable to load the approved member record.");
+    }
+
+    return member;
 }
 
 async function getPortalPaymentAccount(actor, tenantId, accountId, expectedProductType) {
@@ -110,7 +234,8 @@ async function getPortalPaymentAccount(actor, tenantId, accountId, expectedProdu
     }
 
     if (actor.role === ROLES.MEMBER) {
-        if (!actor.profile?.member_id || actor.profile.member_id !== member.id) {
+        const ownMember = await resolveActorMember(actor, tenantId);
+        if (ownMember.id !== member.id) {
             throw new AppError(403, "FORBIDDEN", "You can only initiate payments for your own member account.");
         }
 
@@ -122,6 +247,103 @@ async function getPortalPaymentAccount(actor, tenantId, accountId, expectedProdu
     return { account, member };
 }
 
+async function resolvePortalPaymentAccount(actor, tenantId, accountId = null, expectedProductType, purposeLabel) {
+    if (accountId) {
+        return getPortalPaymentAccount(actor, tenantId, accountId, expectedProductType);
+    }
+
+    const member = actor.role === ROLES.MEMBER
+        ? await resolveActorMember(actor, tenantId)
+        : null;
+
+    if (!member) {
+        throw new AppError(400, "PAYMENT_ACCOUNT_REQUIRED", `A ${expectedProductType} account is required for ${purposeLabel}.`);
+    }
+
+    let { data: account, error: accountError } = await adminSupabase
+        .from("member_accounts")
+        .select("id, tenant_id, member_id, product_type, account_name, account_number")
+        .eq("tenant_id", tenantId)
+        .eq("member_id", member.id)
+        .eq("product_type", expectedProductType)
+        .eq("status", "active")
+        .is("deleted_at", null)
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+    if (accountError) {
+        throw new AppError(500, "PAYMENT_ACCOUNT_LOOKUP_FAILED", `Unable to load a ${expectedProductType} account for ${purposeLabel}.`, accountError);
+    }
+
+    if (!account) {
+        await membersService.ensureMemberAccounts({
+            tenantId,
+            branchId: member.branch_id,
+            member
+        });
+
+        ({ data: account, error: accountError } = await adminSupabase
+            .from("member_accounts")
+            .select("id, tenant_id, member_id, product_type, account_name, account_number")
+            .eq("tenant_id", tenantId)
+            .eq("member_id", member.id)
+            .eq("product_type", expectedProductType)
+            .eq("status", "active")
+            .is("deleted_at", null)
+            .order("created_at", { ascending: true })
+            .limit(1)
+            .maybeSingle());
+
+        if (accountError) {
+            throw new AppError(500, "PAYMENT_ACCOUNT_LOOKUP_FAILED", `Unable to provision a ${expectedProductType} account for ${purposeLabel}.`, accountError);
+        }
+    }
+
+    if (!account) {
+        throw new AppError(404, "PAYMENT_ACCOUNT_NOT_FOUND", `No ${expectedProductType} account is available for ${purposeLabel}.`);
+    }
+
+    return { account, member };
+}
+
+async function resolvePortalRepaymentLoan(actor, tenantId, loanId) {
+    const member = await resolveActorMember(actor, tenantId);
+    const { data: loan, error } = await adminSupabase
+        .from("loans")
+        .select("id, tenant_id, member_id, branch_id, loan_number, status, outstanding_principal, accrued_interest")
+        .eq("tenant_id", tenantId)
+        .eq("id", loanId)
+        .maybeSingle();
+
+    if (error) {
+        throw new AppError(500, "PAYMENT_LOAN_LOOKUP_FAILED", "Unable to load the selected loan.", error);
+    }
+
+    if (!loan) {
+        throw new AppError(404, "PAYMENT_LOAN_NOT_FOUND", "The selected loan was not found.");
+    }
+
+    if (loan.member_id !== member.id) {
+        throw new AppError(403, "FORBIDDEN", "You can only repay your own loan from the member portal.");
+    }
+
+    if (!["active", "in_arrears"].includes(String(loan.status))) {
+        throw new AppError(409, "LOAN_REPAYMENT_UNAVAILABLE", "Only active or in-arrears loans can be repaid.");
+    }
+
+    const outstandingBalance = Math.max(Number(loan.outstanding_principal || 0) + Number(loan.accrued_interest || 0), 0);
+    if (outstandingBalance <= 0) {
+        throw new AppError(409, "LOAN_ALREADY_CLEARED", "This loan no longer has an outstanding balance.");
+    }
+
+    return {
+        member,
+        loan,
+        outstandingBalance
+    };
+}
+
 async function createPaymentOrder(payload) {
     const { data, error } = await adminSupabase
         .from("payment_orders")
@@ -130,7 +352,7 @@ async function createPaymentOrder(payload) {
         .single();
 
     if (error || !data) {
-        throw new AppError(500, "PAYMENT_ORDER_CREATE_FAILED", "Unable to create payment order.", error);
+        throw wrapPaymentOrderError(500, "PAYMENT_ORDER_CREATE_FAILED", "Unable to create payment order.", error);
     }
 
     return data;
@@ -148,7 +370,7 @@ async function updatePaymentOrder(orderId, patch) {
         .single();
 
     if (error || !data) {
-        throw new AppError(500, "PAYMENT_ORDER_UPDATE_FAILED", "Unable to update payment order.", error);
+        throw wrapPaymentOrderError(500, "PAYMENT_ORDER_UPDATE_FAILED", "Unable to update payment order.", error);
     }
 
     return data;
@@ -162,7 +384,7 @@ async function getPaymentOrderById(orderId) {
         .maybeSingle();
 
     if (error) {
-        throw new AppError(500, "PAYMENT_ORDER_LOOKUP_FAILED", "Unable to load payment order.", error);
+        throw wrapPaymentOrderError(500, "PAYMENT_ORDER_LOOKUP_FAILED", "Unable to load payment order.", error);
     }
 
     return data || null;
@@ -179,12 +401,20 @@ async function listPaymentOrders(actor, query = {}) {
 
     let memberScopeIds = null;
     let memberScopeMap = new Map();
+    let ownMember = null;
 
     const mustApplyBranchScope = !actor.isInternalOps && !["super_admin", "auditor"].includes(actor.role) && Array.isArray(actor.branchIds) && actor.branchIds.length > 0;
     const requestedBranchId = query.branch_id || null;
 
     if (requestedBranchId) {
-        assertBranchAccess({ auth: actor }, requestedBranchId);
+        if (actor.role === ROLES.MEMBER) {
+            ownMember = await resolveActorMember(actor, tenantId);
+            if (ownMember.branch_id && ownMember.branch_id !== requestedBranchId) {
+                throw new AppError(403, "BRANCH_ACCESS_DENIED", "You cannot access this branch.");
+            }
+        } else {
+            assertBranchAccess({ auth: actor }, requestedBranchId);
+        }
     }
 
     if (mustApplyBranchScope || requestedBranchId) {
@@ -240,10 +470,8 @@ async function listPaymentOrders(actor, query = {}) {
     }
 
     if (actor.role === ROLES.MEMBER) {
-        if (!actor.profile?.member_id) {
-            throw new AppError(403, "FORBIDDEN", "Member payment history is not available for this profile.");
-        }
-        paymentQuery = paymentQuery.eq("member_id", actor.profile.member_id);
+        ownMember = ownMember || await resolveActorMember(actor, tenantId);
+        paymentQuery = paymentQuery.eq("member_id", ownMember.id);
     } else if (memberScopeIds) {
         paymentQuery = paymentQuery.in("member_id", memberScopeIds);
     } else if (query.member_id) {
@@ -253,7 +481,7 @@ async function listPaymentOrders(actor, query = {}) {
     const { data, error, count } = await paymentQuery;
 
     if (error) {
-        throw new AppError(500, "PAYMENT_ORDER_LIST_FAILED", "Unable to load payment orders.", error);
+        throw wrapPaymentOrderError(500, "PAYMENT_ORDER_LIST_FAILED", "Unable to load payment orders.", error);
     }
 
     const orders = (data || []).map((order) => {
@@ -311,7 +539,7 @@ async function resolvePaymentOrderFromCallback(payload) {
             .maybeSingle();
 
         if (error) {
-            throw new AppError(500, "PAYMENT_ORDER_LOOKUP_FAILED", "Unable to resolve payment order by external ID.", error);
+            throw wrapPaymentOrderError(500, "PAYMENT_ORDER_LOOKUP_FAILED", "Unable to resolve payment order by external ID.", error);
         }
 
         if (data) {
@@ -327,7 +555,7 @@ async function resolvePaymentOrderFromCallback(payload) {
             .maybeSingle();
 
         if (error) {
-            throw new AppError(500, "PAYMENT_ORDER_LOOKUP_FAILED", "Unable to resolve payment order by provider reference.", error);
+            throw wrapPaymentOrderError(500, "PAYMENT_ORDER_LOOKUP_FAILED", "Unable to resolve payment order by provider reference.", error);
         }
 
         if (data) {
@@ -341,12 +569,16 @@ async function resolvePaymentOrderFromCallback(payload) {
 async function assertPaymentOrderAccess(actor, order) {
     assertTenantAccess({ auth: actor }, order.tenant_id);
 
-    if (order.members?.branch_id) {
-        assertBranchAccess({ auth: actor }, order.members.branch_id);
+    if (actor.role === ROLES.MEMBER) {
+        const ownMember = await resolveActorMember(actor, order.tenant_id);
+        if (ownMember.id !== order.member_id) {
+            throw new AppError(403, "FORBIDDEN", "You do not have access to this payment order.");
+        }
+        return;
     }
 
-    if (actor.role === ROLES.MEMBER && actor.profile?.member_id !== order.member_id) {
-        throw new AppError(403, "FORBIDDEN", "You do not have access to this payment order.");
+    if (order.members?.branch_id) {
+        assertBranchAccess({ auth: actor }, order.members.branch_id);
     }
 }
 
@@ -375,9 +607,18 @@ async function postContributionPaymentOrder(order, source = "manual_reconcile") 
     }
 
     try {
-        const result = order.purpose === "savings_deposit"
-            ? await postGatewaySavingsDeposit(order)
-            : await postGatewayShareContribution(order);
+        let result;
+        if (order.purpose === "savings_deposit") {
+            result = await postGatewaySavingsDeposit(order);
+        } else if (order.purpose === "share_contribution") {
+            result = await postGatewayShareContribution(order);
+        } else if (order.purpose === "membership_fee") {
+            result = await postGatewayMembershipFee(order);
+        } else if (order.purpose === "loan_repayment") {
+            result = await postGatewayLoanRepayment(order);
+        } else {
+            throw new AppError(400, "PAYMENT_PURPOSE_UNSUPPORTED", "Unsupported payment purpose.");
+        }
         const postedOrder = await updatePaymentOrder(order.id, {
             status: "posted",
             posted_at: order.posted_at || new Date().toISOString(),
@@ -447,7 +688,13 @@ async function initiatePortalPayment(actor, payload, options) {
     assertTenantAccess({ auth: actor }, tenantId);
 
     const normalizedPhone = normalizePhone(payload.msisdn);
-    const { account, member } = await getPortalPaymentAccount(actor, tenantId, payload.account_id, options.productType);
+    const { account, member } = await resolvePortalPaymentAccount(
+        actor,
+        tenantId,
+        payload.account_id || null,
+        options.productType,
+        options.purposeLabel || options.purpose
+    );
 
     const orderId = crypto.randomUUID();
     const externalId = buildExternalId(orderId);
@@ -597,6 +844,7 @@ async function initiateContributionPayment(actor, payload) {
     return initiatePortalPayment(actor, payload, {
         purpose: "share_contribution",
         productType: "shares",
+        purposeLabel: "share contribution payment",
         defaultDescriptionPrefix: "Member portal share contribution to"
     });
 }
@@ -605,8 +853,185 @@ async function initiateSavingsPayment(actor, payload) {
     return initiatePortalPayment(actor, payload, {
         purpose: "savings_deposit",
         productType: "savings",
+        purposeLabel: "savings deposit",
         defaultDescriptionPrefix: "Member portal savings deposit to"
     });
+}
+
+async function initiateMembershipFeePayment(actor, payload) {
+    return initiatePortalPayment(actor, payload, {
+        purpose: "membership_fee",
+        productType: "savings",
+        purposeLabel: "membership fee payment",
+        defaultDescriptionPrefix: "Membership fee payment to"
+    });
+}
+
+async function initiateLoanRepaymentPayment(actor, payload) {
+    const tenantId = payload.tenant_id || actor.tenantId;
+    if (!tenantId) {
+        throw new AppError(400, "TENANT_ID_REQUIRED", "Tenant identifier is required.");
+    }
+
+    assertTenantAccess({ auth: actor }, tenantId);
+
+    const normalizedPhone = normalizePhone(payload.msisdn);
+    const { member, loan, outstandingBalance } = await resolvePortalRepaymentLoan(actor, tenantId, payload.loan_id);
+    const amount = Number(payload.amount);
+
+    if (amount > outstandingBalance + 0.01) {
+        throw new AppError(
+            400,
+            "LOAN_REPAYMENT_AMOUNT_EXCEEDS_BALANCE",
+            `Repayment amount cannot exceed the outstanding balance of ${outstandingBalance.toFixed(2)}.`
+        );
+    }
+
+    const orderId = crypto.randomUUID();
+    const externalId = buildExternalId(orderId);
+    const expiresAt = new Date(Date.now() + (env.azamPayIntentTtlSeconds * 1000)).toISOString();
+    const description = payload.description || `Member portal loan repayment for ${loan.loan_number}`;
+
+    await createPaymentOrder({
+        id: orderId,
+        tenant_id: tenantId,
+        member_id: member.id,
+        account_id: null,
+        loan_id: loan.id,
+        created_by_user_id: actor.user.id,
+        gateway: "azampay",
+        purpose: "loan_repayment",
+        provider: payload.provider,
+        msisdn: normalizedPhone,
+        amount,
+        currency: env.azamPayCurrency,
+        status: "created",
+        external_id: externalId,
+        description,
+        expires_at: expiresAt,
+        metadata: {
+            source: "member_portal",
+            member_name: member.full_name,
+            branch_id: member.branch_id,
+            loan_number: loan.loan_number,
+            loan_status: loan.status,
+            outstanding_principal: Number(loan.outstanding_principal || 0),
+            accrued_interest: Number(loan.accrued_interest || 0),
+            outstanding_balance: outstandingBalance
+        }
+    });
+
+    try {
+        const checkout = await createCheckout({
+            amount,
+            currency: env.azamPayCurrency,
+            externalId,
+            provider: payload.provider,
+            accountNumber: normalizedPhone,
+            additionalProperties: {
+                source: env.azamPaySourceLabel,
+                property1: tenantId,
+                property2: orderId,
+                property3: member.id
+            }
+        });
+
+        const pendingOrder = await updatePaymentOrder(orderId, {
+            status: "pending",
+            provider_ref: checkout.providerRef,
+            gateway_request: checkout.requestPayload,
+            gateway_response: checkout.responsePayload,
+            error_code: null,
+            error_message: null
+        });
+
+        await logAudit({
+            tenantId,
+            actorUserId: actor.user.id,
+            table: "payment_orders",
+            entityType: "payment_order",
+            entityId: pendingOrder.id,
+            action: "MEMBER_PAYMENT_INITIATED",
+            afterData: {
+                purpose: pendingOrder.purpose,
+                amount: Number(pendingOrder.amount || 0),
+                provider: pendingOrder.provider,
+                loan_id: pendingOrder.loan_id || null,
+                member_id: pendingOrder.member_id,
+                external_id: pendingOrder.external_id,
+                provider_ref: pendingOrder.provider_ref || null
+            }
+        });
+
+        return {
+            order: buildOrderView(pendingOrder),
+            gateway: {
+                provider_ref: pendingOrder.provider_ref || null,
+                response: checkout.responsePayload
+            }
+        };
+    } catch (error) {
+        if (error?.code === "AZAMPAY_TIMEOUT") {
+            const pendingOrder = await updatePaymentOrder(orderId, {
+                status: "pending",
+                error_code: "AZAMPAY_TIMEOUT",
+                error_message: "Azam Pay is taking longer than expected. The order will keep waiting for callback confirmation."
+            });
+
+            await logAudit({
+                tenantId,
+                actorUserId: actor.user.id,
+                table: "payment_orders",
+                entityType: "payment_order",
+                entityId: pendingOrder.id,
+                action: "MEMBER_PAYMENT_INITIATION_TIMEOUT",
+                afterData: {
+                    purpose: pendingOrder.purpose,
+                    amount: Number(pendingOrder.amount || 0),
+                    error_code: pendingOrder.error_code,
+                    error_message: pendingOrder.error_message
+                }
+            });
+
+            return {
+                order: buildOrderView(pendingOrder),
+                gateway: {
+                    provider_ref: pendingOrder.provider_ref || null,
+                    response: {
+                        success: false,
+                        code: error.code,
+                        message: error.message,
+                        pending_confirmation: true
+                    }
+                },
+                processing_state: "pending_confirmation"
+            };
+        }
+
+        const failedOrder = await updatePaymentOrder(orderId, {
+            status: "failed",
+            failed_at: new Date().toISOString(),
+            error_code: error?.code || "AZAMPAY_CHECKOUT_FAILED",
+            error_message: error?.message || "Unable to initiate Azam Pay checkout."
+        });
+
+        await logAudit({
+            tenantId,
+            actorUserId: actor.user.id,
+            table: "payment_orders",
+            entityType: "payment_order",
+            entityId: failedOrder.id,
+            action: "MEMBER_PAYMENT_INITIATION_FAILED",
+            afterData: {
+                purpose: failedOrder.purpose,
+                amount: Number(failedOrder.amount || 0),
+                error_code: failedOrder.error_code,
+                error_message: failedOrder.error_message
+            }
+        });
+
+        throw error;
+    }
 }
 
 async function getPaymentOrderStatus(actor, orderId) {
@@ -728,5 +1153,7 @@ module.exports = {
     handleAzamCallback,
     initiateContributionPayment,
     initiateSavingsPayment,
+    initiateMembershipFeePayment,
+    initiateLoanRepaymentPayment,
     reconcilePaymentOrder
 };

@@ -2,16 +2,15 @@ const express = require("express");
 
 const auth = require("../../middleware/auth");
 const authorize = require("../../middleware/authorize");
-const requireSubscription = require("../../middleware/require-subscription");
 const validate = require("../../middleware/validate");
 const { ROLES } = require("../../constants/roles");
 const controller = require("./products.controller");
 const schemas = require("./products.schemas");
 
 const router = express.Router();
-const PRODUCT_MANAGER_ROLES = [ROLES.BRANCH_MANAGER];
+const PRODUCT_MANAGER_ROLES = [ROLES.BRANCH_MANAGER, ROLES.SUPER_ADMIN, ROLES.PLATFORM_ADMIN, ROLES.PLATFORM_OWNER];
 
-router.use(auth, requireSubscription());
+router.use(auth);
 
 router.get(
     "/bootstrap",

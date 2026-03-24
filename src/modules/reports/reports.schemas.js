@@ -60,11 +60,19 @@ const exportSchema = z.object({
     async: asyncExportSchema
 });
 
+const chargeRevenueSummarySchema = z.object({
+    tenant_id: z.string().uuid().optional(),
+    branch_id: z.string().uuid().optional(),
+    from_date: z.string().date().optional(),
+    to_date: z.string().date().optional()
+});
+
 const exportJobParamSchema = z.object({
     jobId: z.string().uuid()
 });
 
 module.exports = {
     exportSchema,
+    chargeRevenueSummarySchema,
     exportJobParamSchema
 };

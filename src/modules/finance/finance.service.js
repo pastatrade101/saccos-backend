@@ -9,6 +9,7 @@ const {
     recordSessionTransaction
 } = require("../cash-control/cash-control.service");
 const approvalService = require("../approvals/approvals.service");
+const membersService = require("../members/members.service");
 const {
     notifyTellerTransactionBlocked,
     notifyTellerTransactionPostFailed
@@ -42,6 +43,12 @@ function isLikelyBlockedError(error) {
 function isMissingDeletedAtColumn(error) {
     const message = error?.message || "";
     return error?.code === "42703" && message.toLowerCase().includes("deleted_at");
+}
+
+function generateTransactionReference(prefix) {
+    const stamp = new Date().toISOString().replace(/\D/g, "").slice(0, 14);
+    const suffix = Math.random().toString(36).slice(2, 8).toUpperCase();
+    return `${prefix}-${stamp}-${suffix}`;
 }
 
 function resolvePagination(query = {}) {
@@ -431,6 +438,12 @@ async function postGatewayShareContribution(paymentOrder) {
         }
     });
 
+    await membersService.applyMembershipFeePayment(
+        paymentOrder.member_id,
+        Number(paymentOrder.amount || 0),
+        paymentOrder.created_by_user_id
+    );
+
     return result;
 }
 
@@ -472,6 +485,111 @@ async function postGatewaySavingsDeposit(paymentOrder) {
     });
 
     return result;
+}
+
+async function postGatewayMembershipFee(paymentOrder) {
+    const tenantId = paymentOrder.tenant_id;
+    await assertPostingRuleConfigured(tenantId, "membership_fee");
+
+    const { account, member } = await getAccountWithMember(paymentOrder.account_id);
+    assertTenantAccess({ auth: { tenantId } }, account.tenant_id);
+
+    if (member.id !== paymentOrder.member_id) {
+        throw new AppError(409, "PAYMENT_ORDER_MEMBER_MISMATCH", "Payment order member does not match the selected account.");
+    }
+
+    let entryDate = null;
+    if (paymentOrder.paid_at) {
+        const parsed = new Date(paymentOrder.paid_at);
+        if (!Number.isNaN(parsed.getTime())) {
+            entryDate = parsed.toISOString().slice(0, 10);
+        }
+    }
+    if (!entryDate) {
+        entryDate = new Date().toISOString().slice(0, 10);
+    }
+
+    const { data, error } = await adminSupabase.rpc("post_membership_fee", {
+        p_tenant_id: tenantId,
+        p_member_id: member.id,
+        p_branch_id: member.branch_id,
+        p_amount: Number(paymentOrder.amount),
+        p_user_id: paymentOrder.created_by_user_id,
+        p_reference: paymentOrder.external_id || paymentOrder.id,
+        p_description: paymentOrder.description || "Membership fee payment",
+        p_entry_date: entryDate
+    });
+
+    if (error) {
+        throw new AppError(
+            500,
+            "MEMBERSHIP_FEE_POST_FAILED",
+            "Unable to post the membership fee payment.",
+            error
+        );
+    }
+
+    await membersService.applyMembershipFeePayment(
+        member.id,
+        Number(paymentOrder.amount || 0),
+        paymentOrder.created_by_user_id
+    );
+
+    const journalId = Array.isArray(data) ? (data[0] || null) : data || null;
+    return {
+        journal_id: journalId
+    };
+}
+
+async function postGatewayLoanRepayment(paymentOrder) {
+    const tenantId = paymentOrder.tenant_id;
+    await assertPostingRuleConfigured(tenantId, "loan_repay_principal");
+    await assertPostingRuleConfigured(tenantId, "loan_repay_interest");
+
+    if (!paymentOrder.loan_id) {
+        throw new AppError(400, "PAYMENT_ORDER_TARGET_MISSING", "Loan repayment payment order is missing its loan target.");
+    }
+
+    const loan = await getLoan(paymentOrder.loan_id);
+    assertTenantAccess({ auth: { tenantId } }, loan.tenant_id);
+
+    if (loan.member_id !== paymentOrder.member_id) {
+        throw new AppError(409, "PAYMENT_ORDER_MEMBER_MISMATCH", "Payment order member does not match the selected loan.");
+    }
+
+    const repaymentReference = paymentOrder.provider_ref || paymentOrder.external_id || paymentOrder.id;
+    const result = await runFinancialFunction("loan_repayment", {
+        p_tenant_id: tenantId,
+        p_loan_id: paymentOrder.loan_id,
+        p_amount: Number(paymentOrder.amount),
+        p_user_id: paymentOrder.created_by_user_id,
+        p_reference: repaymentReference,
+        p_description: paymentOrder.description || "Member portal loan repayment via Azam Pay"
+    });
+
+    await logAudit({
+        tenantId,
+        actorUserId: paymentOrder.created_by_user_id,
+        table: "loans",
+        entityType: "loan",
+        entityId: paymentOrder.loan_id,
+        action: "gateway_loan_repayment",
+        afterData: {
+            payment_order_id: paymentOrder.id,
+            loan_id: paymentOrder.loan_id,
+            member_id: loan.member_id,
+            amount: Number(paymentOrder.amount || 0),
+            journal_id: result.journal_id || null,
+            interest_component: result.interest_component || null,
+            principal_component: result.principal_component || null,
+            reference: repaymentReference
+        }
+    });
+
+    return {
+        ...result,
+        reference: repaymentReference
+    };
 }
 
 async function dividendAllocation(actor, payload) {
@@ -711,13 +829,14 @@ async function loanRepay(actor, payload) {
         tenantId,
         branchId: loan.branch_id
     });
+    const repaymentReference = payload.reference || generateTransactionReference("LRP");
 
     const result = await runFinancialFunction("loan_repayment", {
         p_tenant_id: tenantId,
         p_loan_id: payload.loan_id,
         p_amount: payload.amount,
         p_user_id: payload.user_id || actor.user.id,
-        p_reference: payload.reference || null,
+        p_reference: repaymentReference,
         p_description: payload.description || null
     });
 
@@ -751,13 +870,16 @@ async function loanRepay(actor, payload) {
         afterData: {
             loan_id: payload.loan_id,
             amount: payload.amount,
-            reference: payload.reference || null,
+            reference: repaymentReference,
             journal_id: result.journal_id || null,
             interest_component: result.interest_component || null
         }
     });
 
-    return result;
+    return {
+        ...result,
+        reference: repaymentReference
+    };
 }
 
 async function accrueInterest(actor, payload) {
@@ -856,7 +978,9 @@ async function getStatements(actor, query) {
             throw new AppError(403, "FORBIDDEN", "Members can only access their own statement.");
         }
 
-        assertBranchAccess({ auth: actor }, member.branch_id);
+        if (actor.role !== "member") {
+            assertBranchAccess({ auth: actor }, member.branch_id);
+        }
         statementQuery = statementQuery.eq("member_id", query.member_id);
     }
 
@@ -979,12 +1103,32 @@ async function getLoans(actor, query) {
             throw new AppError(403, "FORBIDDEN", "Members can only access their own loans.");
         }
 
-        assertBranchAccess({ auth: actor }, member.branch_id);
+        if (actor.role !== "member") {
+            assertBranchAccess({ auth: actor }, member.branch_id);
+        }
         loanQuery = loanQuery.eq("member_id", query.member_id);
     }
 
     if (query.branch_id) {
-        assertBranchAccess({ auth: actor }, query.branch_id);
+        if (actor.role === ROLES.MEMBER) {
+            const { data: ownMember, error: ownMemberError } = await adminSupabase
+                .from("members")
+                .select("branch_id")
+                .eq("tenant_id", tenantId)
+                .eq("user_id", actor.user.id)
+                .is("deleted_at", null)
+                .single();
+
+            if (ownMemberError || !ownMember) {
+                throw new AppError(404, "MEMBER_NOT_FOUND", "Linked member record was not found.");
+            }
+
+            if (ownMember.branch_id !== query.branch_id) {
+                throw new AppError(403, "BRANCH_ACCESS_DENIED", "You cannot access this branch.");
+            }
+        } else {
+            assertBranchAccess({ auth: actor }, query.branch_id);
+        }
         loanQuery = loanQuery.eq("branch_id", query.branch_id);
     }
 
@@ -1154,6 +1298,8 @@ module.exports = {
     shareContribution,
     postGatewayShareContribution,
     postGatewaySavingsDeposit,
+    postGatewayMembershipFee,
+    postGatewayLoanRepayment,
     dividendAllocation,
     transfer,
     loanDisburse,

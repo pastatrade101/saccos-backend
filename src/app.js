@@ -5,6 +5,7 @@ const morgan = require("morgan");
 
 const env = require("./config/env");
 const routes = require("./routes");
+const publicSignupRoutes = require("./modules/public-signups/public-signups.routes");
 const errorHandler = require("./middleware/error-handler");
 const notFoundHandler = require("./middleware/not-found");
 const requestContext = require("./middleware/request-context");
@@ -77,6 +78,7 @@ app.get("/metrics", (req, res) => {
     return res.send(getPrometheusMetrics());
 });
 
+app.use(`${env.apiPrefix}/public`, publicSignupRoutes);
 app.use(env.apiPrefix, routes);
 app.use(notFoundHandler);
 app.use(errorHandler);

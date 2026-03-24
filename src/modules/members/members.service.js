@@ -2,12 +2,13 @@ const crypto = require("crypto");
 
 const { adminSupabase } = require("../../config/supabase");
 const AppError = require("../../utils/app-error");
-const { assertPlanLimit } = require("../../services/subscription.service");
 const { logAudit } = require("../../services/audit.service");
-const { assertBranchAccess, assertTenantAccess } = require("../../services/user-context.service");
+const { assertBranchAccess, assertTenantAccess, invalidateUserContextCache } = require("../../services/user-context.service");
 const { ensureBranchAssignments } = require("../../services/branch-assignment.service");
 const { saveCredentialHandoff, getActiveCredentialByUser } = require("../../services/credential-handoff.service");
 const { sendPasswordSetupLink } = require("../auth/auth.service");
+const { sendTransactionalSms } = require("../../services/sms.service");
+const { getBranchName } = require("../../services/branch-name.service");
 const MEMBERS_COUNT_CACHE_TTL_MS = Math.max(0, Number(process.env.MEMBERS_COUNT_CACHE_TTL_MS || 15000));
 const membersCountCache = new Map();
 const membersCountInFlight = new Map();
@@ -328,6 +329,86 @@ function isMissingDeletedAtColumn(error) {
     return error?.code === "42703" && message.toLowerCase().includes("deleted_at");
 }
 
+function isMissingColumnError(error, columnName) {
+    return error?.code === "PGRST204"
+        && typeof error?.message === "string"
+        && error.message.includes(`'${columnName}'`);
+}
+
+async function resolveOwnMember(actor, tenantId) {
+    if (actor.profile?.member_id) {
+        const { data, error } = await adminSupabase
+            .from("members")
+            .select("id")
+            .eq("tenant_id", tenantId)
+            .eq("id", actor.profile.member_id)
+            .is("deleted_at", null)
+            .maybeSingle();
+
+        if (error) {
+            throw new AppError(500, "MEMBER_LOOKUP_FAILED", "Unable to resolve the linked member.", error);
+        }
+
+        if (data) {
+            return data;
+        }
+    }
+
+    let { data, error } = await adminSupabase
+        .from("members")
+        .select("id")
+        .eq("tenant_id", tenantId)
+        .eq("user_id", actor.user.id)
+        .is("deleted_at", null)
+        .maybeSingle();
+
+    if (error) {
+        throw new AppError(500, "MEMBER_LOOKUP_FAILED", "Unable to resolve the linked member.", error);
+    }
+
+    if (data) {
+        return data;
+    }
+
+    let applicationQuery = adminSupabase
+        .from("member_applications")
+        .select("approved_member_id")
+        .eq("tenant_id", tenantId)
+        .eq("auth_user_id", actor.user.id)
+        .is("deleted_at", null)
+        .not("approved_member_id", "is", null)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+    ({ data, error } = await applicationQuery);
+
+    if (error?.code === "PGRST204" && String(error.message || "").includes("'auth_user_id'")) {
+        applicationQuery = adminSupabase
+            .from("member_applications")
+            .select("approved_member_id")
+            .eq("tenant_id", tenantId)
+            .eq("created_by", actor.user.id)
+            .is("deleted_at", null)
+            .not("approved_member_id", "is", null)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+        ({ data, error } = await applicationQuery);
+    }
+
+    if (error) {
+        throw new AppError(500, "MEMBER_LOOKUP_FAILED", "Unable to resolve the approved member record.", error);
+    }
+
+    if (data?.approved_member_id) {
+        return { id: data.approved_member_id };
+    }
+
+    throw new AppError(404, "MEMBER_NOT_FOUND", "Linked member record was not found.");
+}
+
 async function listMembers(actor, filters = {}) {
     const tenantId = actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
@@ -534,6 +615,24 @@ async function listMemberAccounts(actor, query = {}) {
     assertTenantAccess({ auth: actor }, tenantId);
 
     const pagination = buildPagination(query);
+    let ownMember = null;
+    const actorScopedBranchIds = !actor.isInternalOps && !["super_admin", "auditor"].includes(actor.role) && actor.branchIds.length
+        ? actor.branchIds
+        : [];
+
+    if (actor.role === "member") {
+        ownMember = await resolveOwnMember(actor, tenantId);
+    }
+
+    if (actor.role === "member" || query.member_id || query.branch_id || actorScopedBranchIds.length) {
+        await backfillScopedActiveMemberAccounts({
+            tenantId,
+            memberId: actor.role === "member" ? ownMember.id : (query.member_id || null),
+            branchId: query.branch_id || null,
+            branchIds: actor.role === "member" || query.member_id || query.branch_id ? [] : actorScopedBranchIds
+        });
+    }
+
     const buildAccountQuery = (includeSoftDeleteFilter = true) => {
         let candidate = adminSupabase
             .from("member_accounts")
@@ -551,18 +650,6 @@ async function listMemberAccounts(actor, query = {}) {
     let accountQuery = buildAccountQuery(true);
 
     if (actor.role === "member") {
-        const { data: ownMember, error: ownMemberError } = await adminSupabase
-            .from("members")
-            .select("id")
-            .eq("tenant_id", tenantId)
-            .eq("user_id", actor.user.id)
-            .is("deleted_at", null)
-            .single();
-
-        if (ownMemberError || !ownMember) {
-            throw new AppError(404, "MEMBER_NOT_FOUND", "Linked member record was not found.");
-        }
-
         accountQuery = accountQuery.eq("member_id", ownMember.id);
     } else if (!actor.isInternalOps && !["super_admin", "auditor"].includes(actor.role) && actor.branchIds.length) {
         accountQuery = accountQuery.in("branch_id", actor.branchIds);
@@ -602,18 +689,6 @@ async function listMemberAccounts(actor, query = {}) {
         accountQuery = buildAccountQuery(false);
 
         if (actor.role === "member") {
-            const { data: ownMember, error: ownMemberError } = await adminSupabase
-                .from("members")
-                .select("id")
-                .eq("tenant_id", tenantId)
-                .eq("user_id", actor.user.id)
-                .is("deleted_at", null)
-                .single();
-
-            if (ownMemberError || !ownMember) {
-                throw new AppError(404, "MEMBER_NOT_FOUND", "Linked member record was not found.");
-            }
-
             accountQuery = accountQuery.eq("member_id", ownMember.id);
         } else if (!actor.isInternalOps && !["super_admin", "auditor"].includes(actor.role) && actor.branchIds.length) {
             accountQuery = accountQuery.in("branch_id", actor.branchIds);
@@ -838,6 +913,262 @@ async function appendMembershipStatusHistory({ tenantId, memberId, applicationId
     }
 }
 
+async function sendMembershipActivationSms(member) {
+    if (!member?.phone) {
+        return;
+    }
+
+    const branchName = await getBranchName(member.branch_id);
+    const message = `Welcome to the SACCOS ${member.full_name || "member"}. Your membership at ${branchName || "your branch"} has been activated successfully.`;
+
+    try {
+        await sendTransactionalSms({
+            to: member.phone,
+            text: message,
+            reference: `member-activation-${member.id}`
+        });
+    } catch (error) {
+        console.warn("[members] activation SMS failed", {
+            memberId: member.id,
+            error: error?.message || error
+        });
+    }
+}
+
+async function resolveApprovedApplicationAuthUserId(application, tenantId) {
+    if (application?.auth_user_id) {
+        return application.auth_user_id;
+    }
+
+    if (!application?.created_by) {
+        return null;
+    }
+
+    const { data: profile, error: profileError } = await adminSupabase
+        .from("user_profiles")
+        .select("user_id, tenant_id, role")
+        .eq("user_id", application.created_by)
+        .is("deleted_at", null)
+        .maybeSingle();
+
+    if (profileError) {
+        throw new AppError(
+            500,
+            "MEMBER_PROFILE_LOOKUP_FAILED",
+            "Unable to resolve the approved applicant profile.",
+            profileError
+        );
+    }
+
+    if (profile?.tenant_id && profile.tenant_id !== tenantId) {
+        return null;
+    }
+
+    return profile?.role === "member" ? profile.user_id : null;
+}
+
+async function linkActivatedMemberProfile(member, application) {
+    const authUserId = member.user_id || await resolveApprovedApplicationAuthUserId(application, member.tenant_id);
+
+    if (!authUserId) {
+        return member;
+    }
+
+    const profilePayload = {
+        user_id: authUserId,
+        tenant_id: member.tenant_id,
+        branch_id: member.branch_id || application?.branch_id || null,
+        full_name: member.full_name || application?.full_name || null,
+        phone: member.phone || application?.phone || null,
+        role: "member",
+        member_id: member.id,
+        must_change_password: false,
+        is_active: true
+    };
+
+    const { error: profileError } = await adminSupabase
+        .from("user_profiles")
+        .upsert(profilePayload, { onConflict: "user_id" });
+
+    if (profileError) {
+        throw new AppError(
+            500,
+            "MEMBER_PROFILE_LINK_FAILED",
+            "Unable to link the activated member profile.",
+            profileError
+        );
+    }
+
+    let nextMember = member;
+    if (member.user_id !== authUserId) {
+        const { data: updatedMember, error: memberError } = await adminSupabase
+            .from("members")
+            .update({ user_id: authUserId })
+            .eq("id", member.id)
+            .select("id, tenant_id, branch_id, approved_application_id, status, user_id, full_name, phone")
+            .single();
+
+        if (memberError || !updatedMember) {
+            throw new AppError(
+                500,
+                "MEMBER_USER_LINK_FAILED",
+                "Unable to link the activated member to the applicant login.",
+                memberError
+            );
+        }
+
+        nextMember = updatedMember;
+    }
+
+    invalidateUserContextCache(authUserId);
+    return nextMember;
+}
+
+async function finalizeMemberActivation(member, application, changedBy = null) {
+    let activeMember = member;
+    const memberWasInactive = member.status !== "active";
+    const applicationWasInactive = application?.status !== "active";
+
+    if (application?.id && applicationWasInactive) {
+        const { error: applicationUpdateError } = await adminSupabase
+            .from("member_applications")
+            .update({ status: "active" })
+            .eq("id", application.id);
+
+        if (applicationUpdateError) {
+            throw new AppError(
+                500,
+                "MEMBERSHIP_STATUS_UPDATE_FAILED",
+                "Unable to activate the membership application.",
+                applicationUpdateError
+            );
+        }
+    }
+
+    if (memberWasInactive) {
+        const { data: updatedMember, error: memberUpdateError } = await adminSupabase
+            .from("members")
+            .update({ status: "active" })
+            .eq("id", member.id)
+            .select("id, tenant_id, branch_id, approved_application_id, status, user_id, full_name, phone")
+            .single();
+
+        if (memberUpdateError || !updatedMember) {
+            throw new AppError(
+                500,
+                "MEMBERSHIP_STATUS_UPDATE_FAILED",
+                "Unable to activate member after fee payment.",
+                memberUpdateError
+            );
+        }
+
+        activeMember = updatedMember;
+    }
+
+    await ensureMemberAccounts({
+        tenantId: activeMember.tenant_id,
+        branchId: activeMember.branch_id || application?.branch_id,
+        member: activeMember
+    });
+
+    activeMember = await linkActivatedMemberProfile(activeMember, application);
+
+    if (memberWasInactive || applicationWasInactive) {
+        await appendMembershipStatusHistory({
+            tenantId: activeMember.tenant_id,
+            memberId: activeMember.id,
+            applicationId: application?.id || null,
+            statusCode: "active",
+            changedBy,
+            notes: "Membership fee fully collected."
+        });
+
+        void sendMembershipActivationSms(activeMember);
+    }
+
+    return activeMember;
+}
+
+async function applyMembershipFeePayment(memberId, amount, changedBy = null) {
+    const paymentAmount = Number(amount || 0);
+    if (!paymentAmount) {
+        return;
+    }
+
+    const { data: member, error: memberError } = await adminSupabase
+        .from("members")
+        .select("id, tenant_id, branch_id, approved_application_id, status, user_id, full_name, phone")
+        .eq("id", memberId)
+        .is("deleted_at", null)
+        .single();
+
+    if (memberError || !member?.approved_application_id) {
+        return;
+    }
+
+    let applicationQuery = adminSupabase
+        .from("member_applications")
+        .select("id, status, branch_id, full_name, phone, membership_fee_amount, membership_fee_paid, auth_user_id, created_by")
+        .eq("id", member.approved_application_id)
+        .maybeSingle();
+
+    let { data: application, error: applicationError } = await applicationQuery;
+
+    if (isMissingColumnError(applicationError, "auth_user_id")) {
+        applicationQuery = adminSupabase
+            .from("member_applications")
+            .select("id, status, branch_id, full_name, phone, membership_fee_amount, membership_fee_paid, created_by")
+            .eq("id", member.approved_application_id)
+            .maybeSingle();
+
+        ({ data: application, error: applicationError } = await applicationQuery);
+    }
+
+    if (applicationError || !application) {
+        return;
+    }
+
+    const required = Number(application.membership_fee_amount || 0);
+    if (required <= 0) {
+        await finalizeMemberActivation(member, application, changedBy);
+        return;
+    }
+
+    const currentPaid = Number(application.membership_fee_paid || 0);
+    const updatedPaid = Math.min(required, currentPaid + paymentAmount);
+    const payload = {
+        membership_fee_paid: updatedPaid
+    };
+    const isNowComplete = updatedPaid >= required;
+
+    if (isNowComplete) {
+        payload.status = "active";
+    }
+
+    const { error: applicationUpdateError } = await adminSupabase
+        .from("member_applications")
+        .update(payload)
+        .eq("id", application.id);
+
+    if (applicationUpdateError) {
+        throw new AppError(
+            500,
+            "MEMBERSHIP_FEE_RECORD_FAILED",
+            "Unable to record membership fee payment.",
+            applicationUpdateError
+        );
+    }
+
+    if (!isNowComplete) {
+        return;
+    }
+
+    await finalizeMemberActivation(member, {
+        ...application,
+        status: "active"
+    }, changedBy);
+}
+
 async function ensureMemberAccounts({
     tenantId,
     branchId,
@@ -920,6 +1251,120 @@ async function ensureMemberAccounts({
         ...(existingAccounts || []),
         ...accountRows
     ];
+}
+
+async function backfillScopedActiveMemberAccounts({
+    tenantId,
+    memberId = null,
+    branchId = null,
+    branchIds = []
+}) {
+    let memberQuery = adminSupabase
+        .from("members")
+        .select("id, tenant_id, branch_id, approved_application_id, user_id, full_name, phone, status")
+        .eq("tenant_id", tenantId)
+        .eq("status", "active")
+        .is("deleted_at", null);
+
+    if (memberId) {
+        memberQuery = memberQuery.eq("id", memberId);
+    } else if (branchId) {
+        memberQuery = memberQuery.eq("branch_id", branchId);
+    } else if (branchIds.length) {
+        memberQuery = memberQuery.in("branch_id", branchIds);
+    }
+
+    const { data: members, error: membersError } = await memberQuery;
+
+    if (membersError) {
+        throw new AppError(500, "MEMBER_ACCOUNT_BACKFILL_FAILED", "Unable to load members for account backfill.", membersError);
+    }
+
+    if (!members?.length) {
+        return;
+    }
+
+    const memberIds = members.map((member) => member.id);
+    let accountQuery = adminSupabase
+        .from("member_accounts")
+        .select("member_id, product_type")
+        .eq("tenant_id", tenantId)
+        .in("member_id", memberIds)
+        .is("deleted_at", null);
+
+    let { data: accounts, error: accountsError } = await accountQuery;
+
+    if (accountsError && isMissingDeletedAtColumn(accountsError)) {
+        accountQuery = adminSupabase
+            .from("member_accounts")
+            .select("member_id, product_type")
+            .eq("tenant_id", tenantId)
+            .in("member_id", memberIds);
+
+        ({ data: accounts, error: accountsError } = await accountQuery);
+    }
+
+    if (accountsError) {
+        throw new AppError(
+            500,
+            "MEMBER_ACCOUNT_BACKFILL_FAILED",
+            "Unable to inspect existing member accounts for backfill.",
+            accountsError
+        );
+    }
+
+    const productsByMember = new Map();
+    for (const account of accounts || []) {
+        const current = productsByMember.get(account.member_id) || new Set();
+        current.add(account.product_type);
+        productsByMember.set(account.member_id, current);
+    }
+
+    for (const member of members) {
+        if (member.approved_application_id && !member.user_id) {
+            let applicationQuery = adminSupabase
+                .from("member_applications")
+                .select("id, branch_id, full_name, phone, auth_user_id, created_by")
+                .eq("id", member.approved_application_id)
+                .maybeSingle();
+
+            let { data: application, error: applicationError } = await applicationQuery;
+
+            if (isMissingColumnError(applicationError, "auth_user_id")) {
+                applicationQuery = adminSupabase
+                    .from("member_applications")
+                    .select("id, branch_id, full_name, phone, created_by")
+                    .eq("id", member.approved_application_id)
+                    .maybeSingle();
+
+                ({ data: application, error: applicationError } = await applicationQuery);
+            }
+
+            if (applicationError) {
+                throw new AppError(
+                    500,
+                    "MEMBER_LINK_BACKFILL_FAILED",
+                    "Unable to load the approved application for member linkage backfill.",
+                    applicationError
+                );
+            }
+
+            if (application) {
+                await linkActivatedMemberProfile(member, application);
+            }
+        }
+
+        const products = productsByMember.get(member.id) || new Set();
+        if (products.has("savings") && products.has("shares")) {
+            continue;
+        }
+
+        await ensureMemberAccounts({
+            tenantId,
+            branchId: member.branch_id,
+            member
+        });
+    }
 }
 
 async function provisionMemberAccount(actor, memberId, payload) {
@@ -1441,7 +1886,6 @@ async function createMember(actor, payload) {
     const tenantId = payload.tenant_id || actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
     assertBranchAccess({ auth: actor }, payload.branch_id);
-    await assertPlanLimit(tenantId, "members", "members");
     const normalizedPatch = buildMemberWritePatch(payload);
 
     await assertUniqueMemberIdentityFields({
@@ -1989,5 +2433,6 @@ module.exports = {
     resetMemberPassword,
     ensureMemberAccounts,
     provisionMemberLogin,
+    applyMembershipFeePayment,
     getMemberTemporaryCredential
 };

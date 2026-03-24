@@ -40,7 +40,17 @@ const createApplicationSchema = baseSchema.superRefine((value, ctx) => {
 });
 
 const listApplicationsQuerySchema = z.object({
-    status: z.enum(["draft", "submitted", "reviewed", "approved", "rejected", "cancelled"]).optional(),
+    status: z.enum([
+        "draft",
+        "submitted",
+        "under_review",
+        "reviewed",
+        "approved",
+        "approved_pending_payment",
+        "active",
+        "rejected",
+        "cancelled"
+    ]).optional(),
     branch_id: z.string().uuid().optional(),
     search: z.string().trim().min(1).max(120).optional(),
     page: z.coerce.number().int().positive().default(1),

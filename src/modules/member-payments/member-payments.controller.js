@@ -13,6 +13,18 @@ exports.initiateSavingsPayment = asyncHandler(async (req, res) => {
     res.status(httpStatus).json({ data: result });
 });
 
+exports.initiateMembershipFeePayment = asyncHandler(async (req, res) => {
+    const result = await service.initiateMembershipFeePayment(req.auth, req.validated.body);
+    const httpStatus = result.processing_state === "pending_confirmation" ? 202 : 201;
+    res.status(httpStatus).json({ data: result });
+});
+
+exports.initiateLoanRepaymentPayment = asyncHandler(async (req, res) => {
+    const result = await service.initiateLoanRepaymentPayment(req.auth, req.validated.body);
+    const httpStatus = result.processing_state === "pending_confirmation" ? 202 : 201;
+    res.status(httpStatus).json({ data: result });
+});
+
 exports.listPaymentOrders = asyncHandler(async (req, res) => {
     const result = await service.listPaymentOrders(req.auth, req.validated.query);
     res.json({ data: result });

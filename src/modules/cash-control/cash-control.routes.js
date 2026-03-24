@@ -2,7 +2,6 @@ const express = require("express");
 
 const auth = require("../../middleware/auth");
 const authorize = require("../../middleware/authorize");
-const requireSubscription = require("../../middleware/require-subscription");
 const validate = require("../../middleware/validate");
 const { ROLES } = require("../../constants/roles");
 const controller = require("./cash-control.controller");
@@ -10,7 +9,7 @@ const schemas = require("./cash-control.schemas");
 
 const router = express.Router();
 
-router.use(auth, requireSubscription());
+router.use(auth);
 
 router.get(
     "/sessions",
