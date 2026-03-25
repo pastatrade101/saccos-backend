@@ -90,7 +90,7 @@ router.post(
 );
 router.post(
     "/:id/reset-password",
-    authorize([ROLES.SUPER_ADMIN], { allowInternalOps: false }),
+    authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER], { allowInternalOps: false }),
     validate(resetMemberPasswordSchema),
     controller.resetMemberPassword
 );
