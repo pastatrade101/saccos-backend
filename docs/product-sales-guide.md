@@ -1,215 +1,102 @@
-# SACCOS SaaS Sales Guide
+# SACCOS Client Delivery Guide
 
-This guide is for demos, proposals, and commercial conversations.
+This guide is for demos, client handover discussions, and implementation conversations for the current single-client deployment.
 
-## Product Positioning
+## Positioning
 
-SACCOS Control is an enterprise-ready core operations platform for cooperatives that manage real members and real money.
+SACCOS Control is an operations system for one SACCOS that manages real members and real money with governance built into the workflow.
 
 It unifies:
 
 - member onboarding and lifecycle
 - teller cash operations
 - loan workflow with governance
-- contributions and dividend operations
-- accounting and audit visibility
-- multi-tenant SaaS owner controls
+- contributions and dividends
+- accounting visibility and audit evidence
+- reporting, exports, and member portal access
 
-## What Buyers Get
+## What The Client Gets
 
-### 1. Controlled Money Movement
+### 1. Controlled money movement
 
 - double-entry posting foundation
-- loan disbursement gated by workflow approval
-- idempotency support on posting endpoints
+- loan disbursement gated by approval workflow
+- idempotency on posting endpoints
 - teller session and receipt policy controls
 
-### 2. Governance and Accountability
+### 2. Governance and accountability
 
 - strict role-based permissions by function
 - maker-checker on sensitive workflows
 - auditor read-only workspace
 - full audit trail for sensitive actions
 
-### 3. Scalable SaaS Operations
-
-- multi-tenant architecture with strict tenant isolation
-- plan-based feature entitlements
-- platform owner console for provisioning and lifecycle control
-
-### 4. Faster Onboarding at Scale
-
-- CSV import for bulk members
-- optional portal account provisioning
-- temporary credential generation with forced first password change
-
-## What Closes Deals (Buyer Language)
-
-### 1. Financial Safety for Real Money
-
-Use this message in demos:
-
-- every transaction has traceable accounting impact
-- disbursement is blocked until approvals are complete
-- role controls reduce internal misuse risk
-- audit trails provide regulator and board evidence
-
-Business value:
-
-- fewer loss events
-- stronger board confidence
-- safer growth into larger transaction volumes
-
-### 2. Operational Efficiency
-
-Use this message in demos:
+### 3. Faster operations
 
 - one workflow for members, cash, loans, dividends, and reports
-- bulk import reduces onboarding bottlenecks
-- role dashboards reduce handoff friction
-- built-in approvals cut back manual follow-up
+- CSV import for bulk onboarding
+- optional portal account provisioning
+- reduced manual reconciliation and handoff friction
 
-Business value:
+### 4. Scalable client deployment
 
-- faster turnaround per member request
-- lower manual reconciliation effort
-- smaller operations team can serve more members
+- supports branch growth inside one SACCOS
+- compatibility layer for workspace status/capabilities remains available
+- architecture is still robust enough for higher member and transaction volume
 
-### 3. Transparency to Members (Trust Driver)
+## Why This System Is Different
 
-Use this message in demos:
+Unlike spreadsheet-style cooperative tools, this system enforces financial controls at the application and database layers.
 
-- member portal shows savings, loans, and contribution history
-- statements and receipts are easier to retrieve
-- approval-driven operations improve fairness and consistency
-
-Business value:
-
-- stronger member trust and retention
-- fewer disputes over balances and repayments
-- better reputation for the cooperative
-
-### 4. Growth Capability
-
-Use this message in demos:
-
-- tenant plans support each growth stage (Starter -> Growth -> Enterprise)
-- limits and entitlements are managed centrally
-- team access scales by role without opening control gaps
-- product supports higher member and transaction volume over time
-
-Business value:
-
-- predictable expansion without replacing the system
-- smoother branch/team growth
-- clear commercial upgrade path for each SACCOS
-
-## Why This Platform Is Different
-
-Unlike many cooperative tools that behave like spreadsheets with dashboards, this platform enforces financial governance at the system level.
-
-Every financial action:
+Every sensitive financial action:
 
 - requires the correct role
 - is logged and traceable
 - produces balanced accounting entries
-- cannot be executed without required approvals
+- can be blocked by approval and policy controls
 
-This ensures the cooperative operates with institutional-grade controls.
+## Pain Points Solved
 
-## Buyer Pain Points Solved
+- branch operations managed in spreadsheets with weak controls
+- loan disbursements executed before approvals
+- poor audit traceability for transactions
+- manual member onboarding that slows growth
+- fragmented cash, lending, and reporting workflows
 
-- Spreadsheet-driven branch operations with weak controls
-- Loan disbursements executed before governance approvals
-- Difficulty tracing transaction origins during audits
-- No structured way to scale from one SACCOS to many tenants
-- Manual member onboarding that blocks growth
+## Recommended Demo Story
 
-## Ideal Customers
+1. The SACCOS administrator signs in and opens the operational workspace.
+2. Staff users are assigned to the correct roles and branches.
+3. A branch manager creates and submits a member application.
+4. A super admin approves the application.
+5. A loan officer appraises a loan.
+6. A branch manager approves it.
+7. A teller or loan officer disburses it with evidence capture.
+8. An auditor reviews the lifecycle from request to journal entry and audit log.
 
-- Community and employee SACCOS
-- Regional cooperative unions
-- Financial service providers building SACCOS-as-a-service offerings
-
-## Plan Packaging (Commercial)
-
-### Starter
-
-For smaller teams launching digitally:
-
-- member onboarding foundation
-- cash desk baseline
-- essential operations and controls
-- lower operational limits
-
-### Growth
-
-For active lending and capital expansion:
-
-- loans workflow
-- contributions and dividends
-- stronger reporting
-- maker-checker controls
-
-### Enterprise
-
-For governance-heavy or larger institutions:
-
-- multi-approval patterns
-- high limits and scale
-- deeper control posture and oversight
-
-## Sales Demo Narrative (Recommended)
-
-### Demo Story
-
-A new SACCOS begins digital operations.
-
-The platform owner provisions the tenant in minutes and assigns the right plan.
-
-The SACCOS team immediately starts onboarding members.
-
-A member submits a loan application.
-
-The loan officer appraises the request.
-
-The branch manager reviews and approves.
-
-The teller executes disbursement with receipt capture.
-
-Later, the auditor reviews the full lifecycle, from application to journal posting and evidence trail.
-
-This story demonstrates controlled money movement, role-based governance, and full operational transparency.
+This demonstrates controlled money movement, role-based governance, and operational transparency.
 
 ## Objection Handling
 
 ### “Can staff manipulate records after approval?”
 
-Sensitive lifecycle states are locked and audited. Disbursement cannot run until approved status is reached.
+Sensitive lifecycle states are controlled and audited. Disbursement cannot run until the approval path is satisfied.
 
-### “Can one tenant see another tenant’s data?”
+### “How is access controlled?”
 
-No. Tenant-scoped data model + RLS + backend authorization enforce isolation.
+Role-based backend authorization, branch-aware scoping, and RLS-aware data access patterns are built into the system.
 
-### “Can this scale across many SACCOS?”
+### “Can this grow with the client?”
 
-Yes. Platform owner controls tenant provisioning, plans, and subscription-level feature access.
+Yes. The current deployment is single-client, but the architecture supports branch, member, and transaction growth without replacing the system.
+
+## Deployment Model
+
+- custom deployment for one SACCOS client
+- one operational workspace
+- client-specific branding, policy, and product configuration
+- no self-service SaaS provisioning in the active runtime
 
 ## Closing Message
 
-This product is not just a dashboard. It is a controlled operating system for cooperative finance with real-world governance, auditability, and growth readiness.
-
-## Commercial CTA Pattern
-
-Use this on landing pages and proposals:
-
-- “Request onboarding”
-- “Talk to platform owner”
-- “Choose your plan with guided setup”
-
-Operationally:
-
-1. Customer contacts platform owner.
-2. Platform owner selects plan and provisions tenant.
-3. Platform owner creates tenant super admin credentials.
-4. Tenant team starts onboarding members and operations immediately.
+This system is not just a dashboard. It is a controlled operating environment for cooperative finance with real-world governance, auditability, and operational depth.

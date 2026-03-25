@@ -2,6 +2,11 @@
 
 Updated: March 4, 2026
 
+Historical terminology note:
+
+- This matrix was assembled while the codebase still exposed more SaaS-era language.
+- In the current deployment, row 8 should be read as legacy compatibility capability rather than an active platform product surface.
+
 Status key:
 
 - `Done`: implemented and integrated in current backend + frontend
@@ -18,7 +23,7 @@ Status key:
 | 5 | Dividend lifecycle enterprise controls | Partial | Draft/freeze/allocate/submit/approve/pay/close exists; advanced simulation and policy modeling can be expanded |
 | 6 | Governance, audit, security hardening | Partial | Auditor module, immutable logs, rate limits, idempotency, and password-change forcing exist; deeper hardening continues |
 | 7 | Reporting + exports | Partial | Core CSV exports and auditor reports exist; broader regulatory and PDF packs remain incremental |
-| 8 | SaaS plans, entitlements, tenant controls | Done | Plans/features, subscription gating, platform tenant admin, and backend feature enforcement are active |
+| 8 | Legacy workspace status / compatibility controls | Partial | Subscription and plan artifacts still exist in schema and code, but active platform tenant administration is not part of the mounted client runtime |
 | 9 | CSV import + secure first login | Done | Import jobs, row-level failures, optional auth provisioning, temp credentials export, and forced password change are active |
 | 10 | UI/UX role dashboards + design system | Partial | Role-aware dashboards and themed shell exist; ongoing polish continues by page/workflow |
 | 11 | Tests + QA + readiness | Partial | Procedure tests, API tests, and smoke flow exist; broader coverage and CI maturity are ongoing |
@@ -30,7 +35,7 @@ Status key:
 - Member application approval path stabilized (branch manager submit, super admin approve/reject).
 - Member CSV import supports richer historical migration fields and credentials export.
 - Frontend role gating aligned to latest route permissions.
-- Platform owner controls updated for plan/tenant management scope.
+- Legacy platform-management references remain in parts of the codebase and documentation history, but they are no longer the primary runtime model.
 
 ## Current Priority Gaps
 

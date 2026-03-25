@@ -2,6 +2,11 @@
 
 Date: 2026-03-09
 
+Historical note:
+
+- This document captures a real optimization batch, but some of the terminology reflects the earlier SaaS/multi-tenant phase.
+- References to subscription caches and tenant status lookups should be read as compatibility-layer work retained in the current single-client codebase.
+
 ## Completed in this batch
 
 ### 1) Subscription status cache (hot path)

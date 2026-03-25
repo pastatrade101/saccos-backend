@@ -1,11 +1,16 @@
-# Scalability Upgrade Plan (Target: 500 Tenants)
+# Scalability Upgrade Plan (Single Client Deployment)
 
-This document captures the progressive upgrade plan to scale the system to 500 tenants at full operational capacity.
+This document captures the progressive upgrade plan for one deployed SACCOS as branch count, member count, and concurrent operational load grow.
+
+Filename note:
+
+- This document replaced an earlier 500-tenant SaaS scale plan.
+- Legacy `tenant` and `subscription` wording may still appear in a few compatibility-oriented bullets because the codebase retained older naming.
 
 ## Phase 0: Baseline + Capacity Targets (1 week)
 
 - Define SLOs: `p95 < 400ms` for list endpoints, `p95 < 2s` for heavy reports, error rate `< 1%`.
-- Add full observability: request timing, DB query timing, queue/job timing, tenant-level dashboards.
+- Add full observability: request timing, DB query timing, queue/job timing, and workspace/branch dashboards.
 - Run first load test baseline.
 - Exit: clear "current max" documented and bottleneck-ranked.
 
@@ -19,7 +24,7 @@ This document captures the progressive upgrade plan to scale the system to 500 t
 
 ## Phase 2: Query + Data Access Hardening (2 weeks)
 
-- Optimize high-traffic queries and remove N+1 patterns (platform tenant/subscription views).
+- Optimize high-traffic queries and remove N+1 patterns in workspace status lookups, hot lists, and dashboard queries.
 - Add missing composite indexes from real query plans.
 - Add projection discipline (`select` needed columns, avoid `*` on hot paths).
 - Add cursor/keyset pagination for largest tables.
@@ -39,25 +44,25 @@ This document captures the progressive upgrade plan to scale the system to 500 t
 - Ensure idempotency and OTP/rate-limit logic are instance-safe.
 - Exit: scale-out works linearly under concurrent traffic.
 
-## Phase 5: Tenant-Scale Platform Optimizations (2 weeks)
+## Phase 5: Workspace Optimization + Compatibility Cleanup (2 weeks)
 
-- Cache subscription/feature checks with short TTL + invalidation.
+- Cache workspace status/capability checks with short TTL + invalidation.
 - Add aggregate/materialized views for dashboard/report summaries.
-- Optimize platform admin endpoints for 500+ tenant listing/filtering.
-- Exit: platform-level pages stay fast as tenant count grows.
+- Remove or quarantine legacy platform-only code paths that are not part of the mounted runtime.
+- Exit: workspace-level dashboards and hot paths stay fast as member and branch volume grows.
 
-## Phase 6: Production Readiness for 500 Tenants (2 weeks)
+## Phase 6: Production Readiness for One SACCOS (2 weeks)
 
-- Run staged load tests: `100 -> 250 -> 500` tenants with realistic activity mix.
+- Run staged load tests with realistic growth stages for branches, members, and concurrent staff activity.
 - Run soak test (`24-72h`), failover test, and backup/restore drill.
 - Set autoscaling thresholds and runbook/on-call alerts.
-- Exit: meets SLOs at 500-tenant target load with controlled costs.
+- Exit: meets SLOs for the client deployment target load with controlled costs.
 
 ## Recommended Rollout Gates
 
-1. Gate A: Phase 1+2 complete, pass 100-tenant test.
-2. Gate B: Phase 3+4 complete, pass 250-tenant test.
-3. Gate C: Phase 5+6 complete, pass 500-tenant full-capacity test.
+1. Gate A: Phase 1+2 complete, pass branch/member concurrency baseline.
+2. Gate B: Phase 3+4 complete, pass peak-day operational workload test.
+3. Gate C: Phase 5+6 complete, pass soak and stress tests for the client target load.
 
 ## Optional Next Step
 

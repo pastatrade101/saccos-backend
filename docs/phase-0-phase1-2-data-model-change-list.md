@@ -2,7 +2,7 @@
 
 Updated: March 10, 2026  
 Status: Draft for approval  
-Owner: Platform Owner + Engineering Lead
+Owner: System Owner + Engineering Lead
 
 ## 1. Purpose
 
@@ -240,4 +240,3 @@ This document is considered approved when Product, Risk, Finance, Compliance, an
 1. Entities cover all Phase 1 and 2 exit criteria.
 2. Required constraints/indexes are sufficient for operational scale.
 3. No critical process state lacks durable persistence.
-

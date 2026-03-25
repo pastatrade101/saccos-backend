@@ -2,6 +2,11 @@
 
 Date: 2026-03-10
 
+Historical note:
+
+- This progress log was captured while the codebase still exposed more SaaS-era route and list names.
+- Current client runtime documentation should prefer the mounted route tree and current context docs.
+
 ## Scope
 
 Phase 1 goal is to eliminate unbounded list reads and enforce safe defaults before deeper query/index work.
@@ -15,10 +20,9 @@ Phase 1 goal is to eliminate unbounded list reads and enforce safe defaults befo
   - finance loan/statements/ledger feeds
   - users
   - branches
-  - tenants
+  - legacy workspace/tenant compatibility lists
   - product catalogs (savings/loan/share/fee/penalty/posting-rules)
-  - platform tenants
-  - platform plans
+  - legacy platform compatibility lists
   - member applications
   - dividend cycles
   - cash-control sessions

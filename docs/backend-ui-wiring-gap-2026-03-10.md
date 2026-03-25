@@ -2,12 +2,17 @@
 
 Updated: March 10, 2026
 
+Historical note:
+
+- This comparison was captured while some SaaS-era setup and platform references were still present in the frontend.
+- The active client-facing route map is single-workspace; treat any `/platform/*` or `/tenants/*` references here as legacy compatibility or archived scope unless they are confirmed in the current mounted route tree.
+
 ## Scope
 Comparison of implemented backend modules/routes in `saccos-backend` against currently wired frontend screens/actions.
 
 ## Already Wired in UI
 - Auth sign-in + OTP flow
-- Tenant/platform setup and platform tenant subscription management
+- Initial super-admin setup and workspace entry
 - Staff users and member management (including imports)
 - Loan application lifecycle (create, submit, appraise, approve/reject, disburse, repay)
 - Cash/teller operations and cash control basics
@@ -78,13 +83,12 @@ Not wired:
 
 ### 7) Additional API endpoints currently API-only
 - `POST /auth/signup`
-- `GET /tenants/:id`
-- `PATCH /tenants/:id`
+- legacy tenant-management endpoints from the earlier SaaS phase are not part of the mounted client runtime
 - `GET /members/:id`
 - `PATCH /loan-applications/:id`
 
 ## Recommended UI Wiring Order
 1. Credit-risk actions and guarantor claims workflow UI (critical for Phase 1 operational completeness).
-2. Observability dashboard for SLOs and tenant health (critical for scale operations).
+2. Observability dashboard for SLOs and workspace health (critical for scale operations).
 3. Close period + ledger query + interest accrual operations (Phase 3 governance and auditability).
 4. Remaining advanced report exports and cash-control review/receipt evidence screens.

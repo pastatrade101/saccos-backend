@@ -4,19 +4,25 @@ Last updated: March 11, 2026
 
 This document is a full backend context snapshot for `saccos-backend` as currently implemented.
 
+Terminology note:
+
+- The deployed system is a single client workspace.
+- The database schema and some services still use `tenant`, `platform`, `plan`, and `subscription` terminology because the codebase originated from a SaaS/multi-tenant version.
+- In current documentation, those terms should usually be read as legacy compatibility language unless a section explicitly describes archived platform-era work.
+
 ## 1) Purpose and scope
 
-`saccos-backend` is a single-tenant SACCOS API and worker system for:
+`saccos-backend` is a single-workspace SACCOS API and worker system for:
 
-- tenant lifecycle and subscription governance
+- workspace configuration and branch operations
 - member onboarding and portal access
 - savings, shares, loans, and teller operations
 - maker-checker controls for high-risk operations
 - credit-risk controls (default detection, collections, guarantor exposure/claims)
 - dividend cycles
 - report exports (sync and async worker)
-- platform observability and operations telemetry
-- branch/staff SMS operational alerts with tenant-level trigger controls
+- observability and operational telemetry
+- branch/staff SMS operational alerts with workspace-level trigger controls
 
 Core stack:
 
@@ -73,11 +79,13 @@ Core stack:
 
 ### Roles
 
-Defined in `src/constants/roles.js`, the system now relies on tenant-level roles only (`super_admin`, `branch_manager`, `loan_officer`, `teller`, `auditor`, `member`). Platform owner roles remain in the constants for future extensions but are not wired to any active endpoints in this single-tenant deployment.
+Defined in `src/constants/roles.js`, the normal runtime relies on workspace roles only (`super_admin`, `branch_manager`, `loan_officer`, `teller`, `auditor`, `member`). Legacy internal/platform roles still exist in parts of the codebase but are not part of the mounted client-facing route surface.
 
 ### Subscription and feature gates
 
-- Subscription, plan, and feature gating logic has been removed. The backend assumes the single tenant is always active and exposes the entire feature set without plan enforcement.
+- The legacy subscription/feature model still exists in the codebase and database.
+- In the current deployment it is used as a compatibility status/capabilities layer for the single workspace rather than as a public SaaS provisioning surface.
+- `/api/me/subscription` is still active and the frontend still reads it.
 
 ### Critical safety controls
 
@@ -98,17 +106,18 @@ All routes are mounted in `src/routes/index.js`.
 - `/api/users`
   - me/profile, password-changed marker, staff CRUD, temp credential retrieval
 - `/api/me/subscription`
-  - current tenant subscription + feature entitlements
+  - current workspace status/capabilities response used by the frontend compatibility layer
 
-### Platform owner operations
+### Legacy platform code
 
-- Platform-level endpoints have been removed. All operational work is scoped to the single tenant workspace rather than a multi-tenant platform.
+- Older platform and tenant-management modules still exist in the repository, but they are not mounted from `src/routes/index.js`.
+- The active API surface is the mounted route tree, not the legacy platform modules left in source for compatibility or future cleanup.
 
 ### Tenant administration
 
-- `/api/tenants` is no longer exposed; tenant life cycle is assumed static and managed outside this service.
+- `/api/tenants` is not mounted in the active runtime.
 - `/api/branches`
-  - branch list/create with plan-limit enforcement
+  - branch list/create within the deployed workspace
 - `/api/products`
   - bootstrap + product/rule catalogs (savings, loans, shares, fees, penalties, posting rules)
 
@@ -175,10 +184,10 @@ All routes are mounted in `src/routes/index.js`.
 ### Notification settings (SMS trigger controls)
 
 - `/api/notification-settings/sms-triggers`
-  - tenant super admin reads/updates per-event SMS trigger toggles
-- Gates:
-  - active subscription
-  - `sms_trigger_controls_enabled` (Growth/Enterprise)
+  - workspace super admin reads/updates per-event SMS trigger toggles
+- Legacy compatibility:
+  - some code paths still consult subscription-style feature flags before sending alerts
+  - in this deployment those checks should be treated as workspace configuration, not SaaS plan marketing tiers
 
 ### Reports and exports
 
@@ -198,7 +207,7 @@ All routes are mounted in `src/routes/index.js`.
 - `/api/auditor`
   - read-only audit summaries, exceptions, journals, audit logs, CSV packs
 - `/api/observability`
-  - in-process app observability summary, tenant dashboards, SLO view, reset
+  - in-process app observability summary, SLO view, and reset endpoints for the deployed workspace
 
 ## 6) Key workflows and state models
 
@@ -242,10 +251,9 @@ All routes are mounted in `src/routes/index.js`.
 ### Trigger controls
 
 - catalog in `src/modules/notification-settings/notification-settings.constants.js`
-- per-tenant settings in `sms_trigger_settings`
-- controls are managed by tenant `super_admin`
-- feature availability is plan-gated to Growth/Enterprise
-- runtime sends are also plan-checked to prevent starter-plan SMS dispatch
+- per-workspace settings in `sms_trigger_settings`
+- controls are managed by `super_admin`
+- some legacy feature checks still consult subscription-style flags before SMS sends
 
 ### SMS-worthy event families implemented
 
@@ -258,15 +266,16 @@ All routes are mounted in `src/routes/index.js`.
 ### Instrumentation tables
 
 - `api_metrics`
-  - endpoint, latency, status, bytes, tenant/user dimensions
+  - endpoint, latency, status, bytes, workspace/user dimensions
 - `api_errors`
   - API errors for incident feed
 - `notification_dispatches`
   - SMS dispatch status data
 
-### Platform metrics endpoints
+### Metrics endpoints
 
-- Platform-level metrics endpoints have been removed. Telemetry still captures system-level metrics for the single tenant via the existing `/metrics` and observability racks.
+- Platform-level dashboards from the SaaS phase are not part of the active runtime.
+- Telemetry still captures system-level metrics for the deployed workspace via `/metrics` and `/api/observability/*`.
 
 ### Exclusions
 
@@ -297,25 +306,26 @@ Primary migration directory: `supabase/sql/`.
 - Phase 3 financial statements:
   - `041_phase3_financial_statements.sql`
   - `042_phase3_financial_statements_rls.sql`
-- Platform operations telemetry:
+- Legacy platform operations telemetry:
   - `043_platform_operations_metrics.sql`
-- Tenant deletion guardrail:
+- Legacy workspace delete/cleanup guardrail:
   - `044_tenant_purge_guardrail.sql`
 - Branch alert dispatch audit:
   - `045_branch_alert_notification_dispatches.sql`
 - SMS trigger settings:
   - `046_sms_trigger_settings.sql`
 
-### Tenant hard-delete behavior
+### Legacy workspace delete behavior
 
-`platform.service.deleteTenant` performs:
+The repository still contains delete/cleanup logic from the older multi-tenant phase:
 
-1. confirmation + scope discovery
+1. scope discovery
 2. storage cleanup (`receipts`, `imports`)
-3. explicit delete ordering across tenant tables (including loans, credit-risk, approvals, dispatches, metrics)
-4. dynamic fallback RPC `purge_tenant_scoped_rows`
-5. Supabase auth user cleanup (excluding internal ops platform users)
-6. final tenant row delete
+3. explicit delete ordering across workspace tables
+4. fallback RPC `purge_tenant_scoped_rows`
+5. auth user cleanup
+
+This is not part of the normal mounted runtime path for the client deployment, but it still matters for tests, resets, and schema compatibility.
 
 ## 10) Environment and config context
 
@@ -324,7 +334,7 @@ Primary migration directory: `supabase/sql/`.
 - server/network: `PORT`, `HOST`, `API_PREFIX`, `CORS_ORIGINS`, `SSL_ENABLED`
 - Supabase: URL, anon/service keys, retry tuning
 - auth/otp/sms: OTP TTL/attempts/rates/provider credentials, OTP enforcement switch
-- subscriptions and policy thresholds: grace days, high-value amount, out-of-hours window
+- compatibility status and policy thresholds: grace days, high-value amount, out-of-hours window
 - imports/auth rate limits
 - reporting branding
 - observability and SLO thresholds
@@ -340,7 +350,7 @@ From `package.json` / `scripts/`:
 - `npm run start:worker`
 - `npm run bootstrap:internal-ops`
 - `npm run seed:demo`
-- `npm run reset:tenants`
+- `npm run reset:tenants` (legacy naming retained)
 - `npm run reset:members`
 - `npm run cleanup:report-exports`
 - `npm run load:baseline`
@@ -352,14 +362,14 @@ From `package.json` / `scripts/`:
 
 - API:
   - RBAC/security
-  - tenant isolation
+  - workspace scoping and legacy tenant-boundary checks
   - receipts and reports
 - procedures:
   - financial postings
   - dividends
   - seed/products
 - smoke:
-  - end-to-end platform + tenant critical flow
+  - end-to-end client workspace critical flow
 
 Commands:
 
@@ -384,9 +394,9 @@ Current state summary:
 ## 14) Notes for contributors
 
 - Treat migrations as additive in non-empty environments.
-- Preserve tenant isolation assumptions in every new query path.
+- Preserve workspace scoping assumptions in every new query path.
 - New high-risk mutations should use:
   - idempotency where applicable
   - approval engine checks where applicable
   - audit logging and before/after payloads
-- Any tenant-scoped new table should be included in explicit tenant delete ordering, even with the dynamic purge guardrail present.
+- Any new table using legacy `tenant_id` workspace scoping should be included in cleanup and reset logic where applicable.

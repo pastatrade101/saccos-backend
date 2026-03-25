@@ -2,7 +2,7 @@
 
 Updated: March 10, 2026
 Version: 1.0
-Document owner: Platform Owner
+Document owner: System Owner
 Confidentiality: Internal - Controlled
 
 ## 1. Document Control
@@ -51,8 +51,8 @@ Out of scope:
 | CTRL-MC-001 | Prevent single-user critical posting | Maker-checker mandatory by policy matrix for critical ops | Operations Manager | Internal Auditor | Approval request trail | Monthly |
 | CTRL-MC-002 | High-value withdrawal safety | TZS threshold based 2-step approval, reason code mandatory | Finance Manager | Compliance Lead | Request + reason + approver IDs | Weekly |
 | CTRL-GL-001 | Out-of-period posting control | Block by default; controlled reversal exception only | Finance Controller | Auditor | Reversal approvals + journal links | Monthly |
-| CTRL-RPT-001 | Regulatory reporting governance | Owner/reviewer/approver must be assigned per report | Compliance Lead | Platform Owner | Report run metadata | Monthly |
-| CTRL-DR-001 | Business continuity readiness | RPO <= 15m, RTO <= 4h with evidenced drills | Platform Owner | Security Lead | Drill reports + timestamps | Quarterly |
+| CTRL-RPT-001 | Regulatory reporting governance | Owner/reviewer/approver must be assigned per report | Compliance Lead | System Owner | Report run metadata | Monthly |
+| CTRL-DR-001 | Business continuity readiness | RPO <= 15m, RTO <= 4h with evidenced drills | System Owner | Security Lead | Drill reports + timestamps | Quarterly |
 
 ## 6. Workflow Requirements
 
@@ -118,7 +118,7 @@ Retention baseline:
 
 | Day | Focus | Primary Output | Owner |
 | --- | --- | --- | --- |
-| Day 1 | Kickoff + scope lock | Confirmed decision log and owner assignments | Platform Owner |
+| Day 1 | Kickoff + scope lock | Confirmed decision log and owner assignments | System Owner |
 | Day 2 | Credit + guarantor process design | Draft process maps + transition controls | Credit Manager |
 | Day 3 | Maker-checker threshold policy | Draft approval matrix with thresholds | Operations + Finance |
 | Day 4 | Regulatory + DR requirements freeze | Report catalog + RPO/RTO evidence requirements | Compliance + Security |

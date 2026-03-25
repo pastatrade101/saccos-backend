@@ -4,6 +4,13 @@ All protected endpoints require:
 
 `Authorization: Bearer <supabase_access_token>`
 
+Current deployment note:
+
+- The active API is a single client workspace.
+- Some requests and query parameters still use `tenant_id` because the underlying contracts and schema were inherited from the earlier SaaS version.
+- In current usage, `tenant_id` refers to the one deployed workspace ID for this client.
+- Platform provisioning endpoints are not part of the active mounted route surface and are omitted here.
+
 ## Auth
 
 ### `POST /api/auth/signin`
@@ -72,57 +79,7 @@ When OTP is enabled and `challenge_id` / `otp_code` are missing, API returns:
 }
 ```
 
-## Platform
-
-### `GET /api/platform/tenants`
-
-No body.
-
-### `POST /api/platform/tenants/:tenantId/subscription`
-
-```json
-{
-  "plan_code": "growth",
-  "status": "active",
-  "start_at": "2026-01-01T00:00:00.000Z",
-  "expires_at": "2026-12-31T23:59:59.000Z"
-}
-```
-
-### `PATCH /api/platform/plans/:planId/features`
-
-```json
-{
-  "features": [
-    {
-      "feature_key": "max_members",
-      "feature_type": "int",
-      "int_value": 10000
-    },
-    {
-      "feature_key": "dividends_enabled",
-      "feature_type": "bool",
-      "bool_value": true
-    }
-  ]
-}
-```
-
-## Tenant and User Setup
-
-### `POST /api/tenants`
-
-```json
-{
-  "name": "Ilboru Traders SACCOS",
-  "registration_number": "TZ-SACCOS-2026-001",
-  "status": "active",
-  "plan": "growth",
-  "subscription_status": "active",
-  "start_at": "2026-01-01T00:00:00.000Z",
-  "expires_at": "2026-12-31T23:59:59.000Z"
-}
-```
+## Workspace Bootstrap and User Setup
 
 ### `POST /api/users/setup-super-admin`
 
@@ -131,12 +88,14 @@ No body.
   "tenant_id": "11111111-1111-1111-1111-111111111111",
   "branch_id": "22222222-2222-2222-2222-222222222222",
   "email": "admin@ilborusaccos.co.tz",
-  "full_name": "Tenant Super Admin",
+  "full_name": "SACCOS Super Admin",
   "phone": "+255700000001",
   "invite": false,
   "password": "TempPass!2026"
 }
 ```
+
+Use this only for the initial bootstrap of the deployed workspace.
 
 ### `POST /api/users`
 
@@ -351,19 +310,21 @@ Returns signed URL for credentials export when available.
 
 ## Reports
 
-### `GET /api/reports/trial-balance/export?tenant_id=<uuid>&from_date=2026-01-01&to_date=2026-12-31`
+The current build still accepts `tenant_id` on some report routes for compatibility. Use the deployed workspace ID where required.
 
-### `GET /api/reports/loan-aging/export?tenant_id=<uuid>`
+### `GET /api/reports/trial-balance/export?tenant_id=<workspace_uuid>&from_date=2026-01-01&to_date=2026-12-31`
 
-### `GET /api/reports/par/export?tenant_id=<uuid>`
+### `GET /api/reports/loan-aging/export?tenant_id=<workspace_uuid>`
 
-### `GET /api/reports/loan-portfolio-summary/export?tenant_id=<uuid>&format=csv`
+### `GET /api/reports/par/export?tenant_id=<workspace_uuid>`
 
-### `GET /api/reports/member-balances-summary/export?tenant_id=<uuid>&format=csv`
+### `GET /api/reports/loan-portfolio-summary/export?tenant_id=<workspace_uuid>&format=csv`
 
-### `GET /api/reports/audit-exceptions/export?tenant_id=<uuid>&reason_code=HIGH_VALUE_TX&from_date=2026-01-01&to_date=2026-12-31&format=csv`
+### `GET /api/reports/member-balances-summary/export?tenant_id=<workspace_uuid>&format=csv`
 
-### `GET /api/reports/member-statements/export?tenant_id=<uuid>&member_id=<uuid>`
+### `GET /api/reports/audit-exceptions/export?tenant_id=<workspace_uuid>&reason_code=HIGH_VALUE_TX&from_date=2026-01-01&to_date=2026-12-31&format=csv`
+
+### `GET /api/reports/member-statements/export?tenant_id=<workspace_uuid>&member_id=<uuid>`
 
 ## Pagination (Operational Lists)
 

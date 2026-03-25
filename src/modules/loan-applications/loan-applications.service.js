@@ -16,6 +16,7 @@ const {
 } = require("../../services/branch-alerts.service");
 const financeService = require("../finance/finance.service");
 const creditRiskService = require("../credit-risk/credit-risk.service");
+const loanCapacityService = require("../loan-capacity/loan-capacity.service");
 const { ensureMemberAccounts } = require("../members/members.service");
 const AppError = require("../../utils/app-error");
 const LOAN_APPLICATIONS_COUNT_CACHE_TTL_MS = Math.max(0, Number(process.env.LOAN_APPLICATIONS_COUNT_CACHE_TTL_MS || 15000));
@@ -34,6 +35,13 @@ const LOAN_APPLICATION_LIST_COLUMNS = `
     external_reference,
     purpose,
     requested_amount,
+    contribution_limit,
+    product_limit,
+    liquidity_limit,
+    borrow_limit,
+    borrow_utilization_percent,
+    liquidity_status,
+    capacity_captured_at,
     requested_term_count,
     requested_repayment_frequency,
     requested_interest_rate,
@@ -104,6 +112,53 @@ function toPositiveNumber(value, fallback = null) {
         return fallback;
     }
     return parsed;
+}
+
+function roundPercent(value) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+        return null;
+    }
+
+    return Math.round(parsed * 100) / 100;
+}
+
+function deriveLiquidityStatus(summary) {
+    if (!summary) {
+        return "unknown";
+    }
+
+    if (summary.loan_pool_frozen) {
+        return "frozen";
+    }
+
+    const totalDeposits = Number(summary.total_deposits || 0);
+    const availableForLoans = Number(summary.available_for_loans || 0);
+    const liquidityRatio = totalDeposits > 0 ? availableForLoans / totalDeposits : 0;
+
+    if (liquidityRatio > 0.4) {
+        return "healthy";
+    }
+
+    if (liquidityRatio >= 0.2) {
+        return "warning";
+    }
+
+    return "risk";
+}
+
+function buildCapacitySnapshot(summary, requestedAmount) {
+    const borrowLimit = Number(summary?.borrow_limit || 0);
+    const requested = Number(requestedAmount || 0);
+    return {
+        contribution_limit: Number(summary?.contribution_limit || 0),
+        product_limit: Number(summary?.product_limit || 0),
+        liquidity_limit: Number(summary?.liquidity_limit || 0),
+        borrow_limit: borrowLimit,
+        borrow_utilization_percent: borrowLimit > 0 ? roundPercent((requested / borrowLimit) * 100) : null,
+        liquidity_status: deriveLiquidityStatus(summary),
+        capacity_captured_at: new Date().toISOString()
+    };
 }
 
 function getEligibilityRuleNumber(rules, keys, fallback = null) {
@@ -297,13 +352,12 @@ async function assertNoProblemLoans(tenantId, memberId) {
     }
 }
 
-async function assertNoOpenApplicationForSameProduct(tenantId, memberId, productId, excludeApplicationId = null) {
+async function assertNoOpenApplicationForMember(tenantId, memberId, excludeApplicationId = null) {
     let builder = adminSupabase
         .from("loan_applications")
         .select("id", { head: true, count: "exact" })
         .eq("tenant_id", tenantId)
         .eq("member_id", memberId)
-        .eq("product_id", productId)
         .in("status", ["submitted", "appraised", "approved"]);
 
     if (excludeApplicationId) {
@@ -320,7 +374,7 @@ async function assertNoOpenApplicationForSameProduct(tenantId, memberId, product
         throw new AppError(
             409,
             "PENDING_LOAN_APPLICATION_EXISTS",
-            "You already have another pending loan application for this loan product."
+            "You already have another open loan application."
         );
     }
 }
@@ -329,23 +383,17 @@ async function assertLoanApplicationPolicy({
     tenantId,
     member,
     product,
+    branchId,
     applicationId = null,
     requestedAmount,
     requestedTermCount,
     requestedRepaymentFrequency,
+    guarantors = [],
+    collateralItems = [],
     enforceSubmissionGuards = false
 }) {
     if (member.status !== "active") {
         throw new AppError(409, "MEMBER_NOT_ACTIVE", "Only active members can apply for loans.");
-    }
-
-    const minimumAmount = Math.max(10000, Number(product.min_amount || 0));
-    if (Number(requestedAmount) < minimumAmount) {
-        throw new AppError(400, "LOAN_AMOUNT_BELOW_MINIMUM", `Requested amount must be at least TZS ${minimumAmount.toLocaleString("en-TZ")}.`);
-    }
-
-    if (product.max_amount && Number(requestedAmount) > Number(product.max_amount)) {
-        throw new AppError(400, "LOAN_AMOUNT_ABOVE_MAXIMUM", "Requested amount exceeds maximum allowed for this loan product.");
     }
 
     const minimumTerm = Math.max(1, Number(product.min_term_count || 1));
@@ -369,35 +417,62 @@ async function assertLoanApplicationPolicy({
             { allowed_repayment_frequencies: allowedRepaymentFrequencies }
         );
     }
+    const capacitySummary = await loanCapacityService.evaluateBorrowCapacity({
+        tenantId,
+        member,
+        loanProduct: product,
+        branchId,
+        requestedAmount,
+        source: enforceSubmissionGuards ? "loan_application_submit_validation" : "loan_application_draft_validation"
+    });
 
-    const balances = await getMemberEligibilityBalances(tenantId, member.id);
-    const { eligibleAmount, policy } = calculateEligibleLoanAmount(product, balances);
+    if (capacitySummary.loan_pool_frozen) {
+        throw new AppError(
+            409,
+            "LOAN_POOL_TEMPORARILY_EXHAUSTED",
+            "SACCO loan pool temporarily exhausted. Please try again later.",
+            {
+                allowed_limit: capacitySummary.borrow_limit,
+                liquidity_limit: capacitySummary.liquidity_limit
+            }
+        );
+    }
 
-    if (Number(requestedAmount) > eligibleAmount) {
+    if (Number(requestedAmount) < capacitySummary.minimum_loan_amount) {
         throw new AppError(
             400,
-            "LOAN_ELIGIBILITY_LIMIT_EXCEEDED",
-            "Requested amount exceeds the member's current savings and shares eligibility limit.",
+            "LOAN_AMOUNT_BELOW_MINIMUM",
+            `Requested amount must be at least ${loanCapacityService.formatCurrency(capacitySummary.minimum_loan_amount)}.`,
             {
-                eligible_amount: eligibleAmount,
-                savings_balance: balances.savingsBalance,
-                shares_balance: balances.sharesBalance,
-                savings_multiplier: policy.savingsMultiplier,
-                shares_multiplier: policy.sharesMultiplier
+                minimum_amount: capacitySummary.minimum_loan_amount,
+                allowed_limit: capacitySummary.borrow_limit
+            }
+        );
+    }
+
+    if (Number(requestedAmount) > capacitySummary.borrow_limit) {
+        throw new AppError(
+            400,
+            "LOAN_BORROW_LIMIT_EXCEEDED",
+            "Requested loan exceeds allowed borrowing capacity",
+            {
+                allowed_limit: capacitySummary.borrow_limit,
+                contribution_limit: capacitySummary.contribution_limit,
+                product_limit: capacitySummary.product_limit,
+                liquidity_limit: capacitySummary.liquidity_limit
             }
         );
     }
 
     if (enforceSubmissionGuards) {
         await assertNoProblemLoans(tenantId, member.id);
-        await assertNoOpenApplicationForSameProduct(tenantId, member.id, product.id, applicationId);
+        await assertNoOpenApplicationForMember(tenantId, member.id, applicationId);
     }
 
     return {
-        balances,
-        eligibleAmount,
+        capacitySummary,
         allowedRepaymentFrequencies,
-        minimumAmount,
+        minimumAmount: capacitySummary.minimum_loan_amount,
         minimumTerm,
         maximumTerm
     };
@@ -1296,13 +1371,16 @@ async function createLoanApplication(actor, payload) {
     }
 
     const applicationReference = await generateUniqueLoanApplicationReference(tenantId);
-    await assertLoanApplicationPolicy({
+    const { capacitySummary } = await assertLoanApplicationPolicy({
         tenantId,
         member,
         product,
+        branchId,
         requestedAmount: sanitizedPayload.requested_amount,
         requestedTermCount: sanitizedPayload.requested_term_count,
         requestedRepaymentFrequency: sanitizedPayload.requested_repayment_frequency,
+        guarantors: sanitizedPayload.guarantors,
+        collateralItems: sanitizedPayload.collateral_items,
         enforceSubmissionGuards: false
     });
 
@@ -1318,6 +1396,7 @@ async function createLoanApplication(actor, payload) {
             external_reference: applicationReference,
             purpose: sanitizedPayload.purpose,
             requested_amount: sanitizedPayload.requested_amount,
+            ...buildCapacitySnapshot(capacitySummary, sanitizedPayload.requested_amount),
             requested_term_count: sanitizedPayload.requested_term_count,
             requested_repayment_frequency: sanitizedPayload.requested_repayment_frequency,
             requested_interest_rate: product.annual_interest_rate,
@@ -1365,14 +1444,17 @@ async function updateLoanApplication(actor, applicationId, payload) {
     const applicationReference = existing.external_reference || await generateUniqueLoanApplicationReference(tenantId);
 
     const member = await getMemberRecord(tenantId, existing.member_id);
-    await assertLoanApplicationPolicy({
+    const { capacitySummary } = await assertLoanApplicationPolicy({
         tenantId,
         member,
         product,
+        branchId: nextBranchId,
         applicationId,
         requestedAmount: sanitizedPayload.requested_amount,
         requestedTermCount: sanitizedPayload.requested_term_count,
         requestedRepaymentFrequency: sanitizedPayload.requested_repayment_frequency,
+        guarantors: sanitizedPayload.guarantors ?? existing.loan_guarantors ?? [],
+        collateralItems: sanitizedPayload.collateral_items ?? existing.collateral_items ?? [],
         enforceSubmissionGuards: false
     });
 
@@ -1380,6 +1462,7 @@ async function updateLoanApplication(actor, applicationId, payload) {
         purpose: sanitizedPayload.purpose,
         external_reference: applicationReference,
         requested_amount: sanitizedPayload.requested_amount,
+        ...buildCapacitySnapshot(capacitySummary, sanitizedPayload.requested_amount),
         requested_term_count: sanitizedPayload.requested_term_count,
         requested_repayment_frequency: sanitizedPayload.requested_repayment_frequency,
         requested_interest_rate: product.annual_interest_rate,
@@ -1442,22 +1525,37 @@ async function submitLoanApplication(actor, applicationId) {
 
     const member = await getMemberRecord(tenantId, existing.member_id);
     const product = await getActiveLoanProduct(tenantId, existing.product_id);
-    await assertLoanApplicationPolicy({
+    const { capacitySummary } = await assertLoanApplicationPolicy({
         tenantId,
         member,
         product,
+        branchId: existing.branch_id,
         applicationId,
         requestedAmount: existing.requested_amount,
         requestedTermCount: existing.requested_term_count,
         requestedRepaymentFrequency: existing.requested_repayment_frequency,
+        guarantors: existing.loan_guarantors || [],
+        collateralItems: existing.collateral_items || [],
         enforceSubmissionGuards: true
     });
+
+    const capacitySnapshot = buildCapacitySnapshot(capacitySummary, existing.requested_amount);
 
     const submissionDecision = await submitLoanApplicationDecision({
         tenantId,
         applicationId,
         actorUserId: actor.user.id
     });
+
+    const { error: capacitySnapshotError } = await adminSupabase
+        .from("loan_applications")
+        .update(capacitySnapshot)
+        .eq("tenant_id", tenantId)
+        .eq("id", applicationId);
+
+    if (capacitySnapshotError) {
+        throw new AppError(500, "LOAN_APPLICATION_CAPACITY_SNAPSHOT_SAVE_FAILED", "Unable to persist loan capacity indicators for this application.", capacitySnapshotError);
+    }
 
     await creditRiskService.recomputeGuarantorExposuresForMembers({
         tenantId,
@@ -1486,7 +1584,8 @@ async function submitLoanApplication(actor, applicationId) {
             rejected_by: submissionDecision.rejected_by,
             rejected_at: submissionDecision.rejected_at,
             rejection_reason: submissionDecision.rejection_reason,
-            disbursement_ready_at: submissionDecision.disbursement_ready_at
+            disbursement_ready_at: submissionDecision.disbursement_ready_at,
+            ...capacitySnapshot
         }
     });
 
@@ -1590,6 +1689,35 @@ async function approveLoanApplication(actor, applicationId, payload) {
 
     if (existing.requested_by === actor.user.id) {
         throw new AppError(400, "MAKER_CHECKER_VIOLATION", "The application maker cannot approve the same application.");
+    }
+
+    const [member, product] = await Promise.all([
+        getMemberRecord(tenantId, existing.member_id),
+        getActiveLoanProduct(tenantId, existing.product_id)
+    ]);
+    const capacitySummary = await loanCapacityService.evaluateBorrowCapacity({
+        tenantId,
+        member,
+        loanProduct: product,
+        branchId: existing.branch_id,
+        requestedAmount: existing.recommended_amount || existing.requested_amount,
+        source: "loan_application_approval_validation"
+    });
+
+    if (capacitySummary.requires_guarantor && (existing.loan_guarantors || []).length < capacitySummary.minimum_guarantor_count) {
+        throw new AppError(
+            400,
+            "LOAN_GUARANTOR_REQUIRED",
+            `This loan product requires at least ${capacitySummary.minimum_guarantor_count} guarantor(s) before approval.`
+        );
+    }
+
+    if (capacitySummary.requires_collateral && (existing.collateral_items || []).length < 1) {
+        throw new AppError(
+            400,
+            "LOAN_COLLATERAL_REQUIRED",
+            "This loan product requires collateral before approval."
+        );
     }
 
     assertAllGuarantorsAccepted(existing);

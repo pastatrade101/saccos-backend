@@ -2,6 +2,11 @@
 
 Updated: March 10, 2026
 
+Historical terminology note:
+
+- This roadmap was drafted during the earlier SaaS/multi-tenant phase.
+- In the current deployment, references to tenant/platform/subscription readiness should be read as workspace/client-deployment readiness unless the section is explicitly about archived platform work.
+
 ## Objective
 Close the remaining capability gaps for production-grade SACCOS operations, prioritized by operational risk.
 
@@ -214,22 +219,22 @@ Exit criteria:
 
 - Documented and evidenced successful restore drill meeting defined RPO/RTO.
 
-## Phase 7: 100-Tenant Readiness Gate (1 week)
+## Phase 7: Client Production Readiness Gate (1 week)
 Priority: `Important`
 
 Focus:
 
-- Validate operational readiness at your current business target.
+- Validate operational readiness for the deployed client workspace under realistic branch, member, and staff activity.
 
 Deliverables:
 
-- Mixed-workload load tests (members, loans, reports, platform).
+- Mixed-workload load tests (members, loans, reports, branch operations).
 - Soak test and incident runbook checks.
 - Final go-live risk register with mitigations.
 
 Exit criteria:
 
-- Error rate, latency, and operational controls meet internal SLOs for 100-tenant target.
+- Error rate, latency, and operational controls meet internal SLOs for the client deployment target.
 
 ## Recommended Execution Order
 

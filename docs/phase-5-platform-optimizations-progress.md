@@ -1,6 +1,12 @@
-# Phase 5 Progress: Tenant-Scale Platform Optimizations
+# Phase 5 Progress: Legacy Platform-Scale Optimization Work
 
 Date: 2026-03-09
+
+Historical note:
+
+- This document records optimization work from the earlier SaaS/platform phase of the codebase.
+- The current deployment is single-client and does not expose `/api/platform/tenants` as part of the mounted runtime.
+- The migration and service changes documented here still exist in source history, but this document should not be read as the current client-facing architecture.
 
 ## Completed in this batch
 

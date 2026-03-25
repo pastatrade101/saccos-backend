@@ -63,7 +63,7 @@ Attach links/evidence before closure:
 | Role | Name | Decision | Date | Notes |
 | --- | --- | --- | --- | --- |
 | Product Owner |  |  |  |  |
-| Platform Owner |  |  |  |  |
+| System Owner |  |  |  |  |
 | Finance Controller |  |  |  |  |
 | Credit Manager |  |  |  |  |
 | Operations Manager |  |  |  |  |

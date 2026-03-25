@@ -2,10 +2,16 @@
 
 This document reflects the current React frontend implementation under `frontend/src`.
 
+Current deployment note:
+
+- The app serves one client workspace.
+- Some frontend contracts still use older `tenant` and `subscription` terms because the codebase evolved from a SaaS version.
+- The active route map is the one defined in `frontend/src/App.tsx`, not the older platform-management helpers still present in some shared files.
+
 ## Stack
 
 - React 18 + TypeScript + Vite
-- Material UI (M3-inspired shell)
+- Material UI
 - React Router
 - Axios API client
 - Supabase browser auth client
@@ -22,11 +28,12 @@ This document reflects the current React frontend implementation under `frontend
 
 Key behavior:
 
-- Supabase session persists in browser
-- Access token attached to all API requests
-- `/users/me` and `/me/subscription` hydrate role, tenant context, and entitlements
-- if backend is unavailable, app routes to `/service-unavailable`
-- if `must_change_password=true`, app forces `/change-password` before workspace access
+- Supabase session persists in the browser
+- access token is attached to API requests
+- `/users/me` hydrates role, branch, and workspace context
+- `/me/subscription` is still consumed as a compatibility status/capabilities endpoint for the deployed workspace
+- if backend is unavailable, the app routes to `/service-unavailable`
+- if `must_change_password=true`, the app forces `/change-password` before workspace access
 
 ## Layout and Navigation
 
@@ -36,25 +43,27 @@ Primary shell:
 
 Current layout behavior:
 
-- white side navigation (sharp edges)
+- white side navigation
 - top bar in brand primary color (`#0A0573`)
-- left-side nav toggle
-- right-side avatar menu with logout
-- global route search in top bar
-- responsive drawer behavior for mobile/desktop
+- responsive drawer behavior for mobile and desktop
+- avatar menu with logout and workspace status chips
 
-Role-aware menu visibility is driven by:
+Menu visibility is primarily driven by:
 
 - signed-in role
-- internal ops/platform mode
-- plan entitlements from `/me/subscription`
+- backend authorization
+- compatibility capability/status data from `/me/subscription`
 
-## Route Map (Current)
+## Route Map
 
 Public:
 
 - `/`
 - `/signin`
+- `/signup`
+- `/reset-password`
+- `/privacy-policy`
+- `/terms-and-agreement`
 - `/access-denied`
 - `/service-unavailable`
 
@@ -68,26 +77,26 @@ Member portal:
 
 Setup:
 
-- `/setup/tenant`
 - `/setup/super-admin`
 
 Workspace:
 
 - `/dashboard`
-- `/platform/tenants`
-- `/platform/plans`
 - `/staff-users`
 - `/products`
 - `/member-applications`
 - `/members`
 - `/members/import`
+- `/contributions`
+- `/savings`
+- `/payments`
 - `/cash`
 - `/cash-control`
-- `/contributions`
 - `/dividends`
+- `/follow-ups`
+- `/approvals`
 - `/loans`
 - `/loans/:loanId`
-- `/follow-ups`
 - `/reports`
 
 Auditor:
@@ -98,17 +107,20 @@ Auditor:
 - `/auditor/audit-logs`
 - `/auditor/reports`
 
-## Role Access (UI Layer)
+There are no active `/platform/tenants`, `/platform/plans`, or `/setup/tenant` routes in the current `App.tsx` route tree.
 
-- `platform_admin`: platform tenants/plans + setup, no tenant internal finance operations
-- `super_admin`: governance-level tenant screens, user control, approvals
-- `branch_manager`: member onboarding, applications, team operations, contributions, dividends
-- `loan_officer`: loan workflow appraisal/disbursement/monitoring
-- `teller`: cash desk and approved-loan disbursement + repayments
+## Role Access
+
+- `super_admin`: governance, approvals, and high-level workspace control
+- `branch_manager`: staff, member operations, products, contributions, dividends, and operational oversight
+- `loan_officer`: appraisal, lending workflow, and portfolio review
+- `teller`: cash desk, loan disbursement execution, and repayments
 - `auditor`: read-only auditor routes
 - `member`: portal only
 
 Note: backend RBAC remains the source of truth.
+
+Legacy internal roles such as `platform_admin` and `platform_owner` still appear in some shared types and auth helpers, but they are not part of the normal client-facing route surface.
 
 ## Loan Workflow UI
 
@@ -116,19 +128,15 @@ Main page: `frontend/src/pages/Loans.tsx`
 
 Current behavior:
 
-- workflow card for loan application lifecycle
-- separate actions for:
-  - new application
-  - appraisal
-  - approval/rejection
-  - disbursement from approved applications
-  - loan repayment
-- disbursement action removed for super admin
-- details-first review flow:
-  - officer can open application details before appraisal
-  - portfolio rows link to dedicated loan details page (`/loans/:loanId`)
+- create and submit applications
+- appraise applications
+- approve or reject applications
+- disburse approved applications
+- repay and review portfolio/details
+- open dedicated loan detail page at `/loans/:loanId`
+- show credit-risk collection views and approval-related blocked states
 
-## Member UI
+## Member and Portal UI
 
 Pages:
 
@@ -138,10 +146,10 @@ Pages:
 
 Highlights:
 
-- member onboarding via modal patterns
-- CSV import with robust error handling
+- modal-driven member onboarding
+- CSV import with preview/error handling
 - optional portal account generation
-- import summary, failed rows pagination, credentials download flow
+- import summary, failed rows pagination, and credentials download flow
 
 ## Theming
 
@@ -153,9 +161,9 @@ Brand tokens:
 Theme files:
 
 - `frontend/src/theme/colors.ts`
-- `frontend/tailwind.config.js` (utility alignment where used)
+- `frontend/tailwind.config.js`
 
-Chart color standards are aligned with financial semantics:
+Chart color standards:
 
 - deposits green
 - withdrawals red
@@ -171,11 +179,10 @@ Core API files:
 - `frontend/src/lib/endpoints.ts`
 - `frontend/src/types/api.ts`
 
-These are the single source for endpoint paths and typed contracts used by pages.
+These remain the source of truth for typed contracts, even where some older endpoint names still reflect the previous SaaS design.
 
 ## Design and UX Notes
 
-- member sidebar now supports dedicated pages + toggle behavior
-- top-level form actions are modal-driven for money-sensitive operations
-- blocked states are explicit for inactive subscriptions
+- money-sensitive actions are modal-driven
 - loading, empty, and error states are implemented across role pages
+- blocked states are still surfaced using "subscription" copy in some places because the compatibility API and UI copy have not been fully renamed yet
