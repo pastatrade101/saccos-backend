@@ -3,6 +3,31 @@ const AppError = require("../utils/app-error");
 const asyncHandler = require("../utils/async-handler");
 const { getBranchAssignments, getUserProfile } = require("../services/user-context.service");
 const { verifySupabaseAccessToken } = require("../services/token-verifier.service");
+const { STAFF_ROLES, ROLES } = require("../constants/roles");
+
+const TWO_FACTOR_SETUP_ALLOWED_PATHS = [
+    "/auth/2fa/setup",
+    "/auth/2fa/verify",
+    "/auth/2fa/validate",
+    "/auth/2fa/disable",
+    "/auth/2fa/backup-codes/regenerate",
+    "/users/me",
+    "/me/subscription",
+    "/users/me/password-changed"
+];
+
+function isTwoFactorRequiredForProfile(profile) {
+    return STAFF_ROLES.includes(profile?.role) || profile?.role === ROLES.PLATFORM_ADMIN || profile?.role === ROLES.PLATFORM_OWNER;
+}
+
+function isTwoFactorConfigured(profile) {
+    return Boolean(profile?.two_factor_enabled && profile?.two_factor_verified);
+}
+
+function isTwoFactorSetupAllowed(req) {
+    const path = `${req.baseUrl || ""}${req.path || ""}`;
+    return TWO_FACTOR_SETUP_ALLOWED_PATHS.some((candidate) => path.endsWith(candidate));
+}
 
 function clearAuthContext(req) {
     req.auth = null;
@@ -79,6 +104,17 @@ function createAuthMiddleware(options = {}) {
             }
 
             throw new AppError(403, "PROFILE_INACTIVE", "User profile is inactive.");
+        }
+
+        if (profile && isTwoFactorRequiredForProfile(profile) && !isTwoFactorConfigured(profile) && !isTwoFactorSetupAllowed(req)) {
+            throw new AppError(
+                403,
+                "TWO_FACTOR_SETUP_REQUIRED",
+                "Authenticator-based two-factor authentication must be configured before accessing protected resources.",
+                {
+                    two_factor_setup_required: true
+                }
+            );
         }
 
         req.auth = {

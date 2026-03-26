@@ -69,6 +69,12 @@ const envSchema = z.object({
     OTP_SMS_BASIC_USERNAME: z.string().min(1).optional(),
     OTP_SMS_BASIC_PASSWORD: z.string().min(1).optional(),
     OTP_HASH_SECRET: z.string().min(16).optional(),
+    TWO_FACTOR_ISSUER: z.string().min(2).default("SACCO Control"),
+    TWO_FACTOR_ENCRYPTION_KEY: z.string().min(16).optional(),
+    TWO_FACTOR_BACKUP_CODE_PEPPER: z.string().min(16).optional(),
+    TWO_FACTOR_STEP_UP_TTL_MINUTES: z.coerce.number().int().positive().default(15),
+    TWO_FACTOR_MAX_FAILED_ATTEMPTS: z.coerce.number().int().positive().default(5),
+    TWO_FACTOR_LOCKOUT_MINUTES: z.coerce.number().int().positive().default(15),
     BRANCH_ALERT_SMS_ENABLED: z
         .string()
         .optional()
@@ -183,6 +189,12 @@ module.exports = {
     otpSmsBasicUsername: env.OTP_SMS_BASIC_USERNAME || "",
     otpSmsBasicPassword: env.OTP_SMS_BASIC_PASSWORD || "",
     otpHashSecret: env.OTP_HASH_SECRET || env.SUPABASE_SERVICE_ROLE_KEY,
+    twoFactorIssuer: env.TWO_FACTOR_ISSUER,
+    twoFactorEncryptionKey: env.TWO_FACTOR_ENCRYPTION_KEY || env.TEMP_PASSWORD_ENCRYPTION_KEY || env.SUPABASE_SERVICE_ROLE_KEY,
+    twoFactorBackupCodePepper: env.TWO_FACTOR_BACKUP_CODE_PEPPER || env.SUPABASE_SERVICE_ROLE_KEY,
+    twoFactorStepUpTtlMinutes: env.TWO_FACTOR_STEP_UP_TTL_MINUTES,
+    twoFactorMaxFailedAttempts: env.TWO_FACTOR_MAX_FAILED_ATTEMPTS,
+    twoFactorLockoutMinutes: env.TWO_FACTOR_LOCKOUT_MINUTES,
     branchAlertSmsEnabled: env.BRANCH_ALERT_SMS_ENABLED,
     idempotencyInProgressTtlMs: env.IDEMPOTENCY_IN_PROGRESS_TTL_MS,
     passwordSetupRedirectUrl: env.PASSWORD_SETUP_REDIRECT_URL || "",

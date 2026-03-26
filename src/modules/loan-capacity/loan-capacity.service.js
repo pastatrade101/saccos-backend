@@ -1,6 +1,7 @@
 const { adminSupabase } = require("../../config/supabase");
 const { ROLES } = require("../../constants/roles");
 const { logAudit } = require("../../services/audit.service");
+const { assertTwoFactorStepUp } = require("../../services/two-factor.service");
 const { assertBranchAccess, assertTenantAccess } = require("../../services/user-context.service");
 const AppError = require("../../utils/app-error");
 
@@ -887,6 +888,7 @@ async function updateLoanProductPolicy(actor, loanProductId, payload = {}) {
     ensureManager(actor);
     const tenantId = payload.tenant_id || actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
+    await assertTwoFactorStepUp(actor, payload, { action: "loan_product_policy_update" });
 
     const loanProduct = await getLoanProductRecord(tenantId, loanProductId, { requireActive: false });
     const currentRow = await getLoanProductPolicyRow(tenantId, loanProductId);
@@ -951,6 +953,7 @@ async function updateBranchLiquidityPolicy(actor, branchId, payload = {}) {
     ensureManager(actor);
     const tenantId = payload.tenant_id || actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
+    await assertTwoFactorStepUp(actor, payload, { action: "branch_liquidity_policy_update" });
     assertBranchAccess({ auth: actor }, branchId);
     await getBranchRecord(tenantId, branchId);
 

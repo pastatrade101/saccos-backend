@@ -7,9 +7,20 @@ const { getUserProfile, assertTenantAccess, invalidateUserContextCache } = requi
 const { logAudit } = require("../../services/audit.service");
 const { ensureBranchAssignments } = require("../../services/branch-assignment.service");
 const { saveCredentialHandoff } = require("../../services/credential-handoff.service");
-const { normalizePhone, sendOtpChallenge, verifyOtpChallenge } = require("../../services/otp.service");
+const { normalizePhone } = require("../../services/otp.service");
 const { sendOtpSms } = require("../../services/sms.service");
 const { assertRateLimit } = require("../../services/rate-limit.service");
+const {
+    isTwoFactorRequiredForRole,
+    isTwoFactorConfigured,
+    setupTwoFactor,
+    verifyTwoFactorSetup,
+    validateTwoFactor,
+    regenerateBackupCodes,
+    disableTwoFactor,
+    authenticateWithRecovery,
+    verifySecondFactorForUser
+} = require("../../services/two-factor.service");
 
 const SIGNIN_PROFILE_CACHE_TTL_MS = Math.max(0, Number(process.env.AUTH_SIGNIN_PROFILE_CACHE_TTL_MS || 30000));
 const SIGNIN_LAST_LOGIN_MIN_INTERVAL_MS = Math.max(0, Number(process.env.AUTH_SIGNIN_LAST_LOGIN_MIN_INTERVAL_MS || 300000));
@@ -23,6 +34,10 @@ const SIGNIN_PROFILE_SELECT = [
     "role",
     "is_active",
     "must_change_password",
+    "two_factor_enabled",
+    "two_factor_verified",
+    "two_factor_enabled_at",
+    "two_factor_last_verified_at",
     "first_login_at",
     "last_login_at",
     "deleted_at"
@@ -334,32 +349,22 @@ async function sendPasswordSetupLink(payload) {
 
 async function signIn(payload) {
     const auth = await authenticatePassword(payload);
+    const twoFactorRequired = isTwoFactorRequiredForRole(auth.profile?.role || null);
+    const twoFactorConfigured = isTwoFactorConfigured(auth.profile);
 
-    if (env.otpRequiredOnSignIn) {
-        if (!auth.phone) {
-            throw new AppError(
-                401,
-                "OTP_ENROLL_REQUIRED",
-                "Add a verified phone number to receive OTP.",
-                { otp_enroll_required: true }
-            );
-        }
-
-        if (!payload.challenge_id || !payload.otp_code) {
-            throw new AppError(
-                401,
-                "OTP_REQUIRED",
-                "One-time verification code required.",
-                { otp_required: true }
-            );
-        }
-
-        await verifyOtpChallenge({
-            challengeId: payload.challenge_id,
+    if ((twoFactorRequired || twoFactorConfigured) && twoFactorConfigured) {
+        await verifySecondFactorForUser({
             userId: auth.user.id,
-            purpose: "signin",
-            otpCode: payload.otp_code
+            totpCode: payload.totp_code || null,
+            recoveryCode: payload.recovery_code || null,
+            purpose: "signin"
         });
+    } else if (twoFactorRequired && !twoFactorConfigured) {
+        auth.profile = {
+            ...auth.profile,
+            two_factor_required: true,
+            two_factor_setup_required: true
+        };
     }
 
     touchLastLoginAt(auth.user.id);
@@ -369,57 +374,6 @@ async function signIn(payload) {
         user: auth.user,
         profile: auth.profile
     };
-}
-
-async function sendSignInOtp(payload) {
-    if (!env.otpRequiredOnSignIn) {
-        throw new AppError(
-            400,
-            "OTP_NOT_ENABLED",
-            "OTP sign-in is not enabled in this environment."
-        );
-    }
-
-    const auth = await authenticatePassword(payload);
-    const shouldEnrollPhone = !auth.phone && Boolean(payload.phone);
-    const resolvedPhone = shouldEnrollPhone
-        ? await persistOtpEnrollmentPhone(auth, payload.phone)
-        : auth.phone;
-
-    if (!resolvedPhone) {
-        throw new AppError(
-            401,
-            "OTP_ENROLL_REQUIRED",
-            "Add a verified phone number to receive OTP.",
-            { otp_enroll_required: true }
-        );
-    }
-
-    return sendOtpChallenge({
-        userId: auth.user.id,
-        phone: resolvedPhone,
-        purpose: "signin",
-        challengeId: payload.challenge_id || null
-    });
-}
-
-async function verifySignInOtp(payload) {
-    if (!env.otpRequiredOnSignIn) {
-        throw new AppError(
-            400,
-            "OTP_NOT_ENABLED",
-            "OTP sign-in is not enabled in this environment."
-        );
-    }
-
-    const auth = await authenticatePassword(payload);
-
-    return verifyOtpChallenge({
-        challengeId: payload.challenge_id,
-        userId: auth.user.id,
-        purpose: "signin",
-        otpCode: payload.otp_code
-    });
 }
 
 async function authenticatePassword(payload) {
@@ -446,46 +400,6 @@ async function authenticatePassword(payload) {
         profile,
         phone: profile?.phone || data.user.user_metadata?.phone || null
     };
-}
-
-async function persistOtpEnrollmentPhone(auth, phoneInput) {
-    const normalizedPhone = normalizePhone(phoneInput);
-
-    if (auth.profile?.user_id) {
-        const { error: profileUpdateError } = await adminSupabase
-            .from("user_profiles")
-            .update({ phone: normalizedPhone })
-            .eq("user_id", auth.user.id);
-
-        if (profileUpdateError) {
-            throw new AppError(
-                500,
-                "OTP_PHONE_ENROLL_FAILED",
-                "Unable to save phone number for OTP.",
-                profileUpdateError
-            );
-        }
-    }
-
-    const { error: metadataUpdateError } = await adminSupabase.auth.admin.updateUserById(auth.user.id, {
-        user_metadata: {
-            ...(auth.user.user_metadata || {}),
-            phone: normalizedPhone
-        }
-    });
-
-    if (metadataUpdateError) {
-        throw new AppError(
-            500,
-            "OTP_PHONE_ENROLL_FAILED",
-            "Unable to save phone number for OTP.",
-            metadataUpdateError
-        );
-    }
-
-    invalidateUserContextCache(auth.user.id);
-    invalidateSignInProfileCache(auth.user.id);
-    return normalizedPhone;
 }
 
 async function inviteUser({ actor, payload }) {
@@ -620,8 +534,20 @@ async function inviteUser({ actor, payload }) {
 
 module.exports = {
     signIn,
-    sendSignInOtp,
-    verifySignInOtp,
+    invalidateSignInProfileCache,
+    setupTwoFactor,
+    verifyTwoFactorSetup,
+    validateTwoFactor,
+    regenerateBackupCodes,
+    disableTwoFactor,
+    recoverWithBackupCode: (payload) => authenticateWithRecovery(payload, authenticatePassword).then((auth) => {
+        touchLastLoginAt(auth.user.id);
+        return {
+            session: auth.session,
+            user: auth.user,
+            profile: auth.profile
+        };
+    }),
     sendPasswordSetupLink,
     inviteUser
 };

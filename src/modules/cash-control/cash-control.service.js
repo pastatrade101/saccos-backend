@@ -6,6 +6,7 @@ const env = require("../../config/env");
 const AppError = require("../../utils/app-error");
 const { assertBranchAccess, assertTenantAccess } = require("../../services/user-context.service");
 const { logAudit } = require("../../services/audit.service");
+const { assertTwoFactorStepUp } = require("../../services/two-factor.service");
 const { sendExport } = require("../../services/export.service");
 const { notifyTellerCashMismatch } = require("../../services/branch-alerts.service");
 const { ROLES } = require("../../constants/roles");
@@ -332,6 +333,7 @@ async function updateReceiptPolicy(actor, payload) {
     const tenantId = actor.tenantId;
     const branchId = payload.branch_id || null;
     assertTenantAccess({ auth: actor }, tenantId);
+    await assertTwoFactorStepUp(actor, payload, { action: "receipt_policy_update" });
     if (branchId) {
         assertBranchAccess({ auth: actor }, branchId);
     }

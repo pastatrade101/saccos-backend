@@ -1,5 +1,6 @@
 const { adminSupabase } = require("../config/supabase");
 const AppError = require("../utils/app-error");
+const { STAFF_ROLES, ROLES } = require("../constants/roles");
 const USER_CONTEXT_CACHE_TTL_MS = Math.max(0, Number(process.env.USER_CONTEXT_CACHE_TTL_MS || 15000));
 const userProfileCache = new Map();
 const branchAssignmentsCache = new Map();
@@ -68,6 +69,36 @@ function invalidateUserContextCache(userId) {
     branchAssignmentsInFlight.clear();
 }
 
+function isTwoFactorRequiredForRole(role) {
+    return STAFF_ROLES.includes(role) || role === ROLES.PLATFORM_ADMIN || role === ROLES.PLATFORM_OWNER;
+}
+
+function sanitizeUserProfile(profile) {
+    if (!profile) {
+        return null;
+    }
+
+    const {
+        two_factor_secret,
+        two_factor_backup_codes,
+        two_factor_failed_attempts,
+        two_factor_locked_until,
+        ...rest
+    } = profile;
+
+    const enabled = Boolean(profile.two_factor_enabled && profile.two_factor_verified);
+
+    return {
+        ...rest,
+        two_factor_enabled: enabled,
+        two_factor_verified: Boolean(profile.two_factor_verified),
+        two_factor_enabled_at: profile.two_factor_enabled_at || null,
+        two_factor_last_verified_at: profile.two_factor_last_verified_at || null,
+        two_factor_required: isTwoFactorRequiredForRole(profile.role),
+        two_factor_setup_required: isTwoFactorRequiredForRole(profile.role) && !enabled
+    };
+}
+
 async function getUserProfile(userId) {
     const cached = getCached(userProfileCache, userId);
     if (cached !== null) {
@@ -86,8 +117,9 @@ async function getUserProfile(userId) {
             throw new AppError(500, "USER_PROFILE_LOOKUP_FAILED", "Unable to load user profile.");
         }
 
-        setCached(userProfileCache, userId, data || null);
-        return data || null;
+        const sanitized = sanitizeUserProfile(data || null);
+        setCached(userProfileCache, userId, sanitized);
+        return sanitized;
     });
 }
 
@@ -145,5 +177,6 @@ module.exports = {
     getBranchAssignments,
     invalidateUserContextCache,
     assertTenantAccess,
-    assertBranchAccess
+    assertBranchAccess,
+    sanitizeUserProfile
 };

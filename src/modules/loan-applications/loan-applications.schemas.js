@@ -5,6 +5,10 @@ const money = z.coerce.number().positive().multipleOf(0.01);
 const repaymentFrequency = z.enum(["daily", "weekly", "monthly"]);
 const loanPurposePattern = /^[A-Za-z0-9\s,.]+$/;
 const referencePattern = /^[A-Za-z0-9_-]+$/;
+const twoFactorFields = {
+    two_factor_code: z.string().trim().regex(/^\d{6}$/).optional().nullable(),
+    recovery_code: z.string().trim().min(6).max(20).optional().nullable()
+};
 
 const guarantorSchema = z.object({
     member_id: uuid,
@@ -49,7 +53,8 @@ const appraiseLoanApplicationSchema = z.object({
 });
 
 const approveLoanApplicationSchema = z.object({
-    notes: z.string().trim().min(3).max(1000).optional().nullable()
+    notes: z.string().trim().min(3).max(1000).optional().nullable(),
+    ...twoFactorFields
 });
 
 const rejectLoanApplicationSchema = z.object({
@@ -61,7 +66,8 @@ const disburseApprovedLoanSchema = z.object({
     reference: z.string().max(80).optional().nullable(),
     description: z.string().max(255).optional().nullable(),
     approval_request_id: uuid.optional(),
-    receipt_ids: z.array(z.string().uuid()).max(10).optional().default([])
+    receipt_ids: z.array(z.string().uuid()).max(10).optional().default([]),
+    ...twoFactorFields
 });
 
 const loanApplicationQuerySchema = z.object({

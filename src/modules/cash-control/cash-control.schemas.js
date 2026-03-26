@@ -1,6 +1,10 @@
 const { z } = require("zod");
 
 const money = z.coerce.number().min(0).multipleOf(0.01);
+const twoFactorFields = {
+    two_factor_code: z.string().trim().regex(/^\d{6}$/).optional().nullable(),
+    recovery_code: z.string().trim().min(6).max(20).optional().nullable()
+};
 
 const sessionQuerySchema = z.object({
     date: z.string().date().optional(),
@@ -33,7 +37,8 @@ const receiptPolicySchema = z.object({
     max_receipts_per_tx: z.coerce.number().int().min(1).max(10),
     allowed_mime_types: z.array(z.string().min(3)).min(1),
     max_file_size_mb: z.coerce.number().int().min(1).max(50),
-    enforce_on_types: z.array(z.enum(["deposit", "withdraw", "loan_repay", "loan_disburse", "share_contribution"])).min(1)
+    enforce_on_types: z.array(z.enum(["deposit", "withdraw", "loan_repay", "loan_disburse", "share_contribution"])).min(1),
+    ...twoFactorFields
 });
 
 const receiptInitSchema = z.object({

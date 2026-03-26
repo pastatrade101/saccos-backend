@@ -1,18 +1,59 @@
 const asyncHandler = require("../../utils/async-handler");
+const AppError = require("../../utils/app-error");
+const env = require("../../config/env");
 const authService = require("./auth.service");
 
+function assertHttps(req) {
+    if (env.nodeEnv !== "production") {
+        return;
+    }
+
+    if (req.secure || req.get("x-forwarded-proto") === "https") {
+        return;
+    }
+
+    throw new AppError(400, "HTTPS_REQUIRED", "Two-factor authentication requires HTTPS.");
+}
+
 exports.signIn = asyncHandler(async (req, res) => {
+    assertHttps(req);
     const result = await authService.signIn(req.validated.body);
     res.json(result);
 });
 
-exports.sendOtp = asyncHandler(async (req, res) => {
-    const result = await authService.sendSignInOtp(req.validated.body);
+exports.setupTwoFactor = asyncHandler(async (req, res) => {
+    assertHttps(req);
+    const result = await authService.setupTwoFactor(req.auth);
     res.json(result);
 });
 
-exports.verifyOtp = asyncHandler(async (req, res) => {
-    const result = await authService.verifySignInOtp(req.validated.body);
+exports.verifyTwoFactor = asyncHandler(async (req, res) => {
+    assertHttps(req);
+    const result = await authService.verifyTwoFactorSetup(req.auth, req.validated.body);
+    res.json(result);
+});
+
+exports.validateTwoFactor = asyncHandler(async (req, res) => {
+    assertHttps(req);
+    const result = await authService.validateTwoFactor(req.auth, req.validated.body);
+    res.json(result);
+});
+
+exports.recoverWithBackupCode = asyncHandler(async (req, res) => {
+    assertHttps(req);
+    const result = await authService.recoverWithBackupCode(req.validated.body);
+    res.json(result);
+});
+
+exports.disableTwoFactor = asyncHandler(async (req, res) => {
+    assertHttps(req);
+    const result = await authService.disableTwoFactor(req.auth, req.validated.body);
+    res.json(result);
+});
+
+exports.regenerateBackupCodes = asyncHandler(async (req, res) => {
+    assertHttps(req);
+    const result = await authService.regenerateBackupCodes(req.auth, req.validated.body);
     res.json(result);
 });
 

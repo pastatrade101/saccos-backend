@@ -3,27 +3,39 @@ const { z } = require("zod");
 const signInSchema = z.object({
     email: z.string().email(),
     password: z.string().min(8),
-    challenge_id: z.string().uuid().optional().nullable(),
-    otp_code: z
+    totp_code: z
         .string()
         .trim()
         .regex(/^\d{6}$/)
         .optional()
+        .nullable(),
+    recovery_code: z
+        .string()
+        .trim()
+        .min(6)
+        .max(20)
+        .optional()
         .nullable()
 });
 
-const sendOtpSchema = z.object({
-    email: z.string().email(),
-    password: z.string().min(8),
-    challenge_id: z.string().uuid().optional().nullable(),
-    phone: z.string().trim().min(9).max(20).optional().nullable()
+const twoFactorCodeSchema = z.object({
+    totp_code: z.string().trim().regex(/^\d{6}$/)
 });
 
-const verifyOtpSchema = z.object({
+const validateTwoFactorSchema = z.object({
+    totp_code: z.string().trim().regex(/^\d{6}$/).optional().nullable(),
+    recovery_code: z.string().trim().min(6).max(20).optional().nullable()
+}).refine(
+    (value) => Boolean(value.totp_code || value.recovery_code),
+    {
+        message: "Provide an authenticator code or backup recovery code."
+    }
+);
+
+const recoverySignInSchema = z.object({
     email: z.string().email(),
     password: z.string().min(8),
-    challenge_id: z.string().uuid(),
-    otp_code: z.string().trim().regex(/^\d{6}$/)
+    recovery_code: z.string().trim().min(6).max(20)
 });
 
 const sendPasswordSetupLinkSchema = z.object({
@@ -58,8 +70,9 @@ const inviteUserSchema = z.object({
 
 module.exports = {
     signInSchema,
-    sendOtpSchema,
-    verifyOtpSchema,
+    twoFactorCodeSchema,
+    validateTwoFactorSchema,
+    recoverySignInSchema,
     sendPasswordSetupLinkSchema,
     inviteUserSchema
 };

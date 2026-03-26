@@ -59,7 +59,7 @@ async function startServer() {
 
     server.listen(env.port, env.host, () => {
         console.log(`SACCOS backend listening on http://${env.host}:${env.port}`);
-        console.log(`OTP sign-in enforcement: ${env.otpRequiredOnSignIn ? "ENABLED" : "DISABLED"}`);
+        console.log(`TOTP 2FA: staff-required, member-optional`);
         console.log(
             `[schema-check] api ${schemaStatus.ok ? "passed" : "failed"} (strict=${env.schemaCheckStrict ? "true" : "false"})`
         );

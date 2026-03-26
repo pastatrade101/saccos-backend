@@ -3,6 +3,10 @@ const { z } = require("zod");
 const uuid = z.string().uuid();
 const money = z.coerce.number().min(0).multipleOf(0.01);
 const percent = z.coerce.number().min(0).max(100);
+const twoFactorFields = {
+    two_factor_code: z.string().trim().regex(/^\d{6}$/).optional().nullable(),
+    recovery_code: z.string().trim().min(6).max(20).optional().nullable()
+};
 
 const tenantScopedQuerySchema = z.object({
     tenant_id: uuid.optional()
@@ -36,7 +40,8 @@ const updateLoanProductPolicySchema = z.object({
     min_loan_amount: money.optional(),
     liquidity_buffer_percent: percent.optional(),
     requires_guarantor: z.boolean().optional(),
-    requires_collateral: z.boolean().optional()
+    requires_collateral: z.boolean().optional(),
+    ...twoFactorFields
 }).refine(
     (value) => {
         if (typeof value.max_loan_amount === "number" && typeof value.min_loan_amount === "number") {
@@ -54,7 +59,8 @@ const updateBranchLiquidityPolicySchema = z.object({
     tenant_id: uuid.optional(),
     max_lending_ratio: percent.optional(),
     minimum_liquidity_reserve: money.optional(),
-    auto_loan_freeze_threshold: money.optional()
+    auto_loan_freeze_threshold: money.optional(),
+    ...twoFactorFields
 });
 
 module.exports = {

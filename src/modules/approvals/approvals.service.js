@@ -2,6 +2,7 @@ const { adminSupabase } = require("../../config/supabase");
 const env = require("../../config/env");
 const { ROLES } = require("../../constants/roles");
 const { logAudit } = require("../../services/audit.service");
+const { assertTwoFactorStepUp } = require("../../services/two-factor.service");
 const {
     notifyApprovalOutcomeToMaker,
     notifyApprovalRequestPending,
@@ -143,6 +144,7 @@ async function listApprovalPolicies(actor, query = {}) {
 async function updateApprovalPolicy(actor, operationKey, payload = {}) {
     const tenantId = payload.tenant_id || actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
+    await assertTwoFactorStepUp(actor, payload, { action: "approval_policy_update" });
 
     const current = await getPolicyForOperation(tenantId, operationKey);
     const next = {
@@ -525,6 +527,7 @@ async function markApprovalRequestExecuted({ actor, tenantId, requestId, entityT
 async function decideRequest(actor, requestId, payload = {}, decision = "approved") {
     const tenantId = payload.tenant_id || actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
+    await assertTwoFactorStepUp(actor, payload, { action: `approval_request_${decision}` });
 
     const request = await getApprovalRequestById(actor, requestId, tenantId);
     assertBranchAccess({ auth: actor }, request.branch_id);

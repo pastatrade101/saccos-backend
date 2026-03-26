@@ -1,4 +1,5 @@
 const { randomUUID } = require("crypto");
+const env = require("../../config/env");
 const { adminSupabase } = require("../../config/supabase");
 const { ROLES } = require("../../constants/roles");
 const { getSubscriptionStatus } = require("../../services/subscription.service");
@@ -18,6 +19,7 @@ const financeService = require("../finance/finance.service");
 const creditRiskService = require("../credit-risk/credit-risk.service");
 const loanCapacityService = require("../loan-capacity/loan-capacity.service");
 const { ensureMemberAccounts } = require("../members/members.service");
+const { assertTwoFactorStepUp } = require("../../services/two-factor.service");
 const AppError = require("../../utils/app-error");
 const LOAN_APPLICATIONS_COUNT_CACHE_TTL_MS = Math.max(0, Number(process.env.LOAN_APPLICATIONS_COUNT_CACHE_TTL_MS || 15000));
 const loanApplicationsCountCache = new Map();
@@ -1677,6 +1679,7 @@ async function approveLoanApplication(actor, applicationId, payload) {
     if (actor.role !== ROLES.BRANCH_MANAGER) {
         throw new AppError(403, "FORBIDDEN", "Only branch managers can approve loan applications.");
     }
+    await assertTwoFactorStepUp(actor, payload, { action: "loan_application_approve" });
 
     const tenantId = actor.tenantId;
     const existing = await getExpandedApplication(tenantId, applicationId);
@@ -1856,6 +1859,11 @@ async function disburseLoanApplication(actor, applicationId, payload) {
 
     if (existing.loan_id) {
         throw new AppError(400, "LOAN_ALREADY_DISBURSED", "This application has already been disbursed.");
+    }
+
+    const disbursementAmount = Number(existing.recommended_amount || existing.requested_amount || 0);
+    if (disbursementAmount >= env.highValueThresholdTzs) {
+        await assertTwoFactorStepUp(actor, payload, { action: "loan_application_disburse" });
     }
 
     assertAllGuarantorsAccepted(existing);
