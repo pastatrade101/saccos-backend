@@ -163,6 +163,7 @@ async function runFinancialFunction(functionName, params) {
 
 async function deposit(actor, payload) {
     const tenantId = payload.tenant_id || actor.tenantId;
+    const depositReference = payload.reference || generateTransactionReference("DEP");
     assertTenantAccess({ auth: actor }, tenantId);
     await assertPostingRuleConfigured(tenantId, "deposit");
 
@@ -179,7 +180,7 @@ async function deposit(actor, payload) {
         p_account_id: payload.account_id,
         p_amount: payload.amount,
         p_teller_id: payload.teller_id || actor.user.id,
-        p_reference: payload.reference || null,
+        p_reference: depositReference,
         p_description: payload.description || null
     });
 
@@ -214,7 +215,7 @@ async function deposit(actor, payload) {
             account_id: payload.account_id,
             member_id: member.id,
             amount: payload.amount,
-            reference: payload.reference || null,
+            reference: depositReference,
             journal_id: result.journal_id || null
         }
     });

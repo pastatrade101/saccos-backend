@@ -144,6 +144,7 @@ async function getCurrentSession(actor, branchId = null) {
 async function openSession(actor, payload) {
     const tenantId = actor.tenantId;
     const branchId = payload.branch_id || actor.branchIds[0];
+    const normalizedNotes = String(payload.notes || "").trim() || null;
     assertTenantAccess({ auth: actor }, tenantId);
 
     if (!branchId) {
@@ -166,7 +167,7 @@ async function openSession(actor, payload) {
             opened_by: actor.user.id,
             opening_cash: payload.opening_cash,
             expected_cash: payload.opening_cash,
-            notes: payload.notes || null
+            notes: normalizedNotes
         })
         .select("*")
         .single();
@@ -206,6 +207,10 @@ async function closeSession(actor, sessionId, payload) {
         throw new AppError(403, "FORBIDDEN", "You are not allowed to close this teller session.");
     }
 
+    if (session.status !== "open") {
+        throw new AppError(409, "TELLER_SESSION_ALREADY_CLOSED", "Only an open teller session can be closed.");
+    }
+
     const { data: totalsRows, error: totalsError } = await adminSupabase
         .from("teller_session_transactions")
         .select("direction, amount")
@@ -223,6 +228,15 @@ async function closeSession(actor, sessionId, payload) {
         .reduce((sum, row) => sum + Number(row.amount || 0), 0);
     const expectedCash = Number(session.opening_cash || 0) + inflow - outflow;
     const variance = Number(payload.closing_cash) - expectedCash;
+    const normalizedNotes = String(payload.notes || "").trim() || null;
+
+    if (Number(variance || 0) !== 0 && !normalizedNotes) {
+        throw new AppError(400, "TELLER_VARIANCE_NOTES_REQUIRED", "Closing notes are required when counted cash does not match expected cash.", {
+            expected_cash: expectedCash,
+            closing_cash: payload.closing_cash,
+            variance
+        });
+    }
 
     const { data, error } = await adminSupabase
         .from("teller_sessions")
@@ -232,7 +246,7 @@ async function closeSession(actor, sessionId, payload) {
             variance,
             closed_at: new Date().toISOString(),
             status: "closed_pending_review",
-            notes: payload.notes || session.notes || null
+            notes: normalizedNotes || session.notes || null
         })
         .eq("id", sessionId)
         .select("*")
