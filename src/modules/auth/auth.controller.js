@@ -29,7 +29,7 @@ exports.setupTwoFactor = asyncHandler(async (req, res) => {
 
 exports.verifyTwoFactor = asyncHandler(async (req, res) => {
     assertHttps(req);
-    const result = await authService.verifyTwoFactorSetup(req.auth, req.validated.body);
+    const result = await authService.verifyTwoFactorSetup(req.auth, req.validated.body.totp_code);
     res.json(result);
 });
 

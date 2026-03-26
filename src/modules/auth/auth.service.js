@@ -349,17 +349,21 @@ async function sendPasswordSetupLink(payload) {
 
 async function signIn(payload) {
     const auth = await authenticatePassword(payload);
-    const twoFactorRequired = isTwoFactorRequiredForRole(auth.profile?.role || null);
-    const twoFactorConfigured = isTwoFactorConfigured(auth.profile);
+    const roleRequiresTwoFactor = isTwoFactorRequiredForRole(auth.profile?.role || null);
+    const twoFactorConfigured = Boolean(
+        auth.profile?.two_factor_enabled && auth.profile?.two_factor_verified
+    );
+    const signInRequiresSecondFactor =
+        roleRequiresTwoFactor || (env.otpRequiredOnSignIn && twoFactorConfigured);
 
-    if ((twoFactorRequired || twoFactorConfigured) && twoFactorConfigured) {
+    if (signInRequiresSecondFactor && twoFactorConfigured) {
         await verifySecondFactorForUser({
             userId: auth.user.id,
             totpCode: payload.totp_code || null,
             recoveryCode: payload.recovery_code || null,
             purpose: "signin"
         });
-    } else if (twoFactorRequired && !twoFactorConfigured) {
+    } else if (roleRequiresTwoFactor && !twoFactorConfigured) {
         auth.profile = {
             ...auth.profile,
             two_factor_required: true,
