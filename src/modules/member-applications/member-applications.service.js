@@ -5,8 +5,8 @@ const AppError = require("../../utils/app-error");
 const { assertBranchAccess, assertTenantAccess, invalidateUserContextCache } = require("../../services/user-context.service");
 const { logAudit } = require("../../services/audit.service");
 const membersService = require("../members/members.service");
-const { sendTransactionalSms } = require("../../services/sms.service");
 const { getBranchName } = require("../../services/branch-name.service");
+const { notifyDirectPhones } = require("../../services/branch-alerts.service");
 
 function generateApplicationNumber() {
     return `APP-${new Date().getFullYear()}-${crypto.randomInt(100000, 999999)}`;
@@ -38,13 +38,24 @@ async function sendApprovalSms(application) {
     const branchName = await getBranchName(application.branch_id);
     const applicantName = application.full_name || "Applicant";
     const amountLabel = formatAmountLabel(application.membership_fee_amount);
-    const message = `Hello ${applicantName}, your SACCOS membership application for ${branchName || "your branch"} has been approved. Please pay the membership fee of ${amountLabel} to activate your account.`;
+    const reference = application.application_no || String(application.id || "").slice(0, 8);
+    const message = `Dear ${applicantName}, your membership application${branchName ? ` for ${branchName}` : ""} has been approved. Please pay the membership fee of ${amountLabel} to activate your membership. Ref ${reference}.`;
 
     try {
-        await sendTransactionalSms({
-            to: application.phone,
-            text: message,
-            reference: `member-application-approved-${application.id}`
+        await notifyDirectPhones({
+            tenantId: application.tenant_id,
+            branchId: application.branch_id || null,
+            phones: [application.phone],
+            eventType: "member_application_approved",
+            eventKey: `member_application_approved:${application.id}:${application.approved_at || Date.now()}`,
+            message: message.slice(0, 300),
+            metadata: {
+                member_application_id: application.id,
+                application_no: application.application_no || null,
+                branch_id: application.branch_id || null,
+                membership_fee_amount: Number(application.membership_fee_amount || 0),
+                phone: application.phone
+            }
         });
     } catch (error) {
         console.warn("[member-applications] approval SMS failed", {

@@ -5,12 +5,18 @@ const authorize = require("../../middleware/authorize");
 const validate = require("../../middleware/validate");
 const { ROLES } = require("../../constants/roles");
 const controller = require("./reports.controller");
-const { exportSchema, chargeRevenueSummarySchema, exportJobParamSchema } = require("./reports.schemas");
+const { exportSchema, chargeRevenueSummarySchema, exportJobParamSchema, exportJobsQuerySchema } = require("./reports.schemas");
 
 const router = express.Router();
 
 router.use(auth);
 
+router.get(
+    "/export-jobs",
+    authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER, ROLES.LOAN_OFFICER, ROLES.TELLER, ROLES.AUDITOR], { allowInternalOps: false }),
+    validate(exportJobsQuerySchema, "query"),
+    controller.listExportJobs
+);
 router.get(
     "/export-jobs/:jobId",
     authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER, ROLES.LOAN_OFFICER, ROLES.TELLER, ROLES.AUDITOR], { allowInternalOps: false }),
@@ -96,6 +102,12 @@ router.get(
     authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER, ROLES.AUDITOR], { allowInternalOps: false }),
     validate(exportSchema, "query"),
     controller.auditExceptions
+);
+router.get(
+    "/audit-evidence-pack/export",
+    authorize([ROLES.AUDITOR], { allowInternalOps: false }),
+    validate(exportSchema, "query"),
+    controller.auditEvidencePack
 );
 
 module.exports = router;

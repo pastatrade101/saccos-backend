@@ -119,7 +119,16 @@ exports.getExportJob = asyncHandler(async (req, res) => {
     res.json({ data: job });
 });
 
+exports.listExportJobs = asyncHandler(async (req, res) => {
+    const jobs = await reportExportJobsService.listReportExportJobs(req.auth, req.validated.query);
+    res.json({ data: jobs });
+});
+
 exports.getExportJobDownload = asyncHandler(async (req, res) => {
     const download = await reportExportJobsService.getReportExportJobDownload(req.auth, req.params.jobId);
     res.json({ data: download });
 });
+
+exports.auditEvidencePack = asyncHandler(async (req, res) =>
+    runExport(req, res, reportService.auditEvidencePack, "export_audit_evidence_pack")
+);

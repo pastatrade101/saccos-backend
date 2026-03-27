@@ -97,6 +97,10 @@ const REPORT_REGISTRY = {
     audit_exceptions: {
         loader: reportService.auditExceptionsReport,
         action: "export_audit_exceptions"
+    },
+    audit_evidence_pack: {
+        loader: reportService.auditEvidencePack,
+        action: "export_audit_evidence_pack"
     }
 };
 
@@ -804,6 +808,38 @@ async function getReportExportJob(actor, jobId) {
     return data;
 }
 
+async function listReportExportJobs(actor, query = {}) {
+    const tenantId = actor.tenantId;
+    assertTenantAccess({ auth: actor }, tenantId);
+
+    let builder = adminSupabase
+        .from("report_export_jobs")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .order("created_at", { ascending: false })
+        .limit(Math.max(1, Number(query.limit || 10)));
+
+    if (query.report_key) {
+        builder = builder.eq("report_key", query.report_key);
+    }
+
+    if (query.status) {
+        builder = builder.eq("status", query.status);
+    }
+
+    const { data, error } = await builder;
+
+    if (error) {
+        if (isMissingReportExportJobsSchema(error)) {
+            throw toJobSchemaError(error);
+        }
+
+        throw new AppError(500, "REPORT_EXPORT_JOBS_LIST_FAILED", "Unable to load report export jobs.", error);
+    }
+
+    return data || [];
+}
+
 async function getReportExportJobDownload(actor, jobId) {
     const job = await getReportExportJob(actor, jobId);
 
@@ -838,6 +874,7 @@ async function getReportExportJobDownload(actor, jobId) {
 module.exports = {
     queueReportExportJob,
     getReportExportJob,
+    listReportExportJobs,
     getReportExportJobDownload,
     processNextReportExportJob,
     runReportExportWorkerLoop,

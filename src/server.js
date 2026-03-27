@@ -5,6 +5,7 @@ const http = require("http");
 const app = require("./app");
 const env = require("./config/env");
 const { startDefaultDetectionScheduler } = require("./modules/credit-risk/default-detection.scheduler");
+const { startRepaymentReminderScheduler } = require("./modules/notifications/repayment-reminders.scheduler");
 const { startApiMetricsCollector } = require("./services/api-metrics-collector.service");
 const { assertRequiredSchemaCapabilities } = require("./services/schema-capabilities.service");
 
@@ -23,11 +24,13 @@ server.on("error", (error) => {
 });
 
 let stopDefaultDetectionScheduler = () => {};
+let stopRepaymentReminderScheduler = () => {};
 let stopApiMetricsCollector = async () => {};
 
 function shutdown(signal) {
     console.log(`Received ${signal}, shutting down gracefully.`);
     stopDefaultDetectionScheduler();
+    stopRepaymentReminderScheduler();
     Promise.resolve(stopApiMetricsCollector())
         .catch((error) => {
             console.error("Error while flushing API metrics collector", error);
@@ -66,6 +69,7 @@ async function startServer() {
     });
 
     stopDefaultDetectionScheduler = startDefaultDetectionScheduler();
+    stopRepaymentReminderScheduler = startRepaymentReminderScheduler();
     stopApiMetricsCollector = startApiMetricsCollector();
 }
 

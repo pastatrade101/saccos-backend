@@ -49,6 +49,7 @@ const envSchema = z.object({
     JWT_SECRET: z.string().min(16).optional(),
     RECEIPTS_BUCKET: z.string().default("receipts"),
     IMPORTS_BUCKET: z.string().default("imports"),
+    AUDIT_EVIDENCE_BUCKET: z.string().optional(),
     TEMP_PASSWORD_ENCRYPTION_KEY: z.string().min(16).optional(),
     SUBSCRIPTION_DEFAULT_GRACE_DAYS: z.coerce.number().int().nonnegative().default(7),
     HIGH_VALUE_THRESHOLD_TZS: z.coerce.number().positive().default(2000000),
@@ -113,6 +114,14 @@ const envSchema = z.object({
     CREDIT_RISK_DEFAULT_DETECTION_INTERVAL_MS: z.coerce.number().int().positive().default(900000),
     CREDIT_RISK_DEFAULT_DETECTION_MAX_TENANTS_PER_RUN: z.coerce.number().int().positive().default(200),
     CREDIT_RISK_DEFAULT_DETECTION_MAX_LOANS_PER_TENANT: z.coerce.number().int().positive().default(500),
+    REPAYMENT_REMINDER_SCHEDULER_ENABLED: z
+        .string()
+        .optional()
+        .transform((value) => parseBooleanEnv(value, false)),
+    REPAYMENT_REMINDER_INTERVAL_MS: z.coerce.number().int().positive().default(3600000),
+    REPAYMENT_REMINDER_MAX_TENANTS_PER_RUN: z.coerce.number().int().positive().default(200),
+    REPAYMENT_REMINDER_MAX_SCHEDULES_PER_TENANT: z.coerce.number().int().positive().default(500),
+    REPAYMENT_REMINDER_DUE_SOON_DAYS: z.coerce.number().int().positive().default(1),
     CREDIT_RISK_GUARANTOR_MAX_COMMITMENT_RATIO: z.coerce.number().positive().max(1).default(0.8),
     CREDIT_RISK_GUARANTOR_MIN_AVAILABLE_AMOUNT: z.coerce.number().nonnegative().default(0),
     AZAMPAY_ENABLED: z
@@ -172,6 +181,7 @@ module.exports = {
     jwtSecret: env.JWT_SECRET || "",
     receiptsBucket: env.RECEIPTS_BUCKET,
     importsBucket: env.IMPORTS_BUCKET,
+    auditEvidenceBucket: env.AUDIT_EVIDENCE_BUCKET || env.RECEIPTS_BUCKET,
     tempPasswordEncryptionKey: env.TEMP_PASSWORD_ENCRYPTION_KEY || env.SUPABASE_SERVICE_ROLE_KEY,
     defaultGraceDays: env.SUBSCRIPTION_DEFAULT_GRACE_DAYS,
     highValueThresholdTzs: env.HIGH_VALUE_THRESHOLD_TZS,
@@ -218,6 +228,11 @@ module.exports = {
     creditRiskDefaultDetectionIntervalMs: env.CREDIT_RISK_DEFAULT_DETECTION_INTERVAL_MS,
     creditRiskDefaultDetectionMaxTenantsPerRun: env.CREDIT_RISK_DEFAULT_DETECTION_MAX_TENANTS_PER_RUN,
     creditRiskDefaultDetectionMaxLoansPerTenant: env.CREDIT_RISK_DEFAULT_DETECTION_MAX_LOANS_PER_TENANT,
+    repaymentReminderSchedulerEnabled: env.REPAYMENT_REMINDER_SCHEDULER_ENABLED,
+    repaymentReminderIntervalMs: env.REPAYMENT_REMINDER_INTERVAL_MS,
+    repaymentReminderMaxTenantsPerRun: env.REPAYMENT_REMINDER_MAX_TENANTS_PER_RUN,
+    repaymentReminderMaxSchedulesPerTenant: env.REPAYMENT_REMINDER_MAX_SCHEDULES_PER_TENANT,
+    repaymentReminderDueSoonDays: env.REPAYMENT_REMINDER_DUE_SOON_DAYS,
     creditRiskGuarantorMaxCommitmentRatio: env.CREDIT_RISK_GUARANTOR_MAX_COMMITMENT_RATIO,
     creditRiskGuarantorMinAvailableAmount: env.CREDIT_RISK_GUARANTOR_MIN_AVAILABLE_AMOUNT,
     azamPayEnabled: env.AZAMPAY_ENABLED,

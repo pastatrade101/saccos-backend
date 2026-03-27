@@ -17,6 +17,11 @@ const TABLE_CAPABILITIES = [
     { name: "api_metrics", migration: "043_platform_operations_metrics.sql" },
     { name: "api_errors", migration: "043_platform_operations_metrics.sql" },
     { name: "notification_dispatches", migration: "045_branch_alert_notification_dispatches.sql" },
+    { name: "notifications", migration: "077_in_app_notifications.sql" },
+    { name: "user_notification_preferences", migration: "078_user_notification_preferences.sql" },
+    { name: "audit_cases", migration: "079_audit_cases.sql" },
+    { name: "audit_case_comments", migration: "080_audit_case_workflow.sql" },
+    { name: "audit_case_evidence", migration: "080_audit_case_workflow.sql" },
     { name: "sms_trigger_settings", migration: "046_sms_trigger_settings.sql" },
     { name: "payment_orders", migration: "060_phase5_member_payment_orders.sql" },
     { name: "payment_order_callbacks", migration: "060_phase5_member_payment_orders.sql" }

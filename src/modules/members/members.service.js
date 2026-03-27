@@ -7,6 +7,7 @@ const { assertBranchAccess, assertTenantAccess, invalidateUserContextCache } = r
 const { ensureBranchAssignments } = require("../../services/branch-assignment.service");
 const { saveCredentialHandoff, getActiveCredentialByUser } = require("../../services/credential-handoff.service");
 const { sendPasswordSetupLink } = require("../auth/auth.service");
+const { createInAppNotifications } = require("../notifications/notifications.service");
 const { sendTransactionalSms } = require("../../services/sms.service");
 const { getBranchName } = require("../../services/branch-name.service");
 const MEMBERS_COUNT_CACHE_TTL_MS = Math.max(0, Number(process.env.MEMBERS_COUNT_CACHE_TTL_MS || 15000));
@@ -935,6 +936,33 @@ async function sendMembershipActivationSms(member) {
     }
 }
 
+async function sendMembershipActivationInAppNotification(member) {
+    if (!member?.user_id) {
+        return;
+    }
+
+    const branchName = await getBranchName(member.branch_id);
+    const message = branchName
+        ? `Your membership at ${branchName} is now active. You can sign in and manage savings, contributions, loans, and payments from your member workspace.`
+        : "Your membership is now active. You can sign in and manage savings, contributions, loans, and payments from your member workspace.";
+
+    await createInAppNotifications({
+        tenantId: member.tenant_id,
+        branchId: member.branch_id || null,
+        eventType: "member_membership_activated",
+        eventKey: `member_membership_activated:${member.id}`,
+        message,
+        metadata: {
+            member_id: member.id,
+            branch_id: member.branch_id || null
+        },
+        recipients: [{
+            user_id: member.user_id,
+            role: "member"
+        }]
+    });
+}
+
 async function resolveApprovedApplicationAuthUserId(application, tenantId) {
     if (application?.auth_user_id) {
         return application.auth_user_id;
@@ -1084,6 +1112,12 @@ async function finalizeMemberActivation(member, application, changedBy = null) {
         });
 
         void sendMembershipActivationSms(activeMember);
+        void sendMembershipActivationInAppNotification(activeMember).catch((error) => {
+            console.warn("[members] activation notification failed", {
+                memberId: activeMember.id,
+                error: error?.message || error
+            });
+        });
     }
 
     return activeMember;

@@ -19,6 +19,7 @@ const observabilityRoutes = require("../modules/observability/observability.rout
 const creditRiskRoutes = require("../modules/credit-risk/credit-risk.routes");
 const approvalRoutes = require("../modules/approvals/approvals.routes");
 const notificationSettingsRoutes = require("../modules/notification-settings/notification-settings.routes");
+const notificationRoutes = require("../modules/notifications/notifications.routes");
 const memberPaymentRoutes = require("../modules/member-payments/member-payments.routes");
 const { getSchemaCapabilityStatus } = require("../services/schema-capabilities.service");
 
@@ -53,6 +54,7 @@ router.use("/observability", observabilityRoutes);
 router.use("/credit-risk", creditRiskRoutes);
 router.use("/approvals", approvalRoutes);
 router.use("/notification-settings", notificationSettingsRoutes);
+router.use("/notifications", notificationRoutes);
 router.use("/member-payments", memberPaymentRoutes);
 router.use("/", financeRoutes);
 

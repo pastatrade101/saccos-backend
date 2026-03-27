@@ -3,6 +3,10 @@ const crypto = require("crypto");
 const { adminSupabase } = require("../config/supabase");
 const env = require("../config/env");
 const { SMS_TRIGGER_EVENT_TYPES } = require("../modules/notification-settings/notification-settings.constants");
+const {
+    createInAppNotifications,
+    filterRecipientsByNotificationPreference
+} = require("../modules/notifications/notifications.service");
 const { getSubscriptionStatus } = require("./subscription.service");
 const { normalizePhone } = require("./otp.service");
 const { sendTransactionalSms } = require("./sms.service");
@@ -228,6 +232,22 @@ async function loadRecipientsByUserIds({ tenantId, userIds = [], excludeUserIds 
         .filter(Boolean);
 }
 
+function loadDirectPhoneRecipients({ phones = [] }) {
+    return Array.from(new Set((phones || []).filter(Boolean)))
+        .map((phone) => {
+            try {
+                return {
+                    user_id: null,
+                    full_name: "Applicant",
+                    phone: normalizePhone(phone)
+                };
+            } catch {
+                return null;
+            }
+        })
+        .filter(Boolean);
+}
+
 async function createDispatchRow({
     tenantId,
     branchId,
@@ -245,7 +265,7 @@ async function createDispatchRow({
             event_type: eventType,
             event_key: eventKey,
             channel: "sms",
-            target_user_id: target.user_id,
+            target_user_id: target.user_id || null,
             target_phone: target.phone,
             message,
             metadata: metadata || {},
@@ -284,15 +304,6 @@ async function notifyBranchManagers({
     metadata = {},
     excludeUserIds = []
 }) {
-    if (!env.branchAlertSmsEnabled) {
-        return { enabled: false, delivered: 0, skipped: 0, failed: 0 };
-    }
-
-    const muted = !(await isSmsTriggerEnabled(tenantId, eventType));
-    if (muted) {
-        return { enabled: true, muted: true, delivered: 0, skipped: 0, failed: 0 };
-    }
-
     try {
         const recipients = await loadBranchManagerRecipients({
             tenantId,
@@ -301,14 +312,40 @@ async function notifyBranchManagers({
         });
 
         if (!recipients.length) {
-            return { enabled: true, delivered: 0, skipped: 0, failed: 0 };
+            return { enabled: env.branchAlertSmsEnabled, delivered: 0, skipped: 0, failed: 0, in_app_delivered: 0, in_app_skipped: 0 };
         }
 
+        const inAppResult = await createInAppNotifications({
+            tenantId,
+            branchId,
+            eventType,
+            eventKey,
+            message,
+            metadata,
+            recipients
+        });
+
+        if (!env.branchAlertSmsEnabled) {
+            return { enabled: false, delivered: 0, skipped: 0, failed: 0, in_app_delivered: inAppResult.delivered, in_app_skipped: inAppResult.skipped };
+        }
+
+        const muted = !(await isSmsTriggerEnabled(tenantId, eventType));
+        if (muted) {
+            return { enabled: true, muted: true, delivered: 0, skipped: 0, failed: 0, in_app_delivered: inAppResult.delivered, in_app_skipped: inAppResult.skipped };
+        }
+
+        const smsRecipients = await filterRecipientsByNotificationPreference({
+            tenantId,
+            eventType,
+            recipients,
+            channel: "sms"
+        });
+
         let delivered = 0;
-        let skipped = 0;
+        let skipped = Math.max(0, recipients.length - smsRecipients.length);
         let failed = 0;
 
-        for (const recipient of recipients) {
+        for (const recipient of smsRecipients) {
             const dispatchId = await createDispatchRow({
                 tenantId,
                 branchId,
@@ -352,7 +389,7 @@ async function notifyBranchManagers({
             }
         }
 
-        return { enabled: true, delivered, skipped, failed };
+        return { enabled: true, delivered, skipped, failed, in_app_delivered: inAppResult.delivered, in_app_skipped: inAppResult.skipped };
     } catch (error) {
         if (!isMissingRelationError(error)) {
             console.warn("[branch-alerts] dispatch failed", {
@@ -361,7 +398,7 @@ async function notifyBranchManagers({
                 message: error?.message || "unknown_error"
             });
         }
-        return { enabled: env.branchAlertSmsEnabled, delivered: 0, skipped: 0, failed: 0 };
+        return { enabled: env.branchAlertSmsEnabled, delivered: 0, skipped: 0, failed: 0, in_app_delivered: 0, in_app_skipped: 0 };
     }
 }
 
@@ -376,15 +413,6 @@ async function notifyRoleUsers({
     excludeUserIds = [],
     restrictToUserIds = []
 }) {
-    if (!env.branchAlertSmsEnabled) {
-        return { enabled: false, delivered: 0, skipped: 0, failed: 0 };
-    }
-
-    const muted = !(await isSmsTriggerEnabled(tenantId, eventType));
-    if (muted) {
-        return { enabled: true, muted: true, delivered: 0, skipped: 0, failed: 0 };
-    }
-
     try {
         const recipients = await loadRoleRecipients({
             tenantId,
@@ -395,14 +423,40 @@ async function notifyRoleUsers({
         });
 
         if (!recipients.length) {
-            return { enabled: true, delivered: 0, skipped: 0, failed: 0 };
+            return { enabled: env.branchAlertSmsEnabled, delivered: 0, skipped: 0, failed: 0, in_app_delivered: 0, in_app_skipped: 0 };
         }
 
+        const inAppResult = await createInAppNotifications({
+            tenantId,
+            branchId,
+            eventType,
+            eventKey,
+            message,
+            metadata,
+            recipients
+        });
+
+        if (!env.branchAlertSmsEnabled) {
+            return { enabled: false, delivered: 0, skipped: 0, failed: 0, in_app_delivered: inAppResult.delivered, in_app_skipped: inAppResult.skipped };
+        }
+
+        const muted = !(await isSmsTriggerEnabled(tenantId, eventType));
+        if (muted) {
+            return { enabled: true, muted: true, delivered: 0, skipped: 0, failed: 0, in_app_delivered: inAppResult.delivered, in_app_skipped: inAppResult.skipped };
+        }
+
+        const smsRecipients = await filterRecipientsByNotificationPreference({
+            tenantId,
+            eventType,
+            recipients,
+            channel: "sms"
+        });
+
         let delivered = 0;
-        let skipped = 0;
+        let skipped = Math.max(0, recipients.length - smsRecipients.length);
         let failed = 0;
 
-        for (const recipient of recipients) {
+        for (const recipient of smsRecipients) {
             const dispatchId = await createDispatchRow({
                 tenantId,
                 branchId,
@@ -446,7 +500,7 @@ async function notifyRoleUsers({
             }
         }
 
-        return { enabled: true, delivered, skipped, failed };
+        return { enabled: true, delivered, skipped, failed, in_app_delivered: inAppResult.delivered, in_app_skipped: inAppResult.skipped };
     } catch (error) {
         if (!isMissingRelationError(error)) {
             console.warn("[branch-alerts] dispatch failed", {
@@ -456,7 +510,7 @@ async function notifyRoleUsers({
                 message: error?.message || "unknown_error"
             });
         }
-        return { enabled: env.branchAlertSmsEnabled, delivered: 0, skipped: 0, failed: 0 };
+        return { enabled: env.branchAlertSmsEnabled, delivered: 0, skipped: 0, failed: 0, in_app_delivered: 0, in_app_skipped: 0 };
     }
 }
 
@@ -470,15 +524,6 @@ async function notifyUsersById({
     metadata = {},
     excludeUserIds = []
 }) {
-    if (!env.branchAlertSmsEnabled) {
-        return { enabled: false, delivered: 0, skipped: 0, failed: 0 };
-    }
-
-    const muted = !(await isSmsTriggerEnabled(tenantId, eventType));
-    if (muted) {
-        return { enabled: true, muted: true, delivered: 0, skipped: 0, failed: 0 };
-    }
-
     try {
         const recipients = await loadRecipientsByUserIds({
             tenantId,
@@ -487,14 +532,40 @@ async function notifyUsersById({
         });
 
         if (!recipients.length) {
-            return { enabled: true, delivered: 0, skipped: 0, failed: 0 };
+            return { enabled: env.branchAlertSmsEnabled, delivered: 0, skipped: 0, failed: 0, in_app_delivered: 0, in_app_skipped: 0 };
         }
 
+        const inAppResult = await createInAppNotifications({
+            tenantId,
+            branchId,
+            eventType,
+            eventKey,
+            message,
+            metadata,
+            recipients
+        });
+
+        if (!env.branchAlertSmsEnabled) {
+            return { enabled: false, delivered: 0, skipped: 0, failed: 0, in_app_delivered: inAppResult.delivered, in_app_skipped: inAppResult.skipped };
+        }
+
+        const muted = !(await isSmsTriggerEnabled(tenantId, eventType));
+        if (muted) {
+            return { enabled: true, muted: true, delivered: 0, skipped: 0, failed: 0, in_app_delivered: inAppResult.delivered, in_app_skipped: inAppResult.skipped };
+        }
+
+        const smsRecipients = await filterRecipientsByNotificationPreference({
+            tenantId,
+            eventType,
+            recipients,
+            channel: "sms"
+        });
+
         let delivered = 0;
-        let skipped = 0;
+        let skipped = Math.max(0, recipients.length - smsRecipients.length);
         let failed = 0;
 
-        for (const recipient of recipients) {
+        for (const recipient of smsRecipients) {
             const dispatchId = await createDispatchRow({
                 tenantId,
                 branchId,
@@ -538,10 +609,96 @@ async function notifyUsersById({
             }
         }
 
-        return { enabled: true, delivered, skipped, failed };
+        return { enabled: true, delivered, skipped, failed, in_app_delivered: inAppResult.delivered, in_app_skipped: inAppResult.skipped };
     } catch (error) {
         if (!isMissingRelationError(error)) {
             console.warn("[branch-alerts] direct dispatch failed", {
+                eventType,
+                eventKey,
+                message: error?.message || "unknown_error"
+            });
+        }
+        return { enabled: env.branchAlertSmsEnabled, delivered: 0, skipped: 0, failed: 0, in_app_delivered: 0, in_app_skipped: 0 };
+    }
+}
+
+async function notifyDirectPhones({
+    tenantId,
+    branchId = null,
+    phones = [],
+    eventType,
+    eventKey,
+    message,
+    metadata = {}
+}) {
+    if (!env.branchAlertSmsEnabled) {
+        return { enabled: false, delivered: 0, skipped: 0, failed: 0 };
+    }
+
+    const muted = !(await isSmsTriggerEnabled(tenantId, eventType));
+    if (muted) {
+        return { enabled: true, muted: true, delivered: 0, skipped: 0, failed: 0 };
+    }
+
+    try {
+        const recipients = loadDirectPhoneRecipients({ phones });
+
+        if (!recipients.length) {
+            return { enabled: true, delivered: 0, skipped: 0, failed: 0 };
+        }
+
+        let delivered = 0;
+        let skipped = 0;
+        let failed = 0;
+
+        for (const recipient of recipients) {
+            const dispatchId = await createDispatchRow({
+                tenantId,
+                branchId,
+                eventType,
+                eventKey,
+                message,
+                metadata,
+                target: recipient
+            }).catch((error) => {
+                if (isMissingRelationError(error)) {
+                    return null;
+                }
+                throw error;
+            });
+
+            if (!dispatchId) {
+                skipped += 1;
+                continue;
+            }
+
+            try {
+                const providerPayload = await sendTransactionalSms({
+                    to: recipient.phone,
+                    text: message,
+                    reference: buildReference(eventKey, recipient.phone)
+                });
+
+                await markDispatchStatus(dispatchId, {
+                    status: "sent",
+                    sent_at: new Date().toISOString(),
+                    provider_payload: providerPayload || {}
+                });
+                delivered += 1;
+            } catch (error) {
+                await markDispatchStatus(dispatchId, {
+                    status: "failed",
+                    failed_at: new Date().toISOString(),
+                    error_message: error?.message || "SMS send failed."
+                }).catch(() => null);
+                failed += 1;
+            }
+        }
+
+        return { enabled: true, delivered, skipped, failed };
+    } catch (error) {
+        if (!isMissingRelationError(error)) {
+            console.warn("[branch-alerts] direct phone dispatch failed", {
                 eventType,
                 eventKey,
                 message: error?.message || "unknown_error"
@@ -958,6 +1115,190 @@ async function notifyTellerTransactionBlocked({ actor, tenantId, branchId, opera
     });
 }
 
+async function notifyMemberRepaymentDueSoon({
+    tenantId,
+    branchId = null,
+    memberUserId,
+    memberId = null,
+    scheduleId,
+    loanId = null,
+    loanNumber = null,
+    dueDate,
+    amount
+}) {
+    if (!tenantId || !memberUserId || !scheduleId || !dueDate) {
+        return { in_app_delivered: 0, in_app_skipped: 0 };
+    }
+
+    const amountText = formatAmount(amount);
+    const message = `Your repayment of TZS ${amountText} for loan ${loanNumber || shortId(loanId)} is due on ${dueDate}.`;
+
+    return notifyUsersById({
+        tenantId,
+        branchId,
+        userIds: [memberUserId],
+        eventType: "member_repayment_due_soon",
+        eventKey: `member_repayment_due_soon:${scheduleId}`,
+        message,
+        metadata: {
+            member_id: memberId,
+            loan_id: loanId,
+            loan_schedule_id: scheduleId,
+            due_date: dueDate,
+            amount: Number(amount || 0)
+        }
+    });
+}
+
+async function notifyRepaymentOverdue({
+    tenantId,
+    branchId = null,
+    memberUserId = null,
+    memberId = null,
+    scheduleId,
+    loanId = null,
+    loanNumber = null,
+    dueDate,
+    amount,
+    daysPastDue = 0
+}) {
+    if (!tenantId || !scheduleId || !dueDate) {
+        return {
+            member_in_app_delivered: 0,
+            member_in_app_skipped: 0,
+            staff_in_app_delivered: 0,
+            staff_in_app_skipped: 0
+        };
+    }
+
+    const amountText = formatAmount(amount);
+    const memberMessage = `Your repayment of TZS ${amountText} for loan ${loanNumber || shortId(loanId)} is overdue since ${dueDate}. Please settle it as soon as possible.`;
+    const staffMessage = `Loan ${loanNumber || shortId(loanId)} repayment is overdue by ${daysPastDue} day(s). Outstanding amount is TZS ${amountText}, due on ${dueDate}.`;
+
+    let memberResult = { in_app_delivered: 0, in_app_skipped: 0 };
+    if (memberUserId) {
+        memberResult = await notifyUsersById({
+            tenantId,
+            branchId,
+            userIds: [memberUserId],
+            eventType: "member_repayment_overdue",
+            eventKey: `member_repayment_overdue:${scheduleId}`,
+            message: memberMessage,
+            metadata: {
+                member_id: memberId,
+                loan_id: loanId,
+                loan_schedule_id: scheduleId,
+                due_date: dueDate,
+                amount: Number(amount || 0),
+                days_past_due: Number(daysPastDue || 0)
+            }
+        });
+    }
+
+    const [branchManagerResult, loanOfficerResult] = await Promise.all([
+        notifyRoleUsers({
+            tenantId,
+            branchId,
+            role: "branch_manager",
+            eventType: "branch_repayment_overdue",
+            eventKey: `branch_repayment_overdue:${scheduleId}`,
+            message: staffMessage,
+            metadata: {
+                member_id: memberId,
+                loan_id: loanId,
+                loan_schedule_id: scheduleId,
+                due_date: dueDate,
+                amount: Number(amount || 0),
+                days_past_due: Number(daysPastDue || 0)
+            }
+        }),
+        notifyRoleUsers({
+            tenantId,
+            branchId,
+            role: "loan_officer",
+            eventType: "branch_repayment_overdue",
+            eventKey: `branch_repayment_overdue:${scheduleId}`,
+            message: staffMessage,
+            metadata: {
+                member_id: memberId,
+                loan_id: loanId,
+                loan_schedule_id: scheduleId,
+                due_date: dueDate,
+                amount: Number(amount || 0),
+                days_past_due: Number(daysPastDue || 0)
+            }
+        })
+    ]);
+
+    return {
+        member_in_app_delivered: Number(memberResult?.in_app_delivered || 0),
+        member_in_app_skipped: Number(memberResult?.in_app_skipped || 0),
+        staff_in_app_delivered: Number(branchManagerResult?.in_app_delivered || 0) + Number(loanOfficerResult?.in_app_delivered || 0),
+        staff_in_app_skipped: Number(branchManagerResult?.in_app_skipped || 0) + Number(loanOfficerResult?.in_app_skipped || 0)
+    };
+}
+
+async function notifyBranchManagersLiquidityWarning({
+    tenantId,
+    branchId,
+    branchName = null,
+    liquidityStatus,
+    availableForLoans = 0,
+    freezeThreshold = 0,
+    liquidityPercent = 0
+}) {
+    if (!tenantId || !branchId || !["warning", "risk"].includes(String(liquidityStatus || ""))) {
+        return { in_app_delivered: 0, in_app_skipped: 0 };
+    }
+
+    try {
+        const recipients = await loadBranchManagerRecipients({ tenantId, branchId });
+        if (!recipients.length) {
+            return { in_app_delivered: 0, in_app_skipped: 0 };
+        }
+
+        const eventType = liquidityStatus === "risk" ? "branch_liquidity_risk" : "branch_liquidity_warning";
+        const branchLabel = branchName || "This branch";
+        const amountText = formatAmount(availableForLoans);
+        const freezeText = formatAmount(freezeThreshold);
+        const percentText = Number(liquidityPercent || 0).toFixed(0);
+        const message = liquidityStatus === "risk"
+            ? `${branchLabel} is in critical liquidity territory. Available loan pool is TZS ${amountText} at ${percentText}% liquidity, close to the freeze threshold of TZS ${freezeText}.`
+            : `${branchLabel} loan liquidity is tightening. Available loan pool is TZS ${amountText} at ${percentText}% liquidity against a freeze threshold of TZS ${freezeText}.`;
+
+        const inAppResult = await createInAppNotifications({
+            tenantId,
+            branchId,
+            eventType,
+            eventKey: `${eventType}:${branchId}:${new Date().toISOString().slice(0, 10)}`,
+            message,
+            metadata: {
+                branch_id: branchId,
+                liquidity_status: liquidityStatus,
+                available_for_loans: Number(availableForLoans || 0),
+                freeze_threshold: Number(freezeThreshold || 0),
+                liquidity_percent: Number(liquidityPercent || 0)
+            },
+            recipients
+        });
+
+        return {
+            in_app_delivered: inAppResult.delivered,
+            in_app_skipped: inAppResult.skipped
+        };
+    } catch (error) {
+        if (!isMissingRelationError(error)) {
+            console.warn("[branch-alerts] liquidity warning dispatch failed", {
+                tenantId,
+                branchId,
+                liquidityStatus,
+                message: error?.message || "unknown_error"
+            });
+        }
+        return { in_app_delivered: 0, in_app_skipped: 0 };
+    }
+}
+
 module.exports = {
     invalidateSmsTriggerCache,
     notifyApprovalRequestPending,
@@ -967,6 +1308,7 @@ module.exports = {
     notifyLoanOfficersNewApplication,
     notifyLoanOfficersReappraisalNeeded,
     notifyLoanOfficersApprovedForDisbursement,
+    notifyDirectPhones,
     notifyMemberLoanApplicationApproved,
     notifyMemberLoanApplicationRejected,
     notifyMemberLoanDisbursed,
@@ -977,5 +1319,8 @@ module.exports = {
     notifyApprovalOutcomeToMaker,
     notifyTellerCashMismatch,
     notifyTellerTransactionPostFailed,
-    notifyTellerTransactionBlocked
+    notifyTellerTransactionBlocked,
+    notifyBranchManagersLiquidityWarning,
+    notifyMemberRepaymentDueSoon,
+    notifyRepaymentOverdue
 };

@@ -46,6 +46,66 @@ exports.exceptions = asyncHandler(async (req, res) => {
     res.json({ data });
 });
 
+exports.caseAssignees = asyncHandler(async (req, res) => {
+    applyNoStore(res);
+    const data = await auditorService.listCaseAssignees(req.auth);
+    res.json({ data });
+});
+
+exports.updateCase = asyncHandler(async (req, res) => {
+    applyNoStore(res);
+    const data = await auditorService.updateCase(req.auth, req.validated.params.caseKey, req.validated.body);
+    res.json({ data });
+});
+
+exports.caseDetail = asyncHandler(async (req, res) => {
+    applyNoStore(res);
+    const data = await auditorService.getCaseDetail(req.auth, req.validated.params.caseKey, req.validated.query);
+    res.json({ data });
+});
+
+exports.addCaseComment = asyncHandler(async (req, res) => {
+    applyNoStore(res);
+    const data = await auditorService.addCaseComment(req.auth, req.validated.params.caseKey, req.validated.body);
+    res.status(201).json({ data });
+});
+
+exports.initCaseEvidenceUpload = asyncHandler(async (req, res) => {
+    applyNoStore(res);
+    const data = await auditorService.initCaseEvidenceUpload(req.auth, req.validated.params.caseKey, req.validated.body);
+    res.status(201).json({ data });
+});
+
+exports.confirmCaseEvidenceUpload = asyncHandler(async (req, res) => {
+    applyNoStore(res);
+    const data = await auditorService.confirmCaseEvidenceUpload(req.auth, req.validated.params.evidenceId, req.validated.body);
+    res.json({ data });
+});
+
+exports.downloadCaseEvidence = asyncHandler(async (req, res) => {
+    applyNoStore(res);
+    const data = await auditorService.getCaseEvidenceDownload(req.auth, req.validated.params.evidenceId);
+    res.json({ data });
+});
+
+exports.riskSummary = asyncHandler(async (req, res) => {
+    applyNoStore(res);
+    const data = await auditorService.getRiskSummary(req.auth, req.validated.query);
+    res.json({ data });
+});
+
+exports.exceptionTrends = asyncHandler(async (req, res) => {
+    applyNoStore(res);
+    const data = await auditorService.getExceptionTrends(req.auth, req.validated.query);
+    res.json({ data });
+});
+
+exports.workstationOverview = asyncHandler(async (req, res) => {
+    applyNoStore(res);
+    const data = await auditorService.getWorkstationOverview(req.auth, req.validated.query);
+    res.json({ data });
+});
+
 exports.journals = asyncHandler(async (req, res) => {
     applyNoStore(res);
     const data = await auditorService.getJournals(req.auth, req.validated.query);

@@ -1548,6 +1548,141 @@ async function auditExceptionsReport(actor, query) {
     };
 }
 
+async function auditEvidencePack(actor, query) {
+    const tenantId = query.tenant_id || actor.tenantId;
+    assertTenantAccess({ auth: actor }, tenantId);
+
+    const fromDate = query.from_date || monthStartIsoDate();
+    const toDate = query.to_date || todayIsoDate();
+
+    let exceptionsQuery = adminSupabase
+        .from("v_audit_exception_feed")
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .gte("created_at", fromDate)
+        .lte("created_at", `${toDate}T23:59:59.999Z`)
+        .order("created_at", { ascending: false });
+
+    if (query.branch_id) {
+        assertBranchAccess({ auth: actor }, query.branch_id);
+        exceptionsQuery = exceptionsQuery.eq("branch_id", query.branch_id);
+    } else {
+        exceptionsQuery = applyBranchScope(exceptionsQuery, actor, "branch_id");
+    }
+
+    const [exceptionsResult, casesResult, branchesResult] = await Promise.all([
+        exceptionsQuery,
+        adminSupabase
+            .from("audit_cases")
+            .select("id, status, severity, reason_code, branch_id, opened_at, created_at, resolved_at")
+            .eq("tenant_id", tenantId),
+        adminSupabase
+            .from("branches")
+            .select("id, code, name")
+            .eq("tenant_id", tenantId)
+    ]);
+
+    if (exceptionsResult.error) {
+        throw new AppError(500, "AUDIT_EVIDENCE_PACK_FAILED", "Unable to load audit exceptions for the evidence pack.", exceptionsResult.error);
+    }
+
+    if (casesResult.error && !["PGRST205", "42P01", "42703"].includes(String(casesResult.error.code || ""))) {
+        throw new AppError(500, "AUDIT_EVIDENCE_PACK_FAILED", "Unable to load audit cases for the evidence pack.", casesResult.error);
+    }
+
+    if (branchesResult.error) {
+        throw new AppError(500, "AUDIT_EVIDENCE_PACK_FAILED", "Unable to resolve branch names for the evidence pack.", branchesResult.error);
+    }
+
+    const exceptions = exceptionsResult.data || [];
+    const cases = casesResult.data || [];
+    const branchMap = new Map((branchesResult.data || []).map((row) => [row.id, row]));
+
+    const reasonCounts = new Map();
+    const branchCounts = new Map();
+
+    for (const row of exceptions) {
+        const reason = String(row.reason_code || "UNKNOWN");
+        reasonCounts.set(reason, (reasonCounts.get(reason) || 0) + 1);
+
+        const branchId = row.branch_id || "unassigned";
+        const current = branchCounts.get(branchId) || {
+            branch_name: row.branch_id ? branchMap.get(row.branch_id)?.name || "Unknown branch" : "No branch",
+            branch_code: row.branch_id ? branchMap.get(row.branch_id)?.code || null : null,
+            total: 0,
+            critical: 0
+        };
+        current.total += 1;
+        if (getReasonSeverity(row.reason_code) === "critical") {
+            current.critical += 1;
+        }
+        branchCounts.set(branchId, current);
+    }
+
+    const rows = [
+        {
+            section: "Pack",
+            item: "Tenant",
+            value: tenantId,
+            notes: "Audit evidence pack scope"
+        },
+        {
+            section: "Pack",
+            item: "Date window",
+            value: `${fromDate} to ${toDate}`,
+            notes: "Exception and case review range"
+        },
+        {
+            section: "Summary",
+            item: "Total exceptions",
+            value: exceptions.length,
+            notes: "All exceptions within scope"
+        },
+        {
+            section: "Summary",
+            item: "Critical exceptions",
+            value: exceptions.filter((row) => getReasonSeverity(row.reason_code) === "critical").length,
+            notes: "Highest-risk exception items"
+        },
+        {
+            section: "Summary",
+            item: "Open audit cases",
+            value: cases.filter((row) => !["resolved", "waived"].includes(row.status)).length,
+            notes: "Cases still requiring investigation"
+        },
+        {
+            section: "Summary",
+            item: "Resolved or waived cases",
+            value: cases.filter((row) => ["resolved", "waived"].includes(row.status)).length,
+            notes: "Cases already closed"
+        },
+        ...Array.from(reasonCounts.entries())
+            .sort((left, right) => right[1] - left[1])
+            .slice(0, 10)
+            .map(([reason, count]) => ({
+                section: "Reason concentration",
+                item: reason,
+                value: count,
+                notes: `Severity ${getReasonSeverity(reason)}`
+            })),
+        ...Array.from(branchCounts.values())
+            .sort((left, right) => right.critical - left.critical || right.total - left.total)
+            .slice(0, 10)
+            .map((branch) => ({
+                section: "Branch concentration",
+                item: branch.branch_name,
+                value: branch.total,
+                notes: `${branch.critical} critical exception(s)${branch.branch_code ? ` • ${branch.branch_code}` : ""}`
+            }))
+    ];
+
+    return {
+        title: "Audit Evidence Pack",
+        filename: `audit-evidence-pack-${toDate}`,
+        rows
+    };
+}
+
 module.exports = {
     memberStatement,
     trialBalance,
@@ -1559,5 +1694,6 @@ module.exports = {
     loanAging,
     loanPortfolioSummary,
     memberBalancesSummary,
-    auditExceptionsReport
+    auditExceptionsReport,
+    auditEvidencePack
 };

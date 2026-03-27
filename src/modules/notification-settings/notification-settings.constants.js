@@ -20,6 +20,11 @@ const SMS_TRIGGER_CATALOG = [
         description: "Notify member when their loan application is approved and moved to disbursement readiness."
     },
     {
+        event_type: "member_application_approved",
+        label: "Member application approved",
+        description: "Notify applicant when membership is approved and membership fee payment is now required."
+    },
+    {
         event_type: "member_loan_application_rejected",
         label: "Member loan rejected",
         description: "Notify member when their loan application is rejected, including the rejection reason."

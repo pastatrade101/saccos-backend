@@ -1,6 +1,7 @@
 const { adminSupabase } = require("../../config/supabase");
 const { ROLES } = require("../../constants/roles");
 const { logAudit } = require("../../services/audit.service");
+const { notifyBranchManagersLiquidityWarning } = require("../../services/branch-alerts.service");
 const { assertTwoFactorStepUp } = require("../../services/two-factor.service");
 const { assertBranchAccess, assertTenantAccess } = require("../../services/user-context.service");
 const AppError = require("../../utils/app-error");
@@ -1059,6 +1060,18 @@ async function getBranchDashboard(actor, branchId, query = {}) {
         }),
         getPolicyChangeHistory(tenantId, loanProduct.id, branchId)
     ]);
+
+    if (["warning", "risk"].includes(liquidityHealthStatus)) {
+        void notifyBranchManagersLiquidityWarning({
+            tenantId,
+            branchId,
+            branchName: branch.name,
+            liquidityStatus: liquidityHealthStatus,
+            availableForLoans,
+            freezeThreshold: roundMoney(branchPolicy.auto_loan_freeze_threshold),
+            liquidityPercent: toPercentValue(liquidityRatio)
+        });
+    }
 
     return {
         tenant_id: tenantId,

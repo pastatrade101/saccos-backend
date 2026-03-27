@@ -71,8 +71,15 @@ const exportJobParamSchema = z.object({
     jobId: z.string().uuid()
 });
 
+const exportJobsQuerySchema = z.object({
+    report_key: z.string().max(120).optional(),
+    status: z.enum(["pending", "processing", "completed", "failed"]).optional(),
+    limit: z.coerce.number().int().positive().max(50).default(10)
+});
+
 module.exports = {
     exportSchema,
     chargeRevenueSummarySchema,
-    exportJobParamSchema
+    exportJobParamSchema,
+    exportJobsQuerySchema
 };

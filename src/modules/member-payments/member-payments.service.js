@@ -12,6 +12,7 @@ const {
     extractCallbackIdentifiers,
     normalizeCallbackStatus
 } = require("../../services/azampay.service");
+const { createInAppNotifications } = require("../notifications/notifications.service");
 const membersService = require("../members/members.service");
 const {
     postGatewayShareContribution,
@@ -49,6 +50,110 @@ function wrapPaymentOrderError(statusCode, code, fallbackMessage, error) {
 
 function buildExternalId(orderId) {
     return `saccos_azam_${orderId}`;
+}
+
+function formatNotificationAmount(amount) {
+    return Number(amount || 0).toLocaleString("en-TZ", {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0
+    });
+}
+
+function getPaymentPurposeLabel(purpose) {
+    if (purpose === "share_contribution") {
+        return "share contribution payment";
+    }
+    if (purpose === "savings_deposit") {
+        return "savings deposit";
+    }
+    if (purpose === "membership_fee") {
+        return "membership fee payment";
+    }
+    if (purpose === "loan_repayment") {
+        return "loan repayment";
+    }
+    return "payment";
+}
+
+function buildPaymentEventMessage(order, eventType) {
+    const purposeLabel = getPaymentPurposeLabel(order?.purpose);
+    const amountText = `TSh ${formatNotificationAmount(order?.amount)}`;
+
+    if (eventType === "member_payment_posted") {
+        if (order?.purpose === "share_contribution") {
+            return `Your share contribution of ${amountText} has been posted successfully.`;
+        }
+        if (order?.purpose === "savings_deposit") {
+            return `Your savings deposit of ${amountText} has been posted successfully.`;
+        }
+        if (order?.purpose === "loan_repayment") {
+            return `Your loan repayment of ${amountText} has been posted successfully.`;
+        }
+        return `Your ${purposeLabel} of ${amountText} has been posted successfully.`;
+    }
+
+    if (eventType === "member_payment_expired") {
+        return `Your ${purposeLabel} of ${amountText} expired before confirmation. Open the member portal to start again.`;
+    }
+
+    const failureReason = String(order?.error_message || "Please retry from the member portal.").trim();
+    return `Your ${purposeLabel} of ${amountText} could not be completed. ${failureReason}`;
+}
+
+async function resolvePaymentOrderMemberRecipient(order) {
+    if (!order?.tenant_id || !order?.member_id) {
+        return null;
+    }
+
+    const { data, error } = await adminSupabase
+        .from("members")
+        .select("id, tenant_id, branch_id, user_id")
+        .eq("tenant_id", order.tenant_id)
+        .eq("id", order.member_id)
+        .is("deleted_at", null)
+        .maybeSingle();
+
+    if (error) {
+        throw new AppError(500, "PAYMENT_MEMBER_LOOKUP_FAILED", "Unable to resolve payment-order member recipient.", error);
+    }
+
+    return data?.user_id ? data : null;
+}
+
+async function notifyMemberPaymentOrderEvent(order, eventType) {
+    if (!order?.id || !eventType) {
+        return;
+    }
+
+    if (eventType === "member_payment_posted" && order.purpose === "membership_fee") {
+        return;
+    }
+
+    const recipient = await resolvePaymentOrderMemberRecipient(order);
+    if (!recipient) {
+        return;
+    }
+
+    await createInAppNotifications({
+        tenantId: order.tenant_id,
+        branchId: recipient.branch_id || null,
+        eventType,
+        eventKey: `${eventType}:${order.id}`,
+        message: buildPaymentEventMessage(order, eventType),
+        metadata: {
+            payment_order_id: order.id,
+            member_id: order.member_id,
+            loan_id: order.loan_id || null,
+            account_id: order.account_id || null,
+            purpose: order.purpose,
+            amount: Number(order.amount || 0),
+            status: order.status
+        },
+        recipients: [{
+            user_id: recipient.user_id,
+            role: "member"
+        }]
+    });
 }
 
 function buildOrderView(order) {
@@ -643,6 +748,13 @@ async function postContributionPaymentOrder(order, source = "manual_reconcile") 
             }
         });
 
+        await notifyMemberPaymentOrderEvent(postedOrder, "member_payment_posted").catch((error) => {
+            console.warn("[member-payments] posted notification failed", {
+                orderId: postedOrder.id,
+                error: error?.message || error
+            });
+        });
+
         return postedOrder;
     } catch (error) {
         await markOrderPostingFailure(order.id, error);
@@ -834,6 +946,13 @@ async function initiatePortalPayment(actor, payload, options) {
                 error_code: failedOrder.error_code,
                 error_message: failedOrder.error_message
             }
+        });
+
+        await notifyMemberPaymentOrderEvent(failedOrder, "member_payment_failed").catch((notifyError) => {
+            console.warn("[member-payments] failed notification dispatch failed", {
+                orderId: failedOrder.id,
+                error: notifyError?.message || notifyError
+            });
         });
 
         throw error;
@@ -1030,6 +1149,13 @@ async function initiateLoanRepaymentPayment(actor, payload) {
             }
         });
 
+        await notifyMemberPaymentOrderEvent(failedOrder, "member_payment_failed").catch((notifyError) => {
+            console.warn("[member-payments] failed notification dispatch failed", {
+                orderId: failedOrder.id,
+                error: notifyError?.message || notifyError
+            });
+        });
+
         throw error;
     }
 }
@@ -1134,6 +1260,22 @@ async function handleAzamCallback({ body = {}, query = {}, headers = {} }) {
             expired_at: updatedOrder.expired_at || null
         }
     });
+
+    if (updatedOrder.status === "failed") {
+        await notifyMemberPaymentOrderEvent(updatedOrder, "member_payment_failed").catch((error) => {
+            console.warn("[member-payments] callback failure notification failed", {
+                orderId: updatedOrder.id,
+                error: error?.message || error
+            });
+        });
+    } else if (updatedOrder.status === "expired") {
+        await notifyMemberPaymentOrderEvent(updatedOrder, "member_payment_expired").catch((error) => {
+            console.warn("[member-payments] callback expiry notification failed", {
+                orderId: updatedOrder.id,
+                error: error?.message || error
+            });
+        });
+    }
 
     return {
         httpStatus: 200,
