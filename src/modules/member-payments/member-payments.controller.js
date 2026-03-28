@@ -1,5 +1,6 @@
 const asyncHandler = require("../../utils/async-handler");
 const service = require("./member-payments.service");
+const snippeWebhookService = require("../payments/snippeWebhook.service");
 
 exports.initiateContributionPayment = asyncHandler(async (req, res) => {
     const result = await service.initiateContributionPayment(req.auth, req.validated.body);
@@ -45,6 +46,21 @@ exports.handleAzamCallback = asyncHandler(async (req, res) => {
         body: req.body || {},
         query: req.query || {},
         headers: req.headers || {}
+    });
+
+    res.status(result.httpStatus || 200).json({
+        data: result.data
+    });
+});
+
+exports.handleSnippeWebhook = asyncHandler(async (req, res) => {
+    const result = await snippeWebhookService.handleWebhook({
+        body: req.body || {},
+        headers: req.headers || {},
+        rawBody: req.rawBody || "",
+        ip: req.ip || null,
+        userAgent: req.get("user-agent") || null,
+        source: "legacy_member_payments_webhook"
     });
 
     res.status(result.httpStatus || 200).json({

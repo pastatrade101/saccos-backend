@@ -137,6 +137,14 @@ async function createTenant(actor, payload) {
         throw new AppError(500, "TENANT_PHASE3_SEED_FAILED", "Unable to seed tenant loan workflow defaults.", phase3SeedError);
     }
 
+    const { error: treasurySeedError } = await adminSupabase.rpc("seed_treasury_defaults", {
+        p_tenant_id: tenant.id
+    });
+
+    if (treasurySeedError) {
+        throw new AppError(500, "TENANT_TREASURY_SEED_FAILED", "Unable to seed tenant treasury defaults.", treasurySeedError);
+    }
+
     const { error: branchError } = await adminSupabase
         .from("branches")
         .insert({

@@ -419,7 +419,7 @@ async function postGatewayShareContribution(paymentOrder) {
         p_amount: Number(paymentOrder.amount),
         p_teller_id: paymentOrder.created_by_user_id,
         p_reference: paymentOrder.provider_ref || paymentOrder.external_id || paymentOrder.id,
-        p_description: paymentOrder.description || "Member portal share contribution via Azam Pay"
+        p_description: paymentOrder.description || "Member portal share contribution via mobile money"
     });
 
     await logAudit({
@@ -465,7 +465,7 @@ async function postGatewaySavingsDeposit(paymentOrder) {
         p_amount: Number(paymentOrder.amount),
         p_teller_id: paymentOrder.created_by_user_id,
         p_reference: paymentOrder.provider_ref || paymentOrder.external_id || paymentOrder.id,
-        p_description: paymentOrder.description || "Member portal savings deposit via Azam Pay"
+        p_description: paymentOrder.description || "Member portal savings deposit via mobile money"
     });
 
     await logAudit({
@@ -565,7 +565,7 @@ async function postGatewayLoanRepayment(paymentOrder) {
         p_amount: Number(paymentOrder.amount),
         p_user_id: paymentOrder.created_by_user_id,
         p_reference: repaymentReference,
-        p_description: paymentOrder.description || "Member portal loan repayment via Azam Pay"
+        p_description: paymentOrder.description || "Member portal loan repayment via mobile money"
     });
 
     await logAudit({

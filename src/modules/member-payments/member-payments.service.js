@@ -8,10 +8,16 @@ const { assertBranchAccess, assertTenantAccess } = require("../../services/user-
 const { logAudit } = require("../../services/audit.service");
 const AppError = require("../../utils/app-error");
 const {
-    createCheckout,
     extractCallbackIdentifiers,
     normalizeCallbackStatus
 } = require("../../services/azampay.service");
+const {
+    createPaymentIntent,
+    verifyWebhookSignature,
+    computeWebhookSignatureDiagnostics,
+    extractWebhookIdentifiers,
+    normalizeWebhookStatus
+} = require("../../services/snippe.service");
 const { createInAppNotifications } = require("../notifications/notifications.service");
 const membersService = require("../members/members.service");
 const {
@@ -45,11 +51,30 @@ function wrapPaymentOrderError(statusCode, code, fallbackMessage, error) {
         );
     }
 
+    if (error?.code === "23514" && typeof error?.message === "string" && error.message.includes("payment_orders_gateway_check")) {
+        return new AppError(
+            503,
+            "PAYMENT_ORDER_GATEWAY_SCHEMA_OUTDATED",
+            "Payment orders require treasury/payment gateway migration 084_member_payment_orders_snippe_gateway.sql before Snippe can be used.",
+            error
+        );
+    }
+
+    if (error?.code === "23514" && typeof error?.message === "string" && error.message.includes("payment_order_callbacks_gateway_check")) {
+        return new AppError(
+            503,
+            "PAYMENT_CALLBACK_GATEWAY_SCHEMA_OUTDATED",
+            "Payment callback logging requires migration 084_member_payment_orders_snippe_gateway.sql before Snippe callbacks can be recorded.",
+            error
+        );
+    }
+
     return new AppError(statusCode, code, fallbackMessage, error);
 }
 
-function buildExternalId(orderId) {
-    return `saccos_azam_${orderId}`;
+function buildExternalId(orderId, gateway = "snippe") {
+    const prefix = gateway === "azampay" ? "saccos_azam" : gateway === "snippe" ? "saccos_snp" : "saccos_pay";
+    return `${prefix}_${orderId}`;
 }
 
 function formatNotificationAmount(amount) {
@@ -495,6 +520,50 @@ async function getPaymentOrderById(orderId) {
     return data || null;
 }
 
+async function expirePendingOrderIfTimedOut(order, source = "status_poll") {
+    if (!order || order.status !== "pending" || !order.expires_at) {
+        return order;
+    }
+
+    const expiresAtMs = Date.parse(order.expires_at);
+    if (!Number.isFinite(expiresAtMs) || expiresAtMs > Date.now()) {
+        return order;
+    }
+
+    const expiredOrder = await updatePaymentOrder(order.id, {
+        status: "expired",
+        expired_at: order.expired_at || new Date().toISOString(),
+        error_code: order.error_code || `${String(order.gateway || "payment").toUpperCase()}_PAYMENT_EXPIRED`,
+        error_message: order.error_message || "The mobile money session expired before confirmation."
+    });
+
+    await logAudit({
+        tenantId: expiredOrder.tenant_id,
+        actorUserId: expiredOrder.created_by_user_id,
+        table: "payment_orders",
+        entityType: "payment_order",
+        entityId: expiredOrder.id,
+        action: "MEMBER_PAYMENT_EXPIRED",
+        afterData: {
+            gateway: expiredOrder.gateway,
+            status: expiredOrder.status,
+            external_id: expiredOrder.external_id,
+            provider_ref: expiredOrder.provider_ref || null,
+            expired_at: expiredOrder.expired_at || null,
+            source
+        }
+    });
+
+    await notifyMemberPaymentOrderEvent(expiredOrder, "member_payment_expired").catch((error) => {
+        console.warn("[member-payments] timed-out expiry notification failed", {
+            orderId: expiredOrder.id,
+            error: error?.message || error
+        });
+    });
+
+    return expiredOrder;
+}
+
 async function listPaymentOrders(actor, query = {}) {
     const tenantId = query.tenant_id || actor.tenantId;
     if (!tenantId) {
@@ -609,12 +678,19 @@ async function listPaymentOrders(actor, query = {}) {
     };
 }
 
-async function logPaymentOrderCallback({ paymentOrderId = null, externalId = null, providerRef = null, payload = {}, source = "callback" }) {
+async function logPaymentOrderCallback({
+    paymentOrderId = null,
+    externalId = null,
+    providerRef = null,
+    payload = {},
+    source = "callback",
+    gateway = "snippe"
+}) {
     const { error } = await adminSupabase
         .from("payment_order_callbacks")
         .insert({
             payment_order_id: paymentOrderId,
-            gateway: "azampay",
+            gateway,
             source,
             external_id: externalId,
             provider_ref: providerRef,
@@ -626,9 +702,7 @@ async function logPaymentOrderCallback({ paymentOrderId = null, externalId = nul
     }
 }
 
-async function resolvePaymentOrderFromCallback(payload) {
-    const identifiers = extractCallbackIdentifiers(payload);
-
+async function resolvePaymentOrderFromIdentifiers(identifiers = {}) {
     if (identifiers.internalOrderId) {
         const direct = await getPaymentOrderById(String(identifiers.internalOrderId));
         if (direct) {
@@ -669,6 +743,10 @@ async function resolvePaymentOrderFromCallback(payload) {
     }
 
     return { order: null, identifiers };
+}
+
+async function resolvePaymentOrderFromCallback(payload) {
+    return resolvePaymentOrderFromIdentifiers(extractCallbackIdentifiers(payload));
 }
 
 async function assertPaymentOrderAccess(actor, order) {
@@ -763,7 +841,7 @@ async function postContributionPaymentOrder(order, source = "manual_reconcile") 
 }
 
 async function reconcilePaymentOrder(actor, orderId) {
-    const order = await getPaymentOrderById(orderId);
+    const order = await expirePendingOrderIfTimedOut(await getPaymentOrderById(orderId), "manual_reconcile");
     if (!order) {
         throw new AppError(404, "PAYMENT_ORDER_NOT_FOUND", "Payment order was not found.");
     }
@@ -809,26 +887,26 @@ async function initiatePortalPayment(actor, payload, options) {
     );
 
     const orderId = crypto.randomUUID();
-    const externalId = buildExternalId(orderId);
-    const expiresAt = new Date(Date.now() + (env.azamPayIntentTtlSeconds * 1000)).toISOString();
+    const externalId = buildExternalId(orderId, "snippe");
+    const fallbackExpiresAt = new Date(Date.now() + (env.snippeIntentTtlSeconds * 1000)).toISOString();
     const description = payload.description || `${options.defaultDescriptionPrefix} ${account.account_name || account.account_number}`;
 
-    const createdOrder = await createPaymentOrder({
+    await createPaymentOrder({
         id: orderId,
         tenant_id: tenantId,
         member_id: member.id,
         account_id: account.id,
         created_by_user_id: actor.user.id,
-        gateway: "azampay",
+        gateway: "snippe",
         purpose: options.purpose,
         provider: payload.provider,
         msisdn: normalizedPhone,
         amount: Number(payload.amount),
-        currency: env.azamPayCurrency,
+        currency: env.snippeCurrency,
         status: "created",
         external_id: externalId,
         description,
-        expires_at: expiresAt,
+        expires_at: fallbackExpiresAt,
         metadata: {
             source: "member_portal",
             product_type: account.product_type,
@@ -840,18 +918,25 @@ async function initiatePortalPayment(actor, payload, options) {
     });
 
     try {
-        const checkout = await createCheckout({
+        const checkout = await createPaymentIntent({
             amount: payload.amount,
-            currency: env.azamPayCurrency,
+            currency: env.snippeCurrency,
             externalId,
-            provider: payload.provider,
             accountNumber: normalizedPhone,
-            additionalProperties: {
-                source: env.azamPaySourceLabel,
-                property1: tenantId,
-                property2: orderId,
-                property3: member.id
-            }
+            customer: {
+                name: member.full_name,
+                email: actor.user?.email || ""
+            },
+            metadata: {
+                source: env.snippeSourceLabel,
+                tenant_id: tenantId,
+                order_id: orderId,
+                payment_order_id: orderId,
+                member_id: member.id,
+                purpose: options.purpose,
+                provider: payload.provider
+            },
+            idempotencyKey: orderId
         });
 
         const pendingOrder = await updatePaymentOrder(orderId, {
@@ -859,6 +944,7 @@ async function initiatePortalPayment(actor, payload, options) {
             provider_ref: checkout.providerRef,
             gateway_request: checkout.requestPayload,
             gateway_response: checkout.responsePayload,
+            expires_at: checkout.expiresAt || fallbackExpiresAt,
             error_code: null,
             error_message: null
         });
@@ -889,11 +975,11 @@ async function initiatePortalPayment(actor, payload, options) {
             }
         };
     } catch (error) {
-        if (error?.code === "AZAMPAY_TIMEOUT") {
+        if (error?.code === "SNIPPE_TIMEOUT") {
             const pendingOrder = await updatePaymentOrder(orderId, {
                 status: "pending",
-                error_code: "AZAMPAY_TIMEOUT",
-                error_message: "Azam Pay is taking longer than expected. The order will keep waiting for callback confirmation."
+                error_code: "SNIPPE_TIMEOUT",
+                error_message: "The payment gateway is taking longer than expected. The order will keep waiting for webhook confirmation."
             });
 
             await logAudit({
@@ -929,8 +1015,8 @@ async function initiatePortalPayment(actor, payload, options) {
         const failedOrder = await updatePaymentOrder(orderId, {
             status: "failed",
             failed_at: new Date().toISOString(),
-            error_code: error?.code || "AZAMPAY_CHECKOUT_FAILED",
-            error_message: error?.message || "Unable to initiate Azam Pay checkout."
+            error_code: error?.code || "SNIPPE_PAYMENT_FAILED",
+            error_message: error?.message || "Unable to initiate the mobile money payment."
         });
 
         await logAudit({
@@ -1007,8 +1093,8 @@ async function initiateLoanRepaymentPayment(actor, payload) {
     }
 
     const orderId = crypto.randomUUID();
-    const externalId = buildExternalId(orderId);
-    const expiresAt = new Date(Date.now() + (env.azamPayIntentTtlSeconds * 1000)).toISOString();
+    const externalId = buildExternalId(orderId, "snippe");
+    const fallbackExpiresAt = new Date(Date.now() + (env.snippeIntentTtlSeconds * 1000)).toISOString();
     const description = payload.description || `Member portal loan repayment for ${loan.loan_number}`;
 
     await createPaymentOrder({
@@ -1018,16 +1104,16 @@ async function initiateLoanRepaymentPayment(actor, payload) {
         account_id: null,
         loan_id: loan.id,
         created_by_user_id: actor.user.id,
-        gateway: "azampay",
+        gateway: "snippe",
         purpose: "loan_repayment",
         provider: payload.provider,
         msisdn: normalizedPhone,
         amount,
-        currency: env.azamPayCurrency,
+        currency: env.snippeCurrency,
         status: "created",
         external_id: externalId,
         description,
-        expires_at: expiresAt,
+        expires_at: fallbackExpiresAt,
         metadata: {
             source: "member_portal",
             member_name: member.full_name,
@@ -1041,18 +1127,26 @@ async function initiateLoanRepaymentPayment(actor, payload) {
     });
 
     try {
-        const checkout = await createCheckout({
+        const checkout = await createPaymentIntent({
             amount,
-            currency: env.azamPayCurrency,
+            currency: env.snippeCurrency,
             externalId,
-            provider: payload.provider,
             accountNumber: normalizedPhone,
-            additionalProperties: {
-                source: env.azamPaySourceLabel,
-                property1: tenantId,
-                property2: orderId,
-                property3: member.id
-            }
+            customer: {
+                name: member.full_name,
+                email: actor.user?.email || ""
+            },
+            metadata: {
+                source: env.snippeSourceLabel,
+                tenant_id: tenantId,
+                order_id: orderId,
+                payment_order_id: orderId,
+                member_id: member.id,
+                loan_id: loan.id,
+                purpose: "loan_repayment",
+                provider: payload.provider
+            },
+            idempotencyKey: orderId
         });
 
         const pendingOrder = await updatePaymentOrder(orderId, {
@@ -1060,6 +1154,7 @@ async function initiateLoanRepaymentPayment(actor, payload) {
             provider_ref: checkout.providerRef,
             gateway_request: checkout.requestPayload,
             gateway_response: checkout.responsePayload,
+            expires_at: checkout.expiresAt || fallbackExpiresAt,
             error_code: null,
             error_message: null
         });
@@ -1090,11 +1185,11 @@ async function initiateLoanRepaymentPayment(actor, payload) {
             }
         };
     } catch (error) {
-        if (error?.code === "AZAMPAY_TIMEOUT") {
+        if (error?.code === "SNIPPE_TIMEOUT") {
             const pendingOrder = await updatePaymentOrder(orderId, {
                 status: "pending",
-                error_code: "AZAMPAY_TIMEOUT",
-                error_message: "Azam Pay is taking longer than expected. The order will keep waiting for callback confirmation."
+                error_code: "SNIPPE_TIMEOUT",
+                error_message: "The payment gateway is taking longer than expected. The order will keep waiting for webhook confirmation."
             });
 
             await logAudit({
@@ -1130,8 +1225,8 @@ async function initiateLoanRepaymentPayment(actor, payload) {
         const failedOrder = await updatePaymentOrder(orderId, {
             status: "failed",
             failed_at: new Date().toISOString(),
-            error_code: error?.code || "AZAMPAY_CHECKOUT_FAILED",
-            error_message: error?.message || "Unable to initiate Azam Pay checkout."
+            error_code: error?.code || "SNIPPE_PAYMENT_FAILED",
+            error_message: error?.message || "Unable to initiate the mobile money payment."
         });
 
         await logAudit({
@@ -1161,7 +1256,7 @@ async function initiateLoanRepaymentPayment(actor, payload) {
 }
 
 async function getPaymentOrderStatus(actor, orderId) {
-    const order = await getPaymentOrderById(orderId);
+    const order = await expirePendingOrderIfTimedOut(await getPaymentOrderById(orderId), "status_poll");
     if (!order) {
         throw new AppError(404, "PAYMENT_ORDER_NOT_FOUND", "Payment order was not found.");
     }
@@ -1185,7 +1280,8 @@ async function handleAzamCallback({ body = {}, query = {}, headers = {} }) {
             headers,
             body: payload
         },
-        source: "azam_callback"
+        source: "azam_callback",
+        gateway: "azampay"
     });
 
     if (!order) {
@@ -1289,13 +1385,204 @@ async function handleAzamCallback({ body = {}, query = {}, headers = {} }) {
     };
 }
 
+async function handleSnippeWebhook({ body = {}, headers = {}, rawBody = "" }) {
+    const signatureHeader = headers["x-webhook-signature"] || headers["X-Webhook-Signature"];
+    const timestampHeader = headers["x-webhook-timestamp"] || headers["X-Webhook-Timestamp"] || "";
+    const debugIdentifiers = extractWebhookIdentifiers(body || {}, headers || {});
+    const { order: debugOrder } = await resolvePaymentOrderFromIdentifiers(debugIdentifiers);
+
+    try {
+        verifyWebhookSignature(rawBody, signatureHeader, timestampHeader);
+    } catch (error) {
+        if (!(env.snippeWebhookDebugAllowInvalid && error?.code === "SNIPPE_SIGNATURE_INVALID")) {
+            throw error;
+        }
+
+        const diagnostics = computeWebhookSignatureDiagnostics(rawBody, signatureHeader, timestampHeader);
+
+        console.warn("[snippe] webhook signature mismatch", {
+            event: debugIdentifiers.eventType || null,
+            status: debugIdentifiers.status || null,
+            providerRef: debugIdentifiers.providerRef || null,
+            externalId: debugIdentifiers.externalId || null,
+            paymentOrderId: debugIdentifiers.internalOrderId || null,
+            matches: diagnostics.matches,
+            provided: diagnostics.provided,
+            expected: diagnostics.expected,
+            rawBodyLength: String(rawBody || "").length,
+            rawBodyPreview: String(rawBody || "").slice(0, 400)
+        });
+
+        await logPaymentOrderCallback({
+            paymentOrderId: debugOrder?.id || null,
+            externalId: debugIdentifiers.externalId,
+            providerRef: debugIdentifiers.providerRef,
+            payload: {
+                headers,
+                body,
+                signature_debug: {
+                    provided: diagnostics.provided,
+                    matches: diagnostics.matches,
+                    expected: diagnostics.expected,
+                    raw_body_length: String(rawBody || "").length
+                }
+            },
+            source: "snippe_webhook_debug_invalid_signature",
+            gateway: "snippe"
+        });
+
+        return {
+            httpStatus: 202,
+            data: {
+                success: false,
+                ignored: true,
+                code: "SNIPPE_SIGNATURE_INVALID_DEBUG",
+                diagnostics: {
+                    event_type: debugIdentifiers.eventType || null,
+                    status: debugIdentifiers.status || null,
+                    matches: diagnostics.matches,
+                    provided_signature: diagnostics.provided,
+                    expected_signature_raw_body: diagnostics.expected.raw_body_hex,
+                    expected_signature_trimmed_body: diagnostics.expected.trimmed_body_hex,
+                    expected_signature_timestamp_dot_raw: diagnostics.expected.timestamp_dot_raw_hex || null,
+                    expected_signature_timestamp_dot_trimmed: diagnostics.expected.timestamp_dot_trimmed_hex || null
+                }
+            }
+        };
+    }
+
+    const identifiers = extractWebhookIdentifiers(body || {}, headers || {});
+    const { order } = await resolvePaymentOrderFromIdentifiers(identifiers);
+
+    await logPaymentOrderCallback({
+        paymentOrderId: order?.id || null,
+        externalId: identifiers.externalId,
+        providerRef: identifiers.providerRef,
+        payload: {
+            headers,
+            body
+        },
+        source: "snippe_webhook",
+        gateway: "snippe"
+    });
+
+    if (!order) {
+        return {
+            httpStatus: 404,
+            data: {
+                success: false,
+                code: "PAYMENT_ORDER_NOT_FOUND",
+                identifiers
+            }
+        };
+    }
+
+    const normalized = normalizeWebhookStatus(body || {}, headers || {});
+    const nowIso = new Date().toISOString();
+    const patch = {
+        callback_received_at: nowIso,
+        latest_callback_payload: body,
+        provider_ref: normalized.providerRef || order.provider_ref,
+        provider: normalized.provider || order.provider,
+        error_code: null,
+        error_message: null
+    };
+
+    if (order.status === "posted") {
+        patch.status = "posted";
+    } else if (normalized.status === "paid") {
+        patch.status = "paid";
+        patch.paid_at = order.paid_at || normalized.paidAt || nowIso;
+    } else if (order.status === "paid") {
+        patch.status = "paid";
+        patch.paid_at = order.paid_at || nowIso;
+    } else if (normalized.status === "expired") {
+        patch.status = "expired";
+        patch.expired_at = order.expired_at || nowIso;
+        patch.error_code = "SNIPPE_PAYMENT_EXPIRED";
+        patch.error_message = normalized.message || normalized.statusRaw || "The mobile money session expired.";
+    } else if (normalized.status === "failed") {
+        patch.status = "failed";
+        patch.failed_at = order.failed_at || nowIso;
+        patch.error_code = "SNIPPE_PAYMENT_FAILED";
+        patch.error_message = normalized.message || normalized.statusRaw || "The mobile money gateway reported payment failure.";
+    } else {
+        patch.status = "pending";
+    }
+
+    let updatedOrder = await updatePaymentOrder(order.id, patch);
+
+    if (updatedOrder.status === "paid" && !updatedOrder.posted_at) {
+        try {
+            updatedOrder = await postContributionPaymentOrder(updatedOrder, "snippe_webhook");
+        } catch (error) {
+            console.error("[member-payments] paid order posting failed", {
+                orderId: updatedOrder.id,
+                error: error?.message || error
+            });
+        }
+    }
+
+    await logAudit({
+        tenantId: updatedOrder.tenant_id,
+        actorUserId: updatedOrder.created_by_user_id,
+        table: "payment_orders",
+        entityType: "payment_order",
+        entityId: updatedOrder.id,
+        action: `MEMBER_PAYMENT_${updatedOrder.status.toUpperCase()}`,
+        afterData: {
+            gateway: updatedOrder.gateway,
+            status: updatedOrder.status,
+            external_id: updatedOrder.external_id,
+            provider_ref: updatedOrder.provider_ref || null,
+            paid_at: updatedOrder.paid_at || null,
+            failed_at: updatedOrder.failed_at || null,
+            expired_at: updatedOrder.expired_at || null
+        }
+    });
+
+    if (updatedOrder.status === "failed") {
+        await notifyMemberPaymentOrderEvent(updatedOrder, "member_payment_failed").catch((error) => {
+            console.warn("[member-payments] webhook failure notification failed", {
+                orderId: updatedOrder.id,
+                error: error?.message || error
+            });
+        });
+    } else if (updatedOrder.status === "expired") {
+        await notifyMemberPaymentOrderEvent(updatedOrder, "member_payment_expired").catch((error) => {
+            console.warn("[member-payments] webhook expiry notification failed", {
+                orderId: updatedOrder.id,
+                error: error?.message || error
+            });
+        });
+    }
+
+    return {
+        httpStatus: 200,
+        data: {
+            success: true,
+            order: buildOrderView(updatedOrder),
+            normalized_status: normalized.status,
+            provider_ref: updatedOrder.provider_ref || null,
+            external_id: updatedOrder.external_id
+        }
+    };
+}
+
 module.exports = {
     listPaymentOrders,
     getPaymentOrderStatus,
     handleAzamCallback,
+    handleSnippeWebhook,
     initiateContributionPayment,
     initiateSavingsPayment,
     initiateMembershipFeePayment,
     initiateLoanRepaymentPayment,
-    reconcilePaymentOrder
+    reconcilePaymentOrder,
+    getPaymentOrderById,
+    updatePaymentOrder,
+    resolvePaymentOrderFromIdentifiers,
+    logPaymentOrderCallback,
+    postContributionPaymentOrder,
+    notifyMemberPaymentOrderEvent
 };

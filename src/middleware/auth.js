@@ -16,6 +16,11 @@ const TWO_FACTOR_SETUP_ALLOWED_PATHS = [
     "/users/me/password-changed"
 ];
 
+function normalizeRequestPath(path) {
+    const normalized = `${path || ""}`.replace(/\/+$/, "");
+    return normalized || "/";
+}
+
 function isTwoFactorRequiredForProfile(profile) {
     return STAFF_ROLES.includes(profile?.role) || profile?.role === ROLES.PLATFORM_ADMIN || profile?.role === ROLES.PLATFORM_OWNER;
 }
@@ -25,8 +30,20 @@ function isTwoFactorConfigured(profile) {
 }
 
 function isTwoFactorSetupAllowed(req) {
-    const path = `${req.baseUrl || ""}${req.path || ""}`;
-    return TWO_FACTOR_SETUP_ALLOWED_PATHS.some((candidate) => path.endsWith(candidate));
+    const path = normalizeRequestPath(`${req.baseUrl || ""}${req.path || ""}`);
+
+    if (TWO_FACTOR_SETUP_ALLOWED_PATHS.some((candidate) => path.endsWith(candidate))) {
+        return true;
+    }
+
+    if (req.method === "GET" && (
+        path.endsWith("/notifications")
+        || path.endsWith("/notifications/preferences")
+    )) {
+        return true;
+    }
+
+    return false;
 }
 
 function clearAuthContext(req) {

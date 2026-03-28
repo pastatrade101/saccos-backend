@@ -6,6 +6,8 @@ const morgan = require("morgan");
 const env = require("./config/env");
 const routes = require("./routes");
 const publicSignupRoutes = require("./modules/public-signups/public-signups.routes");
+const snippeWebhookRoutes = require("./modules/payments/snippeWebhook.routes");
+const snippeWebhookController = require("./modules/payments/snippeWebhook.controller");
 const errorHandler = require("./middleware/error-handler");
 const notFoundHandler = require("./middleware/not-found");
 const requestContext = require("./middleware/request-context");
@@ -15,6 +17,15 @@ const { getSchemaCapabilityStatus } = require("./services/schema-capabilities.se
 const { isOriginAllowed } = require("./utils/cors");
 
 const app = express();
+const captureRawBody = (req, res, buffer) => {
+    if (buffer?.length) {
+        req.rawBody = buffer.toString("utf8");
+    }
+};
+const snippeWebhookRawParser = express.raw({
+    type: ["application/json", "application/*+json"],
+    limit: env.bodyLimit
+});
 
 app.disable("x-powered-by");
 app.set("trust proxy", 1);
@@ -37,8 +48,10 @@ app.use(
         credentials: true
     })
 );
-app.use(express.json({ limit: env.bodyLimit }));
-app.use(express.urlencoded({ extended: false, limit: env.bodyLimit }));
+app.post("/webhooks/snippe", snippeWebhookRawParser, snippeWebhookController.handleSnippeWebhook);
+app.post(`${env.apiPrefix}/member-payments/snippe/webhook`, snippeWebhookRawParser, snippeWebhookController.handleSnippeWebhook);
+app.use(express.json({ limit: env.bodyLimit, verify: captureRawBody }));
+app.use(express.urlencoded({ extended: false, limit: env.bodyLimit, verify: captureRawBody }));
 app.use(
     morgan(env.nodeEnv === "production" ? "combined" : "dev", {
         skip: (req) => req.path === "/health" || req.path === `${env.apiPrefix}/health`
@@ -78,6 +91,7 @@ app.get("/metrics", (req, res) => {
     return res.send(getPrometheusMetrics());
 });
 
+app.use("/webhooks", snippeWebhookRoutes);
 app.use(`${env.apiPrefix}/public`, publicSignupRoutes);
 app.use(env.apiPrefix, routes);
 app.use(notFoundHandler);

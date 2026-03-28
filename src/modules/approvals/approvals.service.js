@@ -53,6 +53,14 @@ const DEFAULT_OPERATION_POLICIES = {
         allowed_maker_roles: [ROLES.TELLER, ROLES.LOAN_OFFICER, ROLES.BRANCH_MANAGER, ROLES.SUPER_ADMIN],
         allowed_checker_roles: [ROLES.BRANCH_MANAGER, ROLES.SUPER_ADMIN],
         sla_minutes: 120
+    },
+    "treasury.order_execute": {
+        enabled: true,
+        threshold_amount: 0,
+        required_checker_count: 1,
+        allowed_maker_roles: [ROLES.BRANCH_MANAGER, ROLES.SUPER_ADMIN],
+        allowed_checker_roles: [ROLES.SUPER_ADMIN],
+        sla_minutes: 240
     }
 };
 

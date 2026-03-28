@@ -13,6 +13,7 @@ const cashControlRoutes = require("../modules/cash-control/cash-control.routes")
 const dividendRoutes = require("../modules/dividends/dividends.routes");
 const productRoutes = require("../modules/products/products.routes");
 const loanCapacityRoutes = require("../modules/loan-capacity/loan-capacity.routes");
+const treasuryRoutes = require("../modules/treasury/treasury.routes");
 const auditorRoutes = require("../modules/auditor/auditor.routes");
 const reportRoutes = require("../modules/reports/reports.routes");
 const observabilityRoutes = require("../modules/observability/observability.routes");
@@ -46,6 +47,7 @@ router.use("/imports", importRoutes);
 router.use("/products", productRoutes);
 router.use("/loans", loanCapacityRoutes);
 router.use("/v1/loans", loanCapacityRoutes);
+router.use("/treasury", treasuryRoutes);
 router.use("/cash-control", cashControlRoutes);
 router.use("/dividends", dividendRoutes);
 router.use("/auditor", auditorRoutes);

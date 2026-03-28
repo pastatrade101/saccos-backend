@@ -50,6 +50,7 @@ const inviteUserSchema = z.object({
     role: z.enum([
         "super_admin",
         "branch_manager",
+        "treasury_officer",
         "loan_officer",
         "teller",
         "auditor",

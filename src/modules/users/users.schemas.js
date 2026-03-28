@@ -7,7 +7,7 @@ const createUserSchema = z.object({
     email: z.string().email(),
     full_name: z.string().min(3).max(120),
     phone: z.string().min(7).max(30).optional().nullable(),
-    role: z.enum(["super_admin", "branch_manager", "loan_officer", "teller", "auditor"]),
+    role: z.enum(["super_admin", "branch_manager", "treasury_officer", "loan_officer", "teller", "auditor"]),
     branch_ids: z.array(z.string().uuid()).default([]),
     send_invite: z.boolean().default(true),
     password: z.string().min(8).max(128).optional().nullable()
@@ -40,7 +40,7 @@ const createUserSchema = z.object({
 const updateUserSchema = z.object({
     full_name: z.string().min(3).max(120).optional(),
     phone: z.string().min(7).max(30).nullable().optional(),
-    role: z.enum(["super_admin", "branch_manager", "loan_officer", "teller", "auditor"]).optional(),
+    role: z.enum(["super_admin", "branch_manager", "treasury_officer", "loan_officer", "teller", "auditor"]).optional(),
     is_active: z.boolean().optional(),
     branch_ids: z.array(z.string().uuid()).optional()
 });

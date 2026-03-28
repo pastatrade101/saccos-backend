@@ -124,6 +124,22 @@ const envSchema = z.object({
     REPAYMENT_REMINDER_DUE_SOON_DAYS: z.coerce.number().int().positive().default(1),
     CREDIT_RISK_GUARANTOR_MAX_COMMITMENT_RATIO: z.coerce.number().positive().max(1).default(0.8),
     CREDIT_RISK_GUARANTOR_MIN_AVAILABLE_AMOUNT: z.coerce.number().nonnegative().default(0),
+    SNIPPE_ENABLED: z
+        .string()
+        .optional()
+        .transform((value) => parseBooleanEnv(value, false)),
+    SNIPPE_API_KEY: z.string().optional(),
+    SNIPPE_BASE_URL: z.string().url().default("https://api.snippe.sh"),
+    SNIPPE_CURRENCY: z.string().default("TZS"),
+    SNIPPE_TIMEOUT_MS: z.coerce.number().int().positive().default(60000),
+    SNIPPE_INTENT_TTL_SECONDS: z.coerce.number().int().positive().default(14400),
+    SNIPPE_WEBHOOK_SECRET: z.string().optional(),
+    SNIPPE_WEBHOOK_URL: z.string().url().optional(),
+    SNIPPE_SOURCE_LABEL: z.string().default("saccos_member_portal"),
+    SNIPPE_WEBHOOK_DEBUG_ALLOW_INVALID: z
+        .string()
+        .optional()
+        .transform((value) => parseBooleanEnv(value, false)),
     AZAMPAY_ENABLED: z
         .string()
         .optional()
@@ -235,6 +251,16 @@ module.exports = {
     repaymentReminderDueSoonDays: env.REPAYMENT_REMINDER_DUE_SOON_DAYS,
     creditRiskGuarantorMaxCommitmentRatio: env.CREDIT_RISK_GUARANTOR_MAX_COMMITMENT_RATIO,
     creditRiskGuarantorMinAvailableAmount: env.CREDIT_RISK_GUARANTOR_MIN_AVAILABLE_AMOUNT,
+    snippeEnabled: env.SNIPPE_ENABLED,
+    snippeApiKey: env.SNIPPE_API_KEY || "",
+    snippeBaseUrl: env.SNIPPE_BASE_URL,
+    snippeCurrency: env.SNIPPE_CURRENCY,
+    snippeTimeoutMs: env.SNIPPE_TIMEOUT_MS,
+    snippeIntentTtlSeconds: env.SNIPPE_INTENT_TTL_SECONDS,
+    snippeWebhookSecret: env.SNIPPE_WEBHOOK_SECRET || "",
+    snippeWebhookUrl: env.SNIPPE_WEBHOOK_URL || "",
+    snippeSourceLabel: env.SNIPPE_SOURCE_LABEL,
+    snippeWebhookDebugAllowInvalid: env.SNIPPE_WEBHOOK_DEBUG_ALLOW_INVALID,
     azamPayEnabled: env.AZAMPAY_ENABLED,
     azamPayAppName: env.AZAMPAY_APP_NAME || "",
     azamPayClientId: env.AZAMPAY_CLIENT_ID || "",

@@ -13,6 +13,7 @@ router.use(auth);
 router.use(authorize([
     ROLES.SUPER_ADMIN,
     ROLES.BRANCH_MANAGER,
+    ROLES.TREASURY_OFFICER,
     ROLES.LOAN_OFFICER,
     ROLES.TELLER,
     ROLES.AUDITOR,

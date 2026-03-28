@@ -225,6 +225,60 @@ const NOTIFICATION_PREFERENCE_CATALOG = [
         default_in_app_enabled: true,
         default_sms_enabled: false,
         default_toast_enabled: true
+    },
+    {
+        event_type: "treasury_policy_updated",
+        label: "Treasury policy updated",
+        description: "Notify treasury governance users when treasury guardrails are changed.",
+        roles: [ROLES.TREASURY_OFFICER, ROLES.BRANCH_MANAGER, ROLES.SUPER_ADMIN],
+        default_in_app_enabled: true,
+        default_sms_enabled: false,
+        default_toast_enabled: true
+    },
+    {
+        event_type: "treasury_order_created",
+        label: "Treasury order created",
+        description: "Notify treasury governance users when a new treasury order enters review.",
+        roles: [ROLES.TREASURY_OFFICER, ROLES.BRANCH_MANAGER, ROLES.SUPER_ADMIN],
+        default_in_app_enabled: true,
+        default_sms_enabled: false,
+        default_toast_enabled: false
+    },
+    {
+        event_type: "treasury_order_approved",
+        label: "Treasury order approved",
+        description: "Notify treasury governance users when a treasury order is approved.",
+        roles: [ROLES.TREASURY_OFFICER, ROLES.BRANCH_MANAGER, ROLES.SUPER_ADMIN],
+        default_in_app_enabled: true,
+        default_sms_enabled: false,
+        default_toast_enabled: true
+    },
+    {
+        event_type: "treasury_order_rejected",
+        label: "Treasury order rejected",
+        description: "Notify treasury governance users when a treasury order is rejected.",
+        roles: [ROLES.TREASURY_OFFICER, ROLES.BRANCH_MANAGER, ROLES.SUPER_ADMIN],
+        default_in_app_enabled: true,
+        default_sms_enabled: false,
+        default_toast_enabled: true
+    },
+    {
+        event_type: "treasury_order_executed",
+        label: "Treasury order executed",
+        description: "Notify treasury governance users when a treasury order is executed and posted.",
+        roles: [ROLES.TREASURY_OFFICER, ROLES.BRANCH_MANAGER, ROLES.SUPER_ADMIN],
+        default_in_app_enabled: true,
+        default_sms_enabled: false,
+        default_toast_enabled: true
+    },
+    {
+        event_type: "treasury_policy_violation",
+        label: "Treasury policy violation",
+        description: "Notify treasury governance users when an order breaches treasury guardrails or needs escalation.",
+        roles: [ROLES.TREASURY_OFFICER, ROLES.BRANCH_MANAGER, ROLES.SUPER_ADMIN],
+        default_in_app_enabled: true,
+        default_sms_enabled: false,
+        default_toast_enabled: true
     }
 ];
 

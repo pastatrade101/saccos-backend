@@ -8,7 +8,8 @@ const twoFactorFields = {
 
 const operationKeySchema = z.enum([
     "finance.withdraw",
-    "finance.loan_disburse"
+    "finance.loan_disburse",
+    "treasury.order_execute"
 ]);
 
 const approvalRequestStatusSchema = z.enum([

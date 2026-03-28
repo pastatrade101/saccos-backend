@@ -22,9 +22,16 @@ const TABLE_CAPABILITIES = [
     { name: "audit_cases", migration: "079_audit_cases.sql" },
     { name: "audit_case_comments", migration: "080_audit_case_workflow.sql" },
     { name: "audit_case_evidence", migration: "080_audit_case_workflow.sql" },
+    { name: "treasury_policies", migration: "081_treasury_foundation.sql" },
+    { name: "treasury_assets", migration: "081_treasury_foundation.sql" },
+    { name: "treasury_orders", migration: "081_treasury_foundation.sql" },
+    { name: "treasury_transactions", migration: "081_treasury_foundation.sql" },
+    { name: "treasury_income", migration: "081_treasury_foundation.sql" },
+    { name: "treasury_portfolio_positions", migration: "081_treasury_foundation.sql" },
     { name: "sms_trigger_settings", migration: "046_sms_trigger_settings.sql" },
     { name: "payment_orders", migration: "060_phase5_member_payment_orders.sql" },
-    { name: "payment_order_callbacks", migration: "060_phase5_member_payment_orders.sql" }
+    { name: "payment_order_callbacks", migration: "060_phase5_member_payment_orders.sql" },
+    { name: "webhook_events", migration: "085_snippe_webhook_events.sql" }
 ];
 
 const COLUMN_CAPABILITIES = [

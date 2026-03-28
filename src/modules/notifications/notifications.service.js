@@ -255,6 +255,54 @@ const EVENT_CATALOG = {
         actionRoute: "/auditor/exceptions",
         entityType: "audit_case",
         entityIdKey: "audit_case_id"
+    },
+    treasury_policy_updated: {
+        title: "Treasury policy updated",
+        severity: "warning",
+        actionLabel: "Review treasury",
+        actionRoute: "/treasury/policy-settings",
+        entityType: "treasury_policy",
+        entityIdKey: "treasury_policy_id"
+    },
+    treasury_order_created: {
+        title: "Treasury order created",
+        severity: "info",
+        actionLabel: "Open treasury",
+        actionRoute: "/treasury",
+        entityType: "treasury_order",
+        entityIdKey: "treasury_order_id"
+    },
+    treasury_order_approved: {
+        title: "Treasury order approved",
+        severity: "success",
+        actionLabel: "Open treasury",
+        actionRoute: "/treasury",
+        entityType: "treasury_order",
+        entityIdKey: "treasury_order_id"
+    },
+    treasury_order_rejected: {
+        title: "Treasury order rejected",
+        severity: "warning",
+        actionLabel: "Open treasury",
+        actionRoute: "/treasury",
+        entityType: "treasury_order",
+        entityIdKey: "treasury_order_id"
+    },
+    treasury_order_executed: {
+        title: "Treasury order executed",
+        severity: "success",
+        actionLabel: "Open treasury",
+        actionRoute: "/treasury",
+        entityType: "treasury_order",
+        entityIdKey: "treasury_order_id"
+    },
+    treasury_policy_violation: {
+        title: "Treasury policy violation",
+        severity: "warning",
+        actionLabel: "Open treasury",
+        actionRoute: "/treasury",
+        entityType: "treasury_order",
+        entityIdKey: "treasury_order_id"
     }
 };
 

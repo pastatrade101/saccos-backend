@@ -24,6 +24,7 @@ router.post(
     express.json({ limit: "256kb" }),
     controller.handleAzamCallback
 );
+router.post("/snippe/webhook", controller.handleSnippeWebhook);
 
 router.use(auth);
 

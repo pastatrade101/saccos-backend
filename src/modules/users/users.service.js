@@ -12,11 +12,11 @@ function assertUserProvisioningPermission(actor, targetRole) {
     }
 
     if (actor.role === ROLES.SUPER_ADMIN) {
-        if (targetRole !== ROLES.BRANCH_MANAGER) {
+        if (![ROLES.BRANCH_MANAGER, ROLES.TREASURY_OFFICER].includes(targetRole)) {
             throw new AppError(
                 403,
                 "USER_ROLE_NOT_ALLOWED",
-                "Super admin can only provision branch managers."
+                "Super admin can only provision branch managers and treasury officers."
             );
         }
 
@@ -24,11 +24,11 @@ function assertUserProvisioningPermission(actor, targetRole) {
     }
 
     if (actor.role === ROLES.BRANCH_MANAGER) {
-        if (![ROLES.LOAN_OFFICER, ROLES.TELLER, ROLES.AUDITOR].includes(targetRole)) {
+        if (![ROLES.TREASURY_OFFICER, ROLES.LOAN_OFFICER, ROLES.TELLER, ROLES.AUDITOR].includes(targetRole)) {
             throw new AppError(
                 403,
                 "USER_ROLE_NOT_ALLOWED",
-                "Branch manager can only provision loan officers, tellers, and auditors."
+                "Branch manager can only provision treasury officers, loan officers, tellers, and auditors."
             );
         }
 
@@ -154,6 +154,7 @@ async function listUsers(actor, query = {}) {
     const roleCounts = {
         super_admin: enrichedUsers.filter((user) => user.role === ROLES.SUPER_ADMIN).length,
         branch_manager: enrichedUsers.filter((user) => user.role === ROLES.BRANCH_MANAGER).length,
+        treasury_officer: enrichedUsers.filter((user) => user.role === ROLES.TREASURY_OFFICER).length,
         loan_officer: enrichedUsers.filter((user) => user.role === ROLES.LOAN_OFFICER).length,
         teller: enrichedUsers.filter((user) => user.role === ROLES.TELLER).length,
         auditor: enrichedUsers.filter((user) => user.role === ROLES.AUDITOR).length
@@ -164,7 +165,7 @@ async function listUsers(actor, query = {}) {
         active_access: enrichedUsers.filter((user) => user.is_active).length,
         administrators: roleCounts.super_admin,
         managers: roleCounts.branch_manager,
-        operators: roleCounts.loan_officer + roleCounts.teller,
+        operators: roleCounts.treasury_officer + roleCounts.loan_officer + roleCounts.teller,
         inactive_users: enrichedUsers.filter((user) => !user.is_active).length,
         pending_invites: enrichedUsers.filter(
             (user) => Boolean(user.invited_at) && !user.last_login_at && !user.email_confirmed_at
