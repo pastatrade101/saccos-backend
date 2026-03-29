@@ -696,10 +696,12 @@ async function loanDisburse(actor, payload, options = {}) {
     assertBranchAccess({ auth: actor }, effectivePayload.branch_id);
     await assertPostingRuleConfigured(tenantId, "loan_disburse");
     await assertPostingRuleConfigured(tenantId, "loan_fee");
-    const session = await ensureOpenTellerSession(actor, {
-        tenantId,
-        branchId: effectivePayload.branch_id
-    });
+    const session = options.skipCashControl
+        ? null
+        : await ensureOpenTellerSession(actor, {
+            tenantId,
+            branchId: effectivePayload.branch_id
+        });
 
     let approvalGate = null;
     try {
@@ -744,25 +746,27 @@ async function loanDisburse(actor, payload, options = {}) {
             p_description: effectivePayload.description || null
         });
 
-        await finalizeReceiptsForTransaction(actor, {
-            tenantId,
-            branchId: effectivePayload.branch_id,
-            memberId: effectivePayload.member_id,
-            journalId: result.journal_id,
-            transactionType: "loan_disburse",
-            amount: effectivePayload.principal_amount,
-            receiptIds: effectivePayload.receipt_ids
-        });
-        await recordSessionTransaction({
-            session,
-            tenantId,
-            branchId: effectivePayload.branch_id,
-            journalId: result.journal_id,
-            transactionType: "loan_disburse",
-            direction: "out",
-            amount: effectivePayload.principal_amount,
-            userId: actor.user.id
-        });
+        if (!options.skipCashControl) {
+            await finalizeReceiptsForTransaction(actor, {
+                tenantId,
+                branchId: effectivePayload.branch_id,
+                memberId: effectivePayload.member_id,
+                journalId: result.journal_id,
+                transactionType: "loan_disburse",
+                amount: effectivePayload.principal_amount,
+                receiptIds: effectivePayload.receipt_ids
+            });
+            await recordSessionTransaction({
+                session,
+                tenantId,
+                branchId: effectivePayload.branch_id,
+                journalId: result.journal_id,
+                transactionType: "loan_disburse",
+                direction: "out",
+                amount: effectivePayload.principal_amount,
+                userId: actor.user.id
+            });
+        }
 
         await logAudit({
             tenantId,

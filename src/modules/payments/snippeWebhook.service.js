@@ -9,6 +9,7 @@ const {
     postContributionPaymentOrder,
     notifyMemberPaymentOrderEvent
 } = require("../member-payments/member-payments.service");
+const { processSnippeLoanDisbursementPayoutEvent } = require("../loan-applications/loan-applications.service");
 const { verifySnippeRequestSignature, getHeaderValue } = require("./signatureVerifier");
 
 /**
@@ -238,15 +239,17 @@ function validateAmountMatchesOrder(order, event) {
 async function markPaymentOrderFailed(order, event, ip, userAgent) {
     const nowIso = new Date().toISOString();
     const shouldIgnoreFailure = order.status === "posted" || order.status === "paid";
+    const shouldExpire = event.normalized.status === "expired";
     const patch = {
         callback_received_at: nowIso,
         latest_callback_payload: event.rawBody,
         provider_ref: event.providerRef || order.provider_ref,
         provider: event.normalized.provider || order.provider,
-        status: shouldIgnoreFailure ? order.status : "failed",
-        failed_at: shouldIgnoreFailure ? order.failed_at : order.failed_at || nowIso,
-        error_code: shouldIgnoreFailure ? order.error_code : "SNIPPE_PAYMENT_FAILED",
-        error_message: shouldIgnoreFailure ? order.error_message : (event.failureReason || event.status || "The mobile money gateway reported payment failure.")
+        status: shouldIgnoreFailure ? order.status : (shouldExpire ? "expired" : "failed"),
+        failed_at: shouldIgnoreFailure || shouldExpire ? order.failed_at : order.failed_at || nowIso,
+        expired_at: shouldIgnoreFailure || !shouldExpire ? order.expired_at : order.expired_at || nowIso,
+        error_code: shouldIgnoreFailure ? order.error_code : (shouldExpire ? "SNIPPE_PAYMENT_EXPIRED" : "SNIPPE_PAYMENT_FAILED"),
+        error_message: shouldIgnoreFailure ? order.error_message : (event.failureReason || event.status || (shouldExpire ? "The mobile money session expired." : "The mobile money gateway reported payment failure."))
     };
 
     const updatedOrder = await updatePaymentOrder(order.id, patch);
@@ -273,6 +276,14 @@ async function markPaymentOrderFailed(order, event, ip, userAgent) {
     if (updatedOrder.status === "failed") {
         await notifyMemberPaymentOrderEvent(updatedOrder, "member_payment_failed").catch((error) => {
             logWebhook("warn", "member payment failure notification failed", {
+                orderId: updatedOrder.id,
+                eventId: event.eventId,
+                message: error?.message || error
+            });
+        });
+    } else if (updatedOrder.status === "expired") {
+        await notifyMemberPaymentOrderEvent(updatedOrder, "member_payment_expired").catch((error) => {
+            logWebhook("warn", "member payment expiry notification failed", {
                 orderId: updatedOrder.id,
                 eventId: event.eventId,
                 message: error?.message || error
@@ -421,46 +432,7 @@ async function processPaymentEvent(event, ip, userAgent) {
 }
 
 async function processPayoutEvent(event, ip, userAgent) {
-    const { order, identifiers } = await resolvePaymentOrderForEvent(event);
-    const action = event.eventType === "payout.completed" ? "SNIPPE_PAYOUT_COMPLETED" : "SNIPPE_PAYOUT_FAILED";
-
-    await recordWebhookAudit({
-        event,
-        order,
-        action: order ? action : `${action}_UNMATCHED`,
-        afterData: {
-            event_type: event.eventType,
-            order_id: order?.id || event.orderId,
-            reference: event.reference,
-            external_reference: event.externalReference,
-            provider_ref: event.providerRef,
-            status: event.status,
-            failure_reason: event.failureReason || null
-        },
-        ip,
-        userAgent
-    });
-
-    if (!order) {
-        logWebhook("warn", "received payout webhook without a matching internal payout record", {
-            eventId: event.eventId,
-            eventType: event.eventType,
-            orderId: event.orderId,
-            providerRef: event.providerRef
-        });
-    }
-
-    return {
-        httpStatus: 200,
-        data: {
-            success: true,
-            event_id: event.eventId,
-            event_type: event.eventType,
-            processed: Boolean(order),
-            code: order ? "PAYOUT_EVENT_RECORDED" : "PAYOUT_ORDER_NOT_FOUND",
-            identifiers
-        }
-    };
+    return processSnippeLoanDisbursementPayoutEvent(event, ip, userAgent);
 }
 
 async function dispatchWebhookEvent(event, ip, userAgent) {

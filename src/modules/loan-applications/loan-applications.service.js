@@ -3,8 +3,10 @@ const env = require("../../config/env");
 const { adminSupabase } = require("../../config/supabase");
 const { ROLES } = require("../../constants/roles");
 const { getSubscriptionStatus } = require("../../services/subscription.service");
+const { normalizePhone } = require("../../services/otp.service");
 const { assertBranchAccess, assertTenantAccess } = require("../../services/user-context.service");
 const { logAudit } = require("../../services/audit.service");
+const approvalService = require("../approvals/approvals.service");
 const {
     notifyLoanOfficerGuarantorDeclined,
     notifyMemberLoanApplicationApproved,
@@ -19,6 +21,7 @@ const financeService = require("../finance/finance.service");
 const creditRiskService = require("../credit-risk/credit-risk.service");
 const loanCapacityService = require("../loan-capacity/loan-capacity.service");
 const { ensureMemberAccounts } = require("../members/members.service");
+const { createPayoutIntent, getPayoutStatus } = require("../../services/snippe.service");
 const { assertTwoFactorStepUp } = require("../../services/two-factor.service");
 const AppError = require("../../utils/app-error");
 const LOAN_APPLICATIONS_COUNT_CACHE_TTL_MS = Math.max(0, Number(process.env.LOAN_APPLICATIONS_COUNT_CACHE_TTL_MS || 15000));
@@ -27,6 +30,7 @@ const loanApplicationsCountInFlight = new Map();
 const SUPPORTED_REPAYMENT_FREQUENCIES = ["daily", "weekly", "monthly"];
 const LOAN_PURPOSE_PATTERN = /^[A-Za-z0-9\s,.]+$/;
 const APPLICATION_REFERENCE_PATTERN = /^[A-Za-z0-9_-]+$/;
+const OPEN_MOBILE_DISBURSEMENT_STATUSES = new Set(["created", "pending", "completed"]);
 
 const LOAN_APPLICATION_LIST_COLUMNS = `
     id,
@@ -88,6 +92,87 @@ function isMissingColumnError(error, columnName) {
     return error?.code === "PGRST204"
         && typeof error?.message === "string"
         && error.message.includes(`'${columnName}'`);
+}
+
+function isMissingLoanDisbursementRelationError(error) {
+    const code = String(error?.code || "");
+    return code === "PGRST205" || code === "42P01" || code === "42703";
+}
+
+function wrapLoanDisbursementOrderError(statusCode, code, fallbackMessage, error) {
+    if (isMissingLoanDisbursementRelationError(error)) {
+        return new AppError(
+            503,
+            "LOAN_DISBURSEMENT_SCHEMA_MISSING",
+            "Loan mobile disbursement requires database migration 086_loan_mobile_disbursement_orders.sql.",
+            error
+        );
+    }
+
+    return new AppError(statusCode, code, fallbackMessage, error);
+}
+
+function buildLoanDisbursementExternalId(orderId) {
+    return `saccos_loan_disb_${orderId}`;
+}
+
+function normalizePayoutStatus(rawStatus) {
+    const normalized = String(rawStatus || "").trim().toLowerCase();
+
+    if (["completed", "success", "successful", "paid"].includes(normalized)) {
+        return "completed";
+    }
+
+    if (["failed", "rejected", "cancelled", "canceled", "declined"].includes(normalized)) {
+        return "failed";
+    }
+
+    if (["expired"].includes(normalized)) {
+        return "expired";
+    }
+
+    return "pending";
+}
+
+function buildLoanDisbursementOrderView(order) {
+    const metadata = order?.metadata && typeof order.metadata === "object" ? order.metadata : {};
+    const member = order?.members && typeof order.members === "object" ? order.members : null;
+
+    return {
+        id: order.id,
+        tenant_id: order.tenant_id,
+        branch_id: order.branch_id,
+        application_id: order.application_id,
+        member_id: order.member_id,
+        created_by_user_id: order.created_by_user_id,
+        approval_request_id: order.approval_request_id || null,
+        gateway: order.gateway,
+        channel: order.channel,
+        provider: order.provider || null,
+        msisdn: order.msisdn,
+        amount: Number(order.amount || 0),
+        currency: order.currency,
+        status: order.status,
+        external_id: order.external_id,
+        provider_ref: order.provider_ref || null,
+        reference: order.reference || null,
+        description: order.description || null,
+        member_name: member?.full_name || metadata.member_name || null,
+        member_no: member?.member_no || metadata.member_no || null,
+        callback_received_at: order.callback_received_at || null,
+        completed_at: order.completed_at || null,
+        posted_at: order.posted_at || null,
+        failed_at: order.failed_at || null,
+        expired_at: order.expired_at || null,
+        expires_at: order.expires_at || null,
+        loan_id: order.loan_id || null,
+        journal_id: order.journal_id || null,
+        error_code: order.error_code || null,
+        error_message: order.error_message || null,
+        latest_provider_status: metadata.latest_provider_status || null,
+        created_at: order.created_at,
+        updated_at: order.updated_at
+    };
 }
 
 function stripHtml(value) {
@@ -757,6 +842,240 @@ function attachGuarantorConsentReference(application) {
     };
 }
 
+async function createLoanDisbursementOrder(record) {
+    const { data, error } = await adminSupabase
+        .from("loan_disbursement_orders")
+        .insert(record)
+        .select("*")
+        .single();
+
+    if (error || !data) {
+        throw wrapLoanDisbursementOrderError(
+            500,
+            "LOAN_DISBURSEMENT_ORDER_CREATE_FAILED",
+            "Unable to create the mobile loan disbursement order.",
+            error
+        );
+    }
+
+    return data;
+}
+
+async function updateLoanDisbursementOrder(orderId, patch) {
+    const updatePayload = {
+        ...patch,
+        updated_at: new Date().toISOString()
+    };
+
+    const { data, error } = await adminSupabase
+        .from("loan_disbursement_orders")
+        .update(updatePayload)
+        .eq("id", orderId)
+        .select("*")
+        .single();
+
+    if (error || !data) {
+        throw wrapLoanDisbursementOrderError(
+            500,
+            "LOAN_DISBURSEMENT_ORDER_UPDATE_FAILED",
+            "Unable to update the mobile loan disbursement order.",
+            error
+        );
+    }
+
+    return data;
+}
+
+async function getLoanDisbursementOrderById(orderId) {
+    const { data, error } = await adminSupabase
+        .from("loan_disbursement_orders")
+        .select("*, members(full_name, member_no, branch_id)")
+        .eq("id", orderId)
+        .maybeSingle();
+
+    if (error) {
+        throw wrapLoanDisbursementOrderError(
+            500,
+            "LOAN_DISBURSEMENT_ORDER_LOOKUP_FAILED",
+            "Unable to load the mobile loan disbursement order.",
+            error
+        );
+    }
+
+    return data || null;
+}
+
+async function logLoanDisbursementOrderCallback({
+    disbursementOrderId = null,
+    externalId = null,
+    providerRef = null,
+    payload = {},
+    source = "callback",
+    gateway = "snippe"
+}) {
+    const { error } = await adminSupabase
+        .from("loan_disbursement_order_callbacks")
+        .insert({
+            disbursement_order_id: disbursementOrderId,
+            gateway,
+            source,
+            external_id: externalId,
+            provider_ref: providerRef,
+            payload
+        });
+
+    if (error) {
+        console.warn("[loan-disbursements] callback log failed", { disbursementOrderId, externalId, providerRef });
+    }
+}
+
+async function resolveLoanDisbursementOrderFromIdentifiers(identifiers = {}) {
+    if (identifiers.internalOrderId) {
+        const direct = await getLoanDisbursementOrderById(String(identifiers.internalOrderId));
+        if (direct) {
+            return { order: direct, identifiers };
+        }
+    }
+
+    if (identifiers.externalId) {
+        const { data, error } = await adminSupabase
+            .from("loan_disbursement_orders")
+            .select("*, members(full_name, member_no, branch_id)")
+            .eq("external_id", String(identifiers.externalId))
+            .maybeSingle();
+
+        if (error) {
+            throw wrapLoanDisbursementOrderError(
+                500,
+                "LOAN_DISBURSEMENT_ORDER_LOOKUP_FAILED",
+                "Unable to resolve mobile disbursement order by external ID.",
+                error
+            );
+        }
+
+        if (data) {
+            return { order: data, identifiers };
+        }
+    }
+
+    if (identifiers.providerRef) {
+        const { data, error } = await adminSupabase
+            .from("loan_disbursement_orders")
+            .select("*, members(full_name, member_no, branch_id)")
+            .eq("provider_ref", String(identifiers.providerRef))
+            .maybeSingle();
+
+        if (error) {
+            throw wrapLoanDisbursementOrderError(
+                500,
+                "LOAN_DISBURSEMENT_ORDER_LOOKUP_FAILED",
+                "Unable to resolve mobile disbursement order by provider reference.",
+                error
+            );
+        }
+
+        if (data) {
+            return { order: data, identifiers };
+        }
+    }
+
+    return { order: null, identifiers };
+}
+
+async function attachLatestMobileDisbursementOrders(rows, tenantId) {
+    const applicationIds = Array.from(new Set((rows || []).map((row) => row.id).filter(Boolean)));
+    if (!applicationIds.length) {
+        return rows || [];
+    }
+
+    const { data, error } = await adminSupabase
+        .from("loan_disbursement_orders")
+        .select("*, members(full_name, member_no, branch_id)")
+        .eq("tenant_id", tenantId)
+        .in("application_id", applicationIds)
+        .order("created_at", { ascending: false });
+
+    if (error) {
+        if (isMissingLoanDisbursementRelationError(error)) {
+            return (rows || []).map((row) => ({
+                ...row,
+                latest_mobile_disbursement: null
+            }));
+        }
+
+        throw wrapLoanDisbursementOrderError(
+            500,
+            "LOAN_DISBURSEMENT_ORDER_ENRICH_FAILED",
+            "Unable to load mobile loan disbursement status.",
+            error
+        );
+    }
+
+    const latestByApplication = new Map();
+    for (const row of data || []) {
+        if (!latestByApplication.has(row.application_id)) {
+            latestByApplication.set(row.application_id, buildLoanDisbursementOrderView(row));
+        }
+    }
+
+    return (rows || []).map((row) => ({
+        ...row,
+        latest_mobile_disbursement: latestByApplication.get(row.id) || null
+    }));
+}
+
+async function getLoanDisbursementApprovalPayload(tenantId, approvalRequestId, applicationId) {
+    if (!approvalRequestId) {
+        return {};
+    }
+
+    const { data, error } = await adminSupabase
+        .from("approval_requests")
+        .select("id, operation_key, entity_type, entity_id, payload_json")
+        .eq("tenant_id", tenantId)
+        .eq("id", approvalRequestId)
+        .maybeSingle();
+
+    if (error) {
+        throw new AppError(
+            500,
+            "LOAN_DISBURSEMENT_APPROVAL_LOOKUP_FAILED",
+            "Unable to load approved loan disbursement context.",
+            error
+        );
+    }
+
+    if (!data) {
+        throw new AppError(404, "APPROVAL_REQUEST_NOT_FOUND", "Approval request was not found.");
+    }
+
+    if (data.operation_key !== "finance.loan_disburse") {
+        throw new AppError(
+            400,
+            "APPROVAL_REQUEST_OPERATION_MISMATCH",
+            "Approval request does not belong to a loan disbursement operation."
+        );
+    }
+
+    if (data.entity_type && data.entity_type !== "loan_application") {
+        throw new AppError(
+            400,
+            "APPROVAL_REQUEST_ENTITY_MISMATCH",
+            "Approval request is not linked to a loan application."
+        );
+    }
+
+    if (data.entity_id && applicationId && data.entity_id !== applicationId) {
+        throw new AppError(
+            400,
+            "APPROVAL_REQUEST_APPLICATION_MISMATCH",
+            "Approval request does not match this loan application."
+        );
+    }
+
+    return data.payload_json && typeof data.payload_json === "object" ? data.payload_json : {};
+}
+
 async function getExpandedApplication(tenantId, applicationId) {
     const { data, error } = await adminSupabase
         .from("loan_applications")
@@ -776,7 +1095,11 @@ async function getExpandedApplication(tenantId, applicationId) {
         throw new AppError(404, "LOAN_APPLICATION_NOT_FOUND", "Loan application was not found.");
     }
 
-    return attachGuarantorConsentReference(data);
+    const [expanded] = await attachLatestMobileDisbursementOrders([
+        attachGuarantorConsentReference(data)
+    ], tenantId);
+
+    return expanded;
 }
 
 function ensureApplicationEditAllowed(actor, application) {
@@ -816,6 +1139,540 @@ function assertAllGuarantorsAccepted(application) {
             }))
         }
     );
+}
+
+async function getOpenLoanDisbursementOrderForApplication(applicationId) {
+    const { data, error } = await adminSupabase
+        .from("loan_disbursement_orders")
+        .select("*, members(full_name, member_no, branch_id)")
+        .eq("application_id", applicationId)
+        .in("status", Array.from(OPEN_MOBILE_DISBURSEMENT_STATUSES))
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+    if (error) {
+        throw wrapLoanDisbursementOrderError(
+            500,
+            "LOAN_DISBURSEMENT_ORDER_LOOKUP_FAILED",
+            "Unable to load the active mobile loan disbursement order.",
+            error
+        );
+    }
+
+    return data || null;
+}
+
+function assertLoanDisbursementOrderAccess(actor, order) {
+    assertTenantAccess({ auth: actor }, order.tenant_id);
+    assertBranchAccess({ auth: actor }, order.branch_id);
+}
+
+function buildLoanDisbursementProcessingActor(order) {
+    return {
+        tenantId: order.tenant_id,
+        role: ROLES.TELLER,
+        isInternalOps: true,
+        branchIds: [order.branch_id],
+        user: {
+            id: order.created_by_user_id
+        },
+        profile: null
+    };
+}
+
+async function applyLoanApplicationDisbursedState({
+    tenantId,
+    actorUserId,
+    application,
+    disburseResult
+}) {
+    const applicationId = application.id;
+    const updatePayload = {
+        status: "disbursed",
+        disbursed_by: actorUserId,
+        disbursed_at: new Date().toISOString(),
+        loan_id: disburseResult.loan_id
+    };
+
+    const { data, error } = await adminSupabase
+        .from("loan_applications")
+        .update(updatePayload)
+        .eq("tenant_id", tenantId)
+        .eq("id", applicationId)
+        .select("*")
+        .single();
+
+    if (error || !data) {
+        throw new AppError(500, "LOAN_APPLICATION_DISBURSE_UPDATE_FAILED", "Loan disbursement posted but application status could not be updated.", error);
+    }
+
+    await adminSupabase
+        .from("loans")
+        .update({ application_id: applicationId })
+        .eq("id", disburseResult.loan_id);
+
+    await creditRiskService.recomputeGuarantorExposuresForMembers({
+        tenantId,
+        memberIds: (application.loan_guarantors || []).map((row) => row.member_id),
+        actorUserId,
+        source: "application_disburse"
+    });
+
+    await logAudit({
+        tenantId,
+        actorUserId,
+        table: "loan_applications",
+        action: "LOAN_APPLICATION_DISBURSED",
+        entityType: "loan_application",
+        entityId: applicationId,
+        beforeData: application,
+        afterData: {
+            ...data,
+            loan_number: disburseResult.loan_number,
+            journal_id: disburseResult.journal_id
+        }
+    });
+
+    invalidateLoanApplicationsCountCache();
+    const expanded = await getExpandedApplication(tenantId, applicationId);
+    const alertActor = {
+        tenantId,
+        user: { id: actorUserId },
+        role: ROLES.TELLER,
+        branchIds: [application.branch_id],
+        isInternalOps: true
+    };
+    await notifyMemberLoanDisbursed({
+        actor: alertActor,
+        application: expanded,
+        disbursement: disburseResult
+    });
+    await notifyBranchManagersLoanDisbursed({
+        actor: alertActor,
+        application: expanded,
+        disbursement: disburseResult
+    });
+
+    return expanded;
+}
+
+function buildLoanDisbursementAmountViolation(order, amountValue, amountCurrency) {
+    const expectedAmount = Number(order.amount || 0);
+    if (!Number.isFinite(amountValue) || amountValue <= 0) {
+        return {
+            rule: "amount_match",
+            message: "Payout amount is missing or invalid.",
+            currentValue: amountValue,
+            requiredValue: expectedAmount
+        };
+    }
+
+    if (Number(amountValue) !== expectedAmount) {
+        return {
+            rule: "amount_match",
+            message: "Payout amount does not match the loan disbursement order amount.",
+            currentValue: Number(amountValue),
+            requiredValue: expectedAmount
+        };
+    }
+
+    const expectedCurrency = String(order.currency || "").trim().toUpperCase();
+    if (expectedCurrency && amountCurrency && expectedCurrency !== String(amountCurrency).trim().toUpperCase()) {
+        return {
+            rule: "currency_match",
+            message: "Payout currency does not match the loan disbursement order currency.",
+            currentValue: String(amountCurrency).trim().toUpperCase(),
+            requiredValue: expectedCurrency
+        };
+    }
+
+    return null;
+}
+
+async function finalizeCompletedLoanDisbursementOrder(order, payout = {}, source = "snippe_status_poll") {
+    if (order.status === "posted" && order.loan_id && order.journal_id) {
+        return order;
+    }
+
+    const application = await getExpandedApplication(order.tenant_id, order.application_id);
+    if (application.loan_id && application.status === "disbursed") {
+        return updateLoanDisbursementOrder(order.id, {
+            status: "posted",
+            posted_at: order.posted_at || new Date().toISOString(),
+            loan_id: order.loan_id || application.loan_id,
+            completed_at: order.completed_at || payout.completedAt || new Date().toISOString(),
+            provider_ref: payout.providerRef || order.provider_ref,
+            provider: payout.provider || order.provider,
+            error_code: null,
+            error_message: null
+        });
+    }
+
+    const actor = buildLoanDisbursementProcessingActor(order);
+    const disburseResult = await financeService.loanDisburse(
+        actor,
+        {
+            tenant_id: order.tenant_id,
+            application_id: order.application_id,
+            approval_request_id: order.approval_request_id || null,
+            member_id: application.member_id,
+            branch_id: application.branch_id,
+            principal_amount: application.recommended_amount || application.requested_amount,
+            annual_interest_rate: application.recommended_interest_rate || application.requested_interest_rate || 0,
+            term_count: application.recommended_term_count || application.requested_term_count,
+            repayment_frequency: application.recommended_repayment_frequency || application.requested_repayment_frequency,
+            reference: order.reference || application.external_reference || null,
+            description: order.description || `Loan mobile disbursement for application ${order.application_id}`,
+            disbursed_by: order.created_by_user_id
+        },
+        {
+            skipWorkflow: true,
+            skipApprovalGate: true,
+            skipCashControl: true
+        }
+    );
+
+    const expanded = await applyLoanApplicationDisbursedState({
+        tenantId: order.tenant_id,
+        actorUserId: order.created_by_user_id,
+        application,
+        disburseResult
+    });
+
+    if (order.approval_request_id) {
+        await approvalService.markApprovalRequestExecuted({
+            actor,
+            tenantId: order.tenant_id,
+            requestId: order.approval_request_id,
+            entityType: "loan",
+            entityId: disburseResult.loan_id
+        }).catch((error) => {
+            console.warn("[loan-disbursements] approval execute mark failed", {
+                orderId: order.id,
+                requestId: order.approval_request_id,
+                message: error?.message || error
+            });
+        });
+    }
+
+    const postedOrder = await updateLoanDisbursementOrder(order.id, {
+        status: "posted",
+        posted_at: order.posted_at || new Date().toISOString(),
+        completed_at: order.completed_at || payout.completedAt || new Date().toISOString(),
+        provider_ref: payout.providerRef || order.provider_ref,
+        provider: payout.provider || order.provider,
+        loan_id: disburseResult.loan_id,
+        journal_id: disburseResult.journal_id,
+        error_code: null,
+        error_message: null,
+        metadata: {
+            ...(order.metadata && typeof order.metadata === "object" ? order.metadata : {}),
+            latest_provider_status: payout.status || "completed",
+            source
+        }
+    });
+
+    await logAudit({
+        tenantId: postedOrder.tenant_id,
+        actorUserId: postedOrder.created_by_user_id,
+        table: "loan_disbursement_orders",
+        action: "LOAN_MOBILE_DISBURSEMENT_POSTED",
+        entityType: "loan_disbursement_order",
+        entityId: postedOrder.id,
+        afterData: {
+            application_id: postedOrder.application_id,
+            provider_ref: postedOrder.provider_ref,
+            status: postedOrder.status,
+            journal_id: postedOrder.journal_id,
+            loan_id: postedOrder.loan_id,
+            source
+        }
+    });
+
+    return {
+        ...postedOrder,
+        application: expanded
+    };
+}
+
+async function markLoanDisbursementOrderFailed(order, failure = {}, source = "snippe_status_poll") {
+    const nextStatus = failure.status === "expired" ? "expired" : "failed";
+    const nowIso = new Date().toISOString();
+    const updatedOrder = await updateLoanDisbursementOrder(order.id, {
+        status: nextStatus,
+        provider_ref: failure.providerRef || order.provider_ref,
+        provider: failure.provider || order.provider,
+        callback_received_at: failure.payload ? nowIso : order.callback_received_at,
+        latest_callback_payload: failure.payload || order.latest_callback_payload,
+        failed_at: nextStatus === "failed" ? (order.failed_at || nowIso) : order.failed_at,
+        expired_at: nextStatus === "expired" ? (order.expired_at || nowIso) : order.expired_at,
+        error_code: nextStatus === "expired" ? "SNIPPE_PAYOUT_EXPIRED" : "SNIPPE_PAYOUT_FAILED",
+        error_message: failure.message || (nextStatus === "expired" ? "The mobile money disbursement expired before completion." : "The mobile money disbursement failed."),
+        metadata: {
+            ...(order.metadata && typeof order.metadata === "object" ? order.metadata : {}),
+            latest_provider_status: failure.status || nextStatus,
+            source
+        }
+    });
+
+    await logAudit({
+        tenantId: updatedOrder.tenant_id,
+        actorUserId: updatedOrder.created_by_user_id,
+        table: "loan_disbursement_orders",
+        action: nextStatus === "expired" ? "LOAN_MOBILE_DISBURSEMENT_EXPIRED" : "LOAN_MOBILE_DISBURSEMENT_FAILED",
+        entityType: "loan_disbursement_order",
+        entityId: updatedOrder.id,
+        afterData: {
+            application_id: updatedOrder.application_id,
+            provider_ref: updatedOrder.provider_ref,
+            status: updatedOrder.status,
+            failure_reason: updatedOrder.error_message,
+            source
+        }
+    });
+
+    return updatedOrder;
+}
+
+async function syncPendingLoanDisbursementOrder(order, source = "status_poll") {
+    if (!order) {
+        return null;
+    }
+
+    if (order.status === "posted" || order.status === "failed" || order.status === "expired") {
+        return order;
+    }
+
+    if (order.status === "completed") {
+        return finalizeCompletedLoanDisbursementOrder(order, {
+            providerRef: order.provider_ref,
+            provider: order.provider,
+            status: "completed"
+        }, source);
+    }
+
+    if (!order.provider_ref) {
+        return order;
+    }
+
+    const payoutStatus = await getPayoutStatus(order.provider_ref);
+    if (!payoutStatus.found) {
+        return order;
+    }
+
+    const amountViolation = buildLoanDisbursementAmountViolation(order, payoutStatus.amountValue, payoutStatus.amountCurrency);
+    if (amountViolation) {
+        throw new AppError(
+            409,
+            "LOAN_DISBURSEMENT_AMOUNT_MISMATCH",
+            amountViolation.message,
+            amountViolation
+        );
+    }
+
+    const normalizedStatus = normalizePayoutStatus(payoutStatus.status);
+    const patch = {
+        provider_ref: payoutStatus.providerRef || order.provider_ref,
+        provider: payoutStatus.provider || order.provider,
+        expires_at: payoutStatus.expiresAt || order.expires_at,
+        metadata: {
+            ...(order.metadata && typeof order.metadata === "object" ? order.metadata : {}),
+            latest_provider_status: payoutStatus.status || null,
+            latest_provider_reference: payoutStatus.providerRef || order.provider_ref || null
+        }
+    };
+
+    let refreshedOrder = order;
+    if (
+        patch.provider_ref !== order.provider_ref
+        || patch.provider !== order.provider
+        || patch.expires_at !== order.expires_at
+        || JSON.stringify(patch.metadata) !== JSON.stringify(order.metadata || {})
+    ) {
+        refreshedOrder = await updateLoanDisbursementOrder(order.id, patch);
+    }
+
+    await logLoanDisbursementOrderCallback({
+        disbursementOrderId: refreshedOrder.id,
+        externalId: payoutStatus.externalReference || refreshedOrder.external_id,
+        providerRef: payoutStatus.providerRef || refreshedOrder.provider_ref,
+        payload: payoutStatus.responsePayload,
+        source: "snippe_status_poll",
+        gateway: "snippe"
+    });
+
+    if (normalizedStatus === "completed") {
+        const completedOrder = await updateLoanDisbursementOrder(refreshedOrder.id, {
+            status: "completed",
+            completed_at: refreshedOrder.completed_at || payoutStatus.completedAt || new Date().toISOString(),
+            provider_ref: payoutStatus.providerRef || refreshedOrder.provider_ref,
+            provider: payoutStatus.provider || refreshedOrder.provider,
+            error_code: null,
+            error_message: null,
+            metadata: patch.metadata
+        });
+        return finalizeCompletedLoanDisbursementOrder(completedOrder, {
+            ...payoutStatus,
+            status: normalizedStatus
+        }, source);
+    }
+
+    if (normalizedStatus === "failed" || normalizedStatus === "expired") {
+        return markLoanDisbursementOrderFailed(refreshedOrder, {
+            status: normalizedStatus,
+            providerRef: payoutStatus.providerRef,
+            provider: payoutStatus.provider,
+            message: payoutStatus.responsePayload?.message || payoutStatus.status || null,
+            payload: payoutStatus.responsePayload
+        }, source);
+    }
+
+    if (payoutStatus.expiresAt && new Date(payoutStatus.expiresAt).getTime() <= Date.now()) {
+        return markLoanDisbursementOrderFailed(refreshedOrder, {
+            status: "expired",
+            providerRef: payoutStatus.providerRef,
+            provider: payoutStatus.provider,
+            message: "The mobile money disbursement expired before confirmation.",
+            payload: payoutStatus.responsePayload
+        }, source);
+    }
+
+    return refreshedOrder;
+}
+
+async function getLoanDisbursementOrderStatus(actor, orderId) {
+    const order = await getLoanDisbursementOrderById(orderId);
+    if (!order) {
+        throw new AppError(404, "LOAN_DISBURSEMENT_ORDER_NOT_FOUND", "Mobile loan disbursement order was not found.");
+    }
+
+    assertLoanDisbursementOrderAccess(actor, order);
+    const syncedOrder = await syncPendingLoanDisbursementOrder(order, "status_poll");
+    return {
+        order: buildLoanDisbursementOrderView(syncedOrder)
+    };
+}
+
+async function processSnippeLoanDisbursementPayoutEvent(event, ip = null, userAgent = null) {
+    const identifiers = {
+        internalOrderId: event.orderId,
+        externalId: event.externalReference,
+        providerRef: event.providerRef
+    };
+    const { order } = await resolveLoanDisbursementOrderFromIdentifiers(identifiers);
+
+    await logLoanDisbursementOrderCallback({
+        disbursementOrderId: order?.id || null,
+        externalId: identifiers.externalId || event.externalReference,
+        providerRef: identifiers.providerRef || event.providerRef,
+        payload: event.payload,
+        source: "snippe_webhook",
+        gateway: "snippe"
+    });
+
+    if (!order) {
+        await logAudit({
+            tenantId: event.tenantId || null,
+            actorUserId: null,
+            table: "loan_disbursement_orders",
+            action: "LOAN_MOBILE_DISBURSEMENT_ORDER_NOT_FOUND",
+            entityType: "loan_disbursement_order",
+            entityId: event.orderId || event.providerRef || event.externalReference || null,
+            afterData: {
+                event_type: event.eventType,
+                order_id: event.orderId,
+                provider_ref: event.providerRef,
+                external_reference: event.externalReference
+            },
+            ip,
+            userAgent
+        }).catch(() => null);
+
+        return {
+            httpStatus: 200,
+            data: {
+                success: false,
+                ignored: true,
+                code: "LOAN_DISBURSEMENT_ORDER_NOT_FOUND",
+                identifiers
+            }
+        };
+    }
+
+    const amountViolation = buildLoanDisbursementAmountViolation(order, event.amountValue, event.amountCurrency);
+    if (amountViolation) {
+        await logAudit({
+            tenantId: order.tenant_id,
+            actorUserId: order.created_by_user_id,
+            table: "loan_disbursement_orders",
+            action: "LOAN_MOBILE_DISBURSEMENT_AMOUNT_MISMATCH",
+            entityType: "loan_disbursement_order",
+            entityId: order.id,
+            afterData: {
+                provider_ref: event.providerRef,
+                event_type: event.eventType,
+                amount_received: amountViolation.currentValue,
+                amount_expected: amountViolation.requiredValue
+            },
+            ip,
+            userAgent
+        });
+
+        return {
+            httpStatus: 200,
+            data: {
+                success: false,
+                ignored: true,
+                code: "LOAN_DISBURSEMENT_AMOUNT_MISMATCH"
+            }
+        };
+    }
+
+    let updatedOrder;
+    if (event.eventType === "payout.completed") {
+        const completedOrder = await updateLoanDisbursementOrder(order.id, {
+            status: order.status === "posted" ? "posted" : "completed",
+            callback_received_at: new Date().toISOString(),
+            latest_callback_payload: event.rawBody,
+            provider_ref: event.providerRef || order.provider_ref,
+            provider: event.normalized.provider || order.provider,
+            completed_at: order.completed_at || event.completedAt || new Date().toISOString(),
+            error_code: null,
+            error_message: null,
+            metadata: {
+                ...(order.metadata && typeof order.metadata === "object" ? order.metadata : {}),
+                latest_provider_status: event.status || event.eventType,
+                source: "snippe_webhook"
+            }
+        });
+        updatedOrder = await finalizeCompletedLoanDisbursementOrder(completedOrder, {
+            providerRef: event.providerRef,
+            provider: event.normalized.provider || order.provider,
+            completedAt: event.completedAt,
+            status: event.status || "completed"
+        }, "snippe_webhook");
+    } else {
+        updatedOrder = await markLoanDisbursementOrderFailed(order, {
+            status: normalizePayoutStatus(event.status || event.eventType),
+            providerRef: event.providerRef,
+            provider: event.normalized.provider || order.provider,
+            message: event.failureReason || event.status || "The mobile money disbursement failed.",
+            payload: event.rawBody
+        }, "snippe_webhook");
+    }
+
+    return {
+        httpStatus: 200,
+        data: {
+            success: true,
+            event_id: event.eventId,
+            event_type: event.eventType,
+            order_id: updatedOrder.id,
+            status: updatedOrder.status,
+            provider_ref: updatedOrder.provider_ref || null
+        }
+    };
 }
 
 async function listGuarantorRequests(actor, query = {}) {
@@ -954,11 +1811,13 @@ async function enrichLoanApplicationListDetails(rows, tenantId) {
         collateralByApplication.set(row.application_id, existing);
     }
 
-    return (rows || []).map((row) => attachGuarantorConsentReference({
+    const enrichedRows = (rows || []).map((row) => attachGuarantorConsentReference({
         ...row,
         loan_guarantors: guarantorsByApplication.get(row.id) || [],
         collateral_items: collateralByApplication.get(row.id) || []
     }));
+
+    return attachLatestMobileDisbursementOrders(enrichedRows, tenantId);
 }
 
 async function listLoanApplications(actor, query) {
@@ -999,7 +1858,7 @@ async function listLoanApplications(actor, query) {
     }
 
     const rows = data || [];
-    const hydratedRows = [ROLES.BRANCH_MANAGER, ROLES.LOAN_OFFICER].includes(actor.role)
+    const hydratedRows = [ROLES.BRANCH_MANAGER, ROLES.LOAN_OFFICER, ROLES.TELLER].includes(actor.role)
         ? await enrichLoanApplicationListDetails(rows, tenantId)
         : rows;
     if (hasCursor) {
@@ -1511,6 +2370,42 @@ async function updateLoanApplication(actor, applicationId, payload) {
     return getExpandedApplication(tenantId, applicationId);
 }
 
+async function deleteLoanApplication(actor, applicationId) {
+    const tenantId = actor.tenantId;
+    const existing = await getExpandedApplication(tenantId, applicationId);
+    ensureApplicationEditAllowed(actor, existing);
+
+    if (existing.status !== "draft") {
+        throw new AppError(400, "LOAN_APPLICATION_NOT_DELETABLE", "Only draft loan applications can be deleted.");
+    }
+
+    const { error } = await adminSupabase
+        .from("loan_applications")
+        .delete()
+        .eq("tenant_id", tenantId)
+        .eq("id", applicationId);
+
+    if (error) {
+        throw new AppError(500, "LOAN_APPLICATION_DELETE_FAILED", "Unable to delete loan application.", error);
+    }
+
+    await logAudit({
+        tenantId,
+        actorUserId: actor.user.id,
+        table: "loan_applications",
+        action: "LOAN_APPLICATION_DELETED",
+        entityType: "loan_application",
+        entityId: applicationId,
+        beforeData: existing
+    });
+
+    invalidateLoanApplicationsCountCache();
+    return {
+        id: applicationId,
+        deleted: true
+    };
+}
+
 async function submitLoanApplication(actor, applicationId) {
     if (actor.role === ROLES.BRANCH_MANAGER) {
         throw new AppError(403, "FORBIDDEN", "Branch managers cannot submit loan applications.");
@@ -1845,6 +2740,169 @@ async function rejectLoanApplication(actor, applicationId, payload) {
     return expanded;
 }
 
+async function initiateMobileLoanDisbursement(actor, existing, payload = {}) {
+    const tenantId = actor.tenantId;
+    const existingOrder = await getOpenLoanDisbursementOrderForApplication(existing.id);
+    if (existingOrder) {
+        const syncedOrder = await syncPendingLoanDisbursementOrder(existingOrder, "resume_existing");
+        return {
+            application: await getExpandedApplication(tenantId, existing.id),
+            mobile_disbursement: buildLoanDisbursementOrderView(syncedOrder),
+            existing_order: true
+        };
+    }
+
+    const approvalGate = await approvalService.ensureOperationApproval({
+        actor,
+        tenantId,
+        branchId: existing.branch_id,
+        operationKey: "finance.loan_disburse",
+        requestedAmount: existing.recommended_amount || existing.requested_amount,
+        approvalRequestId: payload.approval_request_id || null,
+        payload: {
+            application_id: existing.id,
+            member_id: existing.member_id,
+            branch_id: existing.branch_id,
+            principal_amount: existing.recommended_amount || existing.requested_amount,
+            annual_interest_rate: existing.recommended_interest_rate || existing.requested_interest_rate || 0,
+            term_count: existing.recommended_term_count || existing.requested_term_count,
+            repayment_frequency: existing.recommended_repayment_frequency || existing.requested_repayment_frequency,
+            disbursement_channel: "mobile_money",
+            recipient_msisdn: payload.recipient_msisdn || existing.members?.phone || null,
+            reference: payload.reference || existing.external_reference || null,
+            description: payload.description || `Loan mobile disbursement for application ${existing.id}`
+        },
+        entityType: "loan_application",
+        entityId: existing.id
+    });
+
+    if (approvalGate?.approval_required && approvalGate.status === "pending_approval") {
+        return {
+            approval_required: true,
+            application_id: existing.id,
+            ...approvalGate
+        };
+    }
+
+    const approvalPayload = approvalGate?.request?.payload_json && typeof approvalGate.request.payload_json === "object"
+        ? approvalGate.request.payload_json
+        : {};
+    const recipientMsisdn = normalizePhone(payload.recipient_msisdn || approvalPayload.recipient_msisdn || existing.members?.phone || "");
+    if (!recipientMsisdn) {
+        throw new AppError(400, "LOAN_DISBURSEMENT_PHONE_REQUIRED", "Member mobile number is required for mobile money disbursement.");
+    }
+
+    const amount = Number(existing.recommended_amount || existing.requested_amount || 0);
+    const reference = payload.reference || approvalPayload.reference || existing.external_reference || null;
+    const description = payload.description || approvalPayload.description || `Loan mobile disbursement for application ${existing.id}`;
+    const orderId = randomUUID();
+    const externalId = buildLoanDisbursementExternalId(orderId);
+    const baseMetadata = {
+        order_id: orderId,
+        application_id: existing.id,
+        member_id: existing.member_id,
+        tenant_id: tenantId,
+        purpose: "loan_disbursement",
+        created_by_user_id: actor.user.id,
+        member_name: existing.members?.full_name || null,
+        member_no: existing.members?.member_no || null
+    };
+
+    let order = await createLoanDisbursementOrder({
+        id: orderId,
+        tenant_id: tenantId,
+        branch_id: existing.branch_id,
+        application_id: existing.id,
+        member_id: existing.member_id,
+        created_by_user_id: actor.user.id,
+        approval_request_id: approvalGate?.approval_request_id || null,
+        gateway: "snippe",
+        channel: "mobile_money",
+        provider: null,
+        msisdn: recipientMsisdn,
+        amount,
+        currency: env.snippeCurrency,
+        status: "created",
+        external_id: externalId,
+        provider_ref: null,
+        reference,
+        description,
+        metadata: baseMetadata
+    });
+
+    await logAudit({
+        tenantId,
+        actorUserId: actor.user.id,
+        table: "loan_disbursement_orders",
+        action: "LOAN_MOBILE_DISBURSEMENT_CREATED",
+        entityType: "loan_disbursement_order",
+        entityId: order.id,
+        afterData: {
+            application_id: existing.id,
+            member_id: existing.member_id,
+            amount,
+            msisdn: recipientMsisdn,
+            approval_request_id: approvalGate?.approval_request_id || null
+        }
+    });
+
+    try {
+        const payoutIntent = await createPayoutIntent({
+            amount,
+            currency: env.snippeCurrency,
+            externalId,
+            accountNumber: recipientMsisdn,
+            customer: {
+                name: existing.members?.full_name || "SACCO Member",
+                email: existing.members?.email || null
+            },
+            metadata: baseMetadata,
+            idempotencyKey: order.id
+        });
+
+        const normalizedStatus = normalizePayoutStatus(payoutIntent.status);
+        order = await updateLoanDisbursementOrder(order.id, {
+            status: normalizedStatus === "completed" ? "completed" : normalizedStatus === "failed" ? "failed" : normalizedStatus === "expired" ? "expired" : "pending",
+            provider_ref: payoutIntent.providerRef,
+            provider: payoutIntent.provider,
+            gateway_request: payoutIntent.requestPayload,
+            gateway_response: payoutIntent.responsePayload,
+            expires_at: payoutIntent.expiresAt || null,
+            completed_at: normalizedStatus === "completed" ? (payoutIntent.completedAt || new Date().toISOString()) : null,
+            failed_at: normalizedStatus === "failed" ? new Date().toISOString() : null,
+            expired_at: normalizedStatus === "expired" ? new Date().toISOString() : null,
+            error_code: normalizedStatus === "failed" ? "SNIPPE_PAYOUT_FAILED" : normalizedStatus === "expired" ? "SNIPPE_PAYOUT_EXPIRED" : null,
+            error_message: normalizedStatus === "failed" ? "The mobile money disbursement failed." : normalizedStatus === "expired" ? "The mobile money disbursement expired." : null,
+            metadata: {
+                ...baseMetadata,
+                latest_provider_status: payoutIntent.status || null
+            }
+        });
+
+        if (normalizedStatus === "completed") {
+            order = await finalizeCompletedLoanDisbursementOrder(order, {
+                providerRef: payoutIntent.providerRef,
+                provider: payoutIntent.provider,
+                completedAt: payoutIntent.completedAt,
+                status: payoutIntent.status || "completed"
+            }, "snippe_initiate");
+        }
+
+        return {
+            application: await getExpandedApplication(tenantId, existing.id),
+            mobile_disbursement: buildLoanDisbursementOrderView(order)
+        };
+    } catch (error) {
+        await updateLoanDisbursementOrder(order.id, {
+            status: "failed",
+            failed_at: new Date().toISOString(),
+            error_code: error?.code || "SNIPPE_PAYOUT_INIT_FAILED",
+            error_message: error?.message || "Unable to initiate mobile money disbursement."
+        }).catch(() => null);
+        throw error;
+    }
+}
+
 async function disburseLoanApplication(actor, applicationId, payload) {
     if (![ROLES.LOAN_OFFICER, ROLES.TELLER].includes(actor.role)) {
         throw new AppError(403, "FORBIDDEN", "You are not allowed to disburse approved loan applications.");
@@ -1870,21 +2928,36 @@ async function disburseLoanApplication(actor, applicationId, payload) {
 
     assertBranchAccess({ auth: actor }, existing.branch_id);
 
+    const approvedPayload = payload.approval_request_id
+        ? await getLoanDisbursementApprovalPayload(tenantId, payload.approval_request_id, applicationId)
+        : {};
+    const effectivePayload = {
+        ...payload,
+        reference: approvedPayload.reference || payload.reference || null,
+        description: approvedPayload.description || payload.description || null,
+        disbursement_channel: approvedPayload.disbursement_channel || payload.disbursement_channel || "cash",
+        recipient_msisdn: approvedPayload.recipient_msisdn || payload.recipient_msisdn || null
+    };
+
+    if (effectivePayload.disbursement_channel === "mobile_money") {
+        return initiateMobileLoanDisbursement(actor, existing, effectivePayload);
+    }
+
     const disburseResult = await financeService.loanDisburse(
         actor,
         {
             tenant_id: tenantId,
             application_id: applicationId,
-            approval_request_id: payload.approval_request_id || null,
+            approval_request_id: effectivePayload.approval_request_id || null,
             member_id: existing.member_id,
             branch_id: existing.branch_id,
             principal_amount: existing.recommended_amount || existing.requested_amount,
             annual_interest_rate: existing.recommended_interest_rate || existing.requested_interest_rate || 0,
             term_count: existing.recommended_term_count || existing.requested_term_count,
             repayment_frequency: existing.recommended_repayment_frequency || existing.requested_repayment_frequency,
-            reference: payload.reference || existing.external_reference || null,
-            description: payload.description || `Loan disbursement for application ${applicationId}`,
-            receipt_ids: payload.receipt_ids || []
+            reference: effectivePayload.reference || existing.external_reference || null,
+            description: effectivePayload.description || `Loan disbursement for application ${applicationId}`,
+            receipt_ids: effectivePayload.receipt_ids || []
         },
         {
             skipWorkflow: true,
@@ -1899,64 +2972,11 @@ async function disburseLoanApplication(actor, applicationId, payload) {
             ...disburseResult
         };
     }
-
-    const updatePayload = {
-        status: "disbursed",
-        disbursed_by: actor.user.id,
-        disbursed_at: new Date().toISOString(),
-        loan_id: disburseResult.loan_id
-    };
-
-    const { data, error } = await adminSupabase
-        .from("loan_applications")
-        .update(updatePayload)
-        .eq("tenant_id", tenantId)
-        .eq("id", applicationId)
-        .select("*")
-        .single();
-
-    if (error || !data) {
-        throw new AppError(500, "LOAN_APPLICATION_DISBURSE_UPDATE_FAILED", "Loan disbursement posted but application status could not be updated.", error);
-    }
-
-    await adminSupabase
-        .from("loans")
-        .update({ application_id: applicationId })
-        .eq("id", disburseResult.loan_id);
-
-    await creditRiskService.recomputeGuarantorExposuresForMembers({
-        tenantId,
-        memberIds: (existing.loan_guarantors || []).map((row) => row.member_id),
-        actorUserId: actor.user.id,
-        source: "application_disburse"
-    });
-
-    await logAudit({
+    const expanded = await applyLoanApplicationDisbursedState({
         tenantId,
         actorUserId: actor.user.id,
-        table: "loan_applications",
-        action: "LOAN_APPLICATION_DISBURSED",
-        entityType: "loan_application",
-        entityId: applicationId,
-        beforeData: existing,
-        afterData: {
-            ...data,
-            loan_number: disburseResult.loan_number,
-            journal_id: disburseResult.journal_id
-        }
-    });
-
-    invalidateLoanApplicationsCountCache();
-    const expanded = await getExpandedApplication(tenantId, applicationId);
-    await notifyMemberLoanDisbursed({
-        actor,
-        application: expanded,
-        disbursement: disburseResult
-    });
-    await notifyBranchManagersLoanDisbursed({
-        actor,
-        application: expanded,
-        disbursement: disburseResult
+        application: existing,
+        disburseResult
     });
 
     return {
@@ -2051,10 +3071,13 @@ module.exports = {
     listGuarantorRequests,
     createLoanApplication,
     updateLoanApplication,
+    deleteLoanApplication,
     submitLoanApplication,
     appraiseLoanApplication,
     approveLoanApplication,
     rejectLoanApplication,
     disburseLoanApplication,
+    getLoanDisbursementOrderStatus,
+    processSnippeLoanDisbursementPayoutEvent,
     respondGuarantorConsent
 };

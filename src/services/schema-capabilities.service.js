@@ -31,7 +31,9 @@ const TABLE_CAPABILITIES = [
     { name: "sms_trigger_settings", migration: "046_sms_trigger_settings.sql" },
     { name: "payment_orders", migration: "060_phase5_member_payment_orders.sql" },
     { name: "payment_order_callbacks", migration: "060_phase5_member_payment_orders.sql" },
-    { name: "webhook_events", migration: "085_snippe_webhook_events.sql" }
+    { name: "webhook_events", migration: "085_snippe_webhook_events.sql" },
+    { name: "loan_disbursement_orders", migration: "086_loan_mobile_disbursement_orders.sql" },
+    { name: "loan_disbursement_order_callbacks", migration: "086_loan_mobile_disbursement_orders.sql" }
 ];
 
 const COLUMN_CAPABILITIES = [

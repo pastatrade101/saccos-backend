@@ -65,9 +65,19 @@ const rejectLoanApplicationSchema = z.object({
 const disburseApprovedLoanSchema = z.object({
     reference: z.string().max(80).optional().nullable(),
     description: z.string().max(255).optional().nullable(),
+    disbursement_channel: z.enum(["cash", "mobile_money"]).optional().default("cash"),
+    recipient_msisdn: z.string().trim().min(9).max(20).optional().nullable(),
     approval_request_id: uuid.optional(),
     receipt_ids: z.array(z.string().uuid()).max(10).optional().default([]),
     ...twoFactorFields
+});
+
+const loanDisbursementOrderParamSchema = z.object({
+    orderId: uuid
+});
+
+const loanApplicationParamSchema = z.object({
+    id: uuid
 });
 
 const loanApplicationQuerySchema = z.object({
@@ -101,6 +111,8 @@ module.exports = {
     approveLoanApplicationSchema,
     rejectLoanApplicationSchema,
     disburseApprovedLoanSchema,
+    loanApplicationParamSchema,
+    loanDisbursementOrderParamSchema,
     loanApplicationQuerySchema,
     guarantorRequestsQuerySchema,
     guarantorConsentSchema

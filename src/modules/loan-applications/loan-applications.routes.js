@@ -13,6 +13,13 @@ const router = express.Router();
 router.use(auth);
 
 router.get(
+    "/disbursements/:orderId/status",
+    authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER, ROLES.LOAN_OFFICER, ROLES.TELLER, ROLES.AUDITOR], { allowInternalOps: false }),
+    validate(schemas.loanDisbursementOrderParamSchema, "params"),
+    controller.getDisbursementStatus
+);
+
+router.get(
     "/",
     authorize([ROLES.SUPER_ADMIN, ROLES.BRANCH_MANAGER, ROLES.LOAN_OFFICER, ROLES.TELLER, ROLES.AUDITOR, ROLES.MEMBER], { allowInternalOps: false }),
     validate(schemas.loanApplicationQuerySchema, "query"),
@@ -36,8 +43,16 @@ router.post(
 router.patch(
     "/:id",
     authorize([ROLES.BRANCH_MANAGER, ROLES.LOAN_OFFICER, ROLES.TELLER, ROLES.MEMBER], { allowInternalOps: false }),
+    validate(schemas.loanApplicationParamSchema, "params"),
     validate(schemas.updateLoanApplicationSchema),
     controller.update
+);
+
+router.delete(
+    "/:id",
+    authorize([ROLES.BRANCH_MANAGER, ROLES.LOAN_OFFICER, ROLES.TELLER, ROLES.MEMBER], { allowInternalOps: false }),
+    validate(schemas.loanApplicationParamSchema, "params"),
+    controller.remove
 );
 
 router.post(

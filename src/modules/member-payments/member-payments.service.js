@@ -13,6 +13,7 @@ const {
 } = require("../../services/azampay.service");
 const {
     createPaymentIntent,
+    getPaymentStatus,
     verifyWebhookSignature,
     computeWebhookSignatureDiagnostics,
     extractWebhookIdentifiers,
@@ -518,6 +519,289 @@ async function getPaymentOrderById(orderId) {
     }
 
     return data || null;
+}
+
+function validateSnippeStatusAmount(order, gatewayStatus) {
+    const orderAmount = Number(order?.amount);
+    const gatewayAmount = Number(gatewayStatus?.amountValue);
+
+    if (!Number.isFinite(orderAmount) || !Number.isFinite(gatewayAmount)) {
+        return null;
+    }
+
+    if (orderAmount !== gatewayAmount) {
+        return {
+            code: "SNIPPE_STATUS_AMOUNT_MISMATCH",
+            message: "Snippe status amount does not match the internal order amount."
+        };
+    }
+
+    const orderCurrency = String(order?.currency || "").trim().toUpperCase();
+    const gatewayCurrency = String(gatewayStatus?.amountCurrency || "").trim().toUpperCase();
+
+    if (orderCurrency && gatewayCurrency && orderCurrency !== gatewayCurrency) {
+        return {
+            code: "SNIPPE_STATUS_CURRENCY_MISMATCH",
+            message: "Snippe status currency does not match the internal order currency."
+        };
+    }
+
+    return null;
+}
+
+async function syncPendingSnippeOrder(order, source = "status_poll") {
+    if (!order || order.gateway !== "snippe" || order.status !== "pending" || !order.provider_ref) {
+        return {
+            order,
+            gatewayChecked: false
+        };
+    }
+
+    let gatewayStatus;
+    try {
+        gatewayStatus = await getPaymentStatus(order.provider_ref);
+    } catch (error) {
+        console.warn("[member-payments] snippe status check failed", {
+            orderId: order.id,
+            providerRef: order.provider_ref,
+            source,
+            error: error?.message || error
+        });
+        return {
+            order,
+            gatewayChecked: false,
+            gatewayCheckError: error?.code || "SNIPPE_STATUS_CHECK_FAILED"
+        };
+    }
+
+    if (!gatewayStatus?.found) {
+        return {
+            order,
+            gatewayChecked: true,
+            gatewayStatus: "unknown"
+        };
+    }
+
+    const gatewayOrderId = gatewayStatus?.metadata?.order_id || gatewayStatus?.metadata?.payment_order_id || null;
+    if (gatewayOrderId && String(gatewayOrderId) !== String(order.id)) {
+        console.warn("[member-payments] snippe status metadata order mismatch", {
+            orderId: order.id,
+            providerRef: order.provider_ref,
+            source,
+            gatewayOrderId
+        });
+
+        await logAudit({
+            tenantId: order.tenant_id,
+            actorUserId: order.created_by_user_id,
+            table: "payment_orders",
+            entityType: "payment_order",
+            entityId: order.id,
+            action: "MEMBER_PAYMENT_GATEWAY_ORDER_MISMATCH",
+            afterData: {
+                source,
+                provider_ref: order.provider_ref,
+                order_id: order.id,
+                gateway_order_id: gatewayOrderId
+            }
+        });
+
+        return {
+            order,
+            gatewayChecked: true,
+            gatewayStatus: gatewayStatus.status || "unknown",
+            gatewayViolation: "SNIPPE_STATUS_ORDER_MISMATCH"
+        };
+    }
+
+    const amountViolation = validateSnippeStatusAmount(order, gatewayStatus);
+    if (amountViolation) {
+        console.warn("[member-payments] snippe status amount mismatch", {
+            orderId: order.id,
+            providerRef: order.provider_ref,
+            source,
+            orderAmount: Number(order.amount || 0),
+            gatewayAmount: gatewayStatus.amountValue,
+            orderCurrency: order.currency,
+            gatewayCurrency: gatewayStatus.amountCurrency
+        });
+
+        await logAudit({
+            tenantId: order.tenant_id,
+            actorUserId: order.created_by_user_id,
+            table: "payment_orders",
+            entityType: "payment_order",
+            entityId: order.id,
+            action: "MEMBER_PAYMENT_GATEWAY_STATUS_MISMATCH",
+            afterData: {
+                source,
+                provider_ref: order.provider_ref,
+                order_amount: Number(order.amount || 0),
+                gateway_amount: gatewayStatus.amountValue,
+                order_currency: order.currency,
+                gateway_currency: gatewayStatus.amountCurrency
+            }
+        });
+
+        return {
+            order,
+            gatewayChecked: true,
+            gatewayStatus: gatewayStatus.status || "unknown",
+            gatewayViolation: amountViolation.code
+        };
+    }
+
+    const normalized = normalizeWebhookStatus({
+        data: {
+            reference: gatewayStatus.providerRef,
+            external_reference: gatewayStatus.externalReference,
+            status: gatewayStatus.status,
+            amount: {
+                value: gatewayStatus.amountValue,
+                currency: gatewayStatus.amountCurrency
+            },
+            completed_at: gatewayStatus.completedAt,
+            metadata: gatewayStatus.metadata || {}
+        }
+    });
+
+    if (normalized.status === "pending") {
+        const gatewayExpiresAtMs = gatewayStatus.expiresAt ? Date.parse(gatewayStatus.expiresAt) : Number.NaN;
+        const hasGatewayExpired = Number.isFinite(gatewayExpiresAtMs) && gatewayExpiresAtMs <= Date.now();
+
+        if (hasGatewayExpired) {
+            const expiredOrder = await updatePaymentOrder(order.id, {
+                expires_at: gatewayStatus.expiresAt || order.expires_at,
+                status: "expired",
+                expired_at: order.expired_at || new Date().toISOString(),
+                error_code: "SNIPPE_PAYMENT_EXPIRED",
+                error_message: "The mobile money session expired before approval."
+            });
+
+            await logAudit({
+                tenantId: expiredOrder.tenant_id,
+                actorUserId: expiredOrder.created_by_user_id,
+                table: "payment_orders",
+                entityType: "payment_order",
+                entityId: expiredOrder.id,
+                action: "MEMBER_PAYMENT_STATUS_SYNC_EXPIRED",
+                afterData: {
+                    source,
+                    provider_ref: expiredOrder.provider_ref || null,
+                    gateway_status: gatewayStatus.status || null,
+                    gateway_expires_at: gatewayStatus.expiresAt || null,
+                    status: expiredOrder.status,
+                    expired_at: expiredOrder.expired_at || null
+                }
+            });
+
+            await notifyMemberPaymentOrderEvent(expiredOrder, "member_payment_expired").catch((error) => {
+                console.warn("[member-payments] status-sync expiry notification failed", {
+                    orderId: expiredOrder.id,
+                    error: error?.message || error
+                });
+            });
+
+            return {
+                order: expiredOrder,
+                gatewayChecked: true,
+                gatewayStatus: "expired"
+            };
+        }
+
+        if (gatewayStatus.expiresAt && gatewayStatus.expiresAt !== order.expires_at) {
+            order = await updatePaymentOrder(order.id, {
+                expires_at: gatewayStatus.expiresAt
+            });
+        }
+
+        return {
+            order,
+            gatewayChecked: true,
+            gatewayStatus: normalized.status
+        };
+    }
+
+    await logPaymentOrderCallback({
+        paymentOrderId: order.id,
+        externalId: gatewayStatus?.externalReference || order.external_id,
+        providerRef: gatewayStatus?.providerRef || order.provider_ref,
+        payload: {
+            response: gatewayStatus?.responsePayload || null
+        },
+        source: "snippe_status_poll",
+        gateway: "snippe"
+    });
+
+    const nowIso = new Date().toISOString();
+    const patch = {
+        provider_ref: gatewayStatus.providerRef || order.provider_ref,
+        expires_at: gatewayStatus.expiresAt || order.expires_at,
+        error_code: null,
+        error_message: null
+    };
+
+    if (normalized.status === "paid") {
+        patch.status = "paid";
+        patch.paid_at = order.paid_at || normalized.paidAt || gatewayStatus.completedAt || nowIso;
+    } else if (normalized.status === "expired") {
+        patch.status = "expired";
+        patch.expired_at = order.expired_at || nowIso;
+        patch.error_code = "SNIPPE_PAYMENT_EXPIRED";
+        patch.error_message = normalized.message || "The mobile money session expired before approval.";
+    } else {
+        patch.status = "failed";
+        patch.failed_at = order.failed_at || nowIso;
+        patch.error_code = "SNIPPE_PAYMENT_FAILED";
+        patch.error_message = normalized.message || gatewayStatus.status || "The mobile money gateway reported payment failure.";
+    }
+
+    let updatedOrder = await updatePaymentOrder(order.id, patch);
+
+    if (updatedOrder.status === "paid" && !updatedOrder.posted_at) {
+        updatedOrder = await postContributionPaymentOrder(updatedOrder, source);
+    }
+
+    await logAudit({
+        tenantId: updatedOrder.tenant_id,
+        actorUserId: updatedOrder.created_by_user_id,
+        table: "payment_orders",
+        entityType: "payment_order",
+        entityId: updatedOrder.id,
+        action: `MEMBER_PAYMENT_STATUS_SYNC_${updatedOrder.status.toUpperCase()}`,
+        afterData: {
+            source,
+            provider_ref: updatedOrder.provider_ref || null,
+            gateway_status: gatewayStatus.status || null,
+            status: updatedOrder.status,
+            paid_at: updatedOrder.paid_at || null,
+            failed_at: updatedOrder.failed_at || null,
+            expired_at: updatedOrder.expired_at || null,
+            posted_at: updatedOrder.posted_at || null
+        }
+    });
+
+    if (updatedOrder.status === "failed") {
+        await notifyMemberPaymentOrderEvent(updatedOrder, "member_payment_failed").catch((error) => {
+            console.warn("[member-payments] status-sync failure notification failed", {
+                orderId: updatedOrder.id,
+                error: error?.message || error
+            });
+        });
+    } else if (updatedOrder.status === "expired") {
+        await notifyMemberPaymentOrderEvent(updatedOrder, "member_payment_expired").catch((error) => {
+            console.warn("[member-payments] status-sync expiry notification failed", {
+                orderId: updatedOrder.id,
+                error: error?.message || error
+            });
+        });
+    }
+
+    return {
+        order: updatedOrder,
+        gatewayChecked: true,
+        gatewayStatus: normalized.status
+    };
 }
 
 async function expirePendingOrderIfTimedOut(order, source = "status_poll") {
@@ -1256,15 +1540,30 @@ async function initiateLoanRepaymentPayment(actor, payload) {
 }
 
 async function getPaymentOrderStatus(actor, orderId) {
-    const order = await expirePendingOrderIfTimedOut(await getPaymentOrderById(orderId), "status_poll");
+    let order = await expirePendingOrderIfTimedOut(await getPaymentOrderById(orderId), "status_poll");
     if (!order) {
         throw new AppError(404, "PAYMENT_ORDER_NOT_FOUND", "Payment order was not found.");
     }
 
     await assertPaymentOrderAccess(actor, order);
 
+    let gatewayChecked = false;
+    let gatewayStatus = null;
+    if (order.status === "pending" && order.gateway === "snippe") {
+        const syncResult = await syncPendingSnippeOrder(order, "status_poll");
+        order = syncResult.order || order;
+        gatewayChecked = Boolean(syncResult.gatewayChecked);
+        gatewayStatus = syncResult.gatewayStatus || null;
+    }
+
     return {
-        order: buildOrderView(order)
+        order: buildOrderView(order),
+        order_id: order.id,
+        status: order.status === "paid" || order.status === "posted" ? "completed" : order.status,
+        gateway_reference: order.provider_ref || order.external_id || null,
+        amount: Number(order.amount || 0),
+        gateway_checked: gatewayChecked,
+        gateway_status: gatewayStatus
     };
 }
 
