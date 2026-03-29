@@ -10,6 +10,7 @@ const { sendPasswordSetupLink } = require("../auth/auth.service");
 const { createInAppNotifications } = require("../notifications/notifications.service");
 const { sendTransactionalSms } = require("../../services/sms.service");
 const { getBranchName } = require("../../services/branch-name.service");
+const { resolveOptionalLocationHierarchy } = require("../locations/locations.service");
 const MEMBERS_COUNT_CACHE_TTL_MS = Math.max(0, Number(process.env.MEMBERS_COUNT_CACHE_TTL_MS || 15000));
 const membersCountCache = new Map();
 const membersCountInFlight = new Map();
@@ -24,6 +25,8 @@ const MEMBER_LIST_COLUMNS = `
     last_name,
     full_name,
     gender,
+    marital_status,
+    occupation,
     phone,
     email,
     member_no,
@@ -36,16 +39,30 @@ const MEMBER_LIST_COLUMNS = `
     state,
     country,
     postal_code,
+    region_id,
+    district_id,
+    ward_id,
+    village_id,
+    region,
+    district,
+    ward,
+    street_or_village,
+    residential_address,
     nida_no,
     tin_no,
     next_of_kin_name,
     next_of_kin_phone,
     next_of_kin_relationship,
+    next_of_kin_address,
     employer,
+    membership_type,
+    initial_share_amount,
+    monthly_savings_commitment,
     kyc_status,
     kyc_reason,
     notes,
-    created_at
+    created_at,
+    updated_at
 `;
 const PRIVILEGED_IDENTITY_ROLES = new Set(["super_admin", "branch_manager", "auditor"]);
 const TANZANIA_PHONE_PATTERN = /^(\+?255|0)?[67]\d{8}$/;
@@ -162,7 +179,9 @@ function maskSensitiveIdentity(value) {
 }
 
 function shouldViewSensitiveIdentity(actor) {
-    return actor.isInternalOps || PRIVILEGED_IDENTITY_ROLES.has(actor.role);
+    return actor.isInternalOps
+        || PRIVILEGED_IDENTITY_ROLES.has(actor.role)
+        || actor.role === "member";
 }
 
 function projectMemberForRead(row, actor) {
@@ -275,6 +294,32 @@ function buildMemberWritePatch(payload, existing = null) {
     }
 
     return patch;
+}
+
+async function buildResolvedMemberLocationPatch(payload) {
+    const resolvedLocation = await resolveOptionalLocationHierarchy({
+        regionId: payload.region_id,
+        districtId: payload.district_id,
+        wardId: payload.ward_id,
+        villageId: payload.village_id
+    });
+
+    if (!resolvedLocation) {
+        return {};
+    }
+
+    return {
+        region_id: resolvedLocation.region_id,
+        district_id: resolvedLocation.district_id,
+        ward_id: resolvedLocation.ward_id,
+        village_id: resolvedLocation.village_id,
+        region: resolvedLocation.region_name,
+        district: resolvedLocation.district_name,
+        ward: resolvedLocation.ward_name,
+        street_or_village: payload.street_or_village || resolvedLocation.village_name,
+        city: payload.city || resolvedLocation.district_name,
+        state: payload.state || resolvedLocation.region_name
+    };
 }
 
 function generateTemporaryPassword() {
@@ -471,7 +516,9 @@ function applyMemberListFilters(builder, { actor, filters, tenantId }) {
         .is("deleted_at", null);
 
     if (actor.role === "member") {
-        query = query.eq("user_id", actor.user.id);
+        query = actor.profile?.member_id
+            ? query.eq("id", actor.profile.member_id)
+            : query.eq("user_id", actor.user.id);
     } else if (!actor.isInternalOps && !["super_admin", "auditor"].includes(actor.role) && actor.branchIds.length) {
         query = query.in("branch_id", actor.branchIds);
     }
@@ -1921,6 +1968,7 @@ async function createMember(actor, payload) {
     assertTenantAccess({ auth: actor }, tenantId);
     assertBranchAccess({ auth: actor }, payload.branch_id);
     const normalizedPatch = buildMemberWritePatch(payload);
+    const locationPatch = await buildResolvedMemberLocationPatch(payload);
 
     await assertUniqueMemberIdentityFields({
         tenantId,
@@ -1939,6 +1987,8 @@ async function createMember(actor, payload) {
             last_name: normalizedPatch.last_name,
             full_name: normalizedPatch.full_name,
             gender: normalizedPatch.gender || null,
+            marital_status: payload.marital_status || null,
+            occupation: payload.occupation || null,
             dob: normalizedPatch.dob || null,
             phone: normalizedPatch.phone || null,
             email: normalizedPatch.email || null,
@@ -1946,16 +1996,29 @@ async function createMember(actor, payload) {
             national_id: normalizedPatch.national_id || null,
             address_line1: normalizedPatch.address_line1 || null,
             address_line2: payload.address_line2 || null,
-            city: payload.city || null,
-            state: payload.state || null,
+            city: locationPatch.city || payload.city || null,
+            state: locationPatch.state || payload.state || null,
             country: payload.country || null,
             postal_code: payload.postal_code || null,
+            region_id: locationPatch.region_id || payload.region_id || null,
+            district_id: locationPatch.district_id || payload.district_id || null,
+            ward_id: locationPatch.ward_id || payload.ward_id || null,
+            village_id: locationPatch.village_id || payload.village_id || null,
+            region: locationPatch.region || payload.region || null,
+            district: locationPatch.district || payload.district || null,
+            ward: locationPatch.ward || payload.ward || null,
+            street_or_village: locationPatch.street_or_village || payload.street_or_village || null,
+            residential_address: payload.residential_address || null,
             nida_no: normalizedPatch.nida_no || null,
             tin_no: normalizedPatch.tin_no || null,
             next_of_kin_name: payload.next_of_kin_name || null,
             next_of_kin_phone: payload.next_of_kin_phone || null,
             next_of_kin_relationship: payload.next_of_kin_relationship || null,
+            next_of_kin_address: payload.next_of_kin_address || null,
             employer: payload.employer || null,
+            membership_type: payload.membership_type || null,
+            initial_share_amount: payload.initial_share_amount || 0,
+            monthly_savings_commitment: payload.monthly_savings_commitment || 0,
             kyc_status: payload.kyc_status || "pending",
             kyc_reason: payload.kyc_reason || null,
             notes: payload.notes || null,
@@ -2040,7 +2103,7 @@ async function getMember(actor, memberId) {
 
     assertTenantAccess({ auth: actor }, data.tenant_id);
 
-    if (actor.role === "member" && data.user_id !== actor.user.id) {
+    if (actor.role === "member" && data.user_id !== actor.user.id && data.id !== actor.profile?.member_id) {
         throw new AppError(403, "FORBIDDEN", "Members can only access their own record.");
     }
 
@@ -2048,9 +2111,55 @@ async function getMember(actor, memberId) {
     return projectMemberForRead(data, actor);
 }
 
+async function syncLinkedMemberProfile(updated) {
+    if (!updated.user_id) {
+        return;
+    }
+
+    const { error: profileError } = await adminSupabase
+        .from("user_profiles")
+        .update({
+            branch_id: updated.branch_id,
+            full_name: updated.full_name,
+            phone: updated.phone || null,
+            member_id: updated.id
+        })
+        .eq("user_id", updated.user_id);
+
+    if (profileError) {
+        throw new AppError(500, "MEMBER_PROFILE_SYNC_FAILED", "Unable to sync linked member profile.", profileError);
+    }
+
+    const { error: authError } = await adminSupabase.auth.admin.updateUserById(updated.user_id, {
+        email: updated.email || undefined,
+        user_metadata: {
+            full_name: updated.full_name,
+            phone: updated.phone
+        },
+        app_metadata: {
+            tenant_id: updated.tenant_id,
+            role: "member",
+            member_id: updated.id
+        }
+    });
+
+    if (authError) {
+        throw new AppError(500, "MEMBER_AUTH_SYNC_FAILED", "Unable to sync linked member login.", authError);
+    }
+
+    await ensureBranchAssignments({
+        tenantId: updated.tenant_id,
+        userId: updated.user_id,
+        branchIds: [updated.branch_id]
+    });
+
+    invalidateUserContextCache(updated.user_id);
+}
+
 async function updateMember(actor, memberId, payload) {
     const before = await getMember(actor, memberId);
     const normalizedPayload = buildMemberWritePatch(payload, before);
+    const locationPatch = await buildResolvedMemberLocationPatch(payload);
     const rawUpdates = {};
     const rawMutableColumns = [
         "branch_id",
@@ -2060,10 +2169,25 @@ async function updateMember(actor, memberId, payload) {
         "state",
         "country",
         "postal_code",
+        "region_id",
+        "district_id",
+        "ward_id",
+        "village_id",
+        "marital_status",
+        "occupation",
+        "region",
+        "district",
+        "ward",
+        "street_or_village",
+        "residential_address",
         "next_of_kin_name",
         "next_of_kin_phone",
         "next_of_kin_relationship",
+        "next_of_kin_address",
         "employer",
+        "membership_type",
+        "initial_share_amount",
+        "monthly_savings_commitment",
         "kyc_status",
         "kyc_reason",
         "notes",
@@ -2092,7 +2216,8 @@ async function updateMember(actor, memberId, payload) {
         .from("members")
         .update({
             ...rawUpdates,
-            ...normalizedPayload
+            ...normalizedPayload,
+            ...locationPatch
         })
         .eq("id", memberId)
         .select("*")
@@ -2112,50 +2237,89 @@ async function updateMember(actor, memberId, payload) {
         });
     }
 
-    if (updated.user_id) {
-        const { error: profileError } = await adminSupabase
-            .from("user_profiles")
-            .update({
-                branch_id: updated.branch_id,
-                full_name: updated.full_name,
-                phone: updated.phone || null,
-                member_id: updated.id
-            })
-            .eq("user_id", updated.user_id);
-
-        if (profileError) {
-            throw new AppError(500, "MEMBER_PROFILE_SYNC_FAILED", "Unable to sync linked member profile.", profileError);
-        }
-
-        const { error: authError } = await adminSupabase.auth.admin.updateUserById(updated.user_id, {
-            email: updated.email || undefined,
-            user_metadata: {
-                full_name: updated.full_name,
-                phone: updated.phone
-            },
-            app_metadata: {
-                tenant_id: updated.tenant_id,
-                role: "member",
-                member_id: updated.id
-            }
-        });
-
-        if (authError) {
-            throw new AppError(500, "MEMBER_AUTH_SYNC_FAILED", "Unable to sync linked member login.", authError);
-        }
-
-        await ensureBranchAssignments({
-            tenantId: updated.tenant_id,
-            userId: updated.user_id,
-            branchIds: [updated.branch_id]
-        });
-    }
+    await syncLinkedMemberProfile(updated);
 
     await logAudit({
         tenantId: before.tenant_id,
         userId: actor.user.id,
         table: "members",
         action: "update_member",
+        beforeData: projectMemberForRead(before, actor),
+        afterData: projectMemberForRead(updated, actor)
+    });
+
+    return projectMemberForRead(updated, actor);
+}
+
+async function updateOwnProfileCompletion(actor, payload) {
+    const tenantId = actor.tenantId;
+    assertTenantAccess({ auth: actor }, tenantId);
+
+    const ownMember = await resolveOwnMember(actor, tenantId);
+    const before = await getMember(actor, ownMember.id);
+    const normalizedPayload = buildMemberWritePatch(payload, before);
+    const locationPatch = await buildResolvedMemberLocationPatch(payload);
+    const rawUpdates = {};
+    const rawMutableColumns = [
+        "marital_status",
+        "occupation",
+        "address_line2",
+        "city",
+        "state",
+        "country",
+        "postal_code",
+        "region_id",
+        "district_id",
+        "ward_id",
+        "village_id",
+        "region",
+        "district",
+        "ward",
+        "street_or_village",
+        "residential_address",
+        "next_of_kin_name",
+        "next_of_kin_phone",
+        "next_of_kin_relationship",
+        "next_of_kin_address",
+        "employer"
+    ];
+
+    for (const column of rawMutableColumns) {
+        if (Object.prototype.hasOwnProperty.call(payload, column)) {
+            rawUpdates[column] = payload[column];
+        }
+    }
+
+    await assertUniqueMemberIdentityFields({
+        tenantId: before.tenant_id,
+        memberId: ownMember.id,
+        email: Object.prototype.hasOwnProperty.call(normalizedPayload, "email") ? normalizedPayload.email : null,
+        tinNo: Object.prototype.hasOwnProperty.call(normalizedPayload, "tin_no") ? normalizedPayload.tin_no : null,
+        nidaNo: Object.prototype.hasOwnProperty.call(normalizedPayload, "nida_no") ? normalizedPayload.nida_no : null
+    });
+
+    const { data: updated, error } = await adminSupabase
+        .from("members")
+        .update({
+            ...rawUpdates,
+            ...normalizedPayload,
+            ...locationPatch
+        })
+        .eq("id", ownMember.id)
+        .select("*")
+        .single();
+
+    if (error) {
+        throw new AppError(500, "MEMBER_PROFILE_COMPLETION_UPDATE_FAILED", "Unable to update member profile details.", error);
+    }
+
+    await syncLinkedMemberProfile(updated);
+
+    await logAudit({
+        tenantId: before.tenant_id,
+        userId: actor.user.id,
+        table: "members",
+        action: "update_member_profile_completion",
         beforeData: projectMemberForRead(before, actor),
         afterData: projectMemberForRead(updated, actor)
     });
@@ -2460,6 +2624,7 @@ module.exports = {
     createMember,
     getMember,
     updateMember,
+    updateOwnProfileCompletion,
     deleteMember,
     bulkDeleteMembers,
     createMemberLogin,

@@ -33,6 +33,10 @@ exports.reviewApplication = asyncHandler(async (req, res) => {
     res.json({ data: await service.reviewApplication(req.auth, req.params.id, req.validated.body) });
 });
 
+exports.requestMoreInfo = asyncHandler(async (req, res) => {
+    res.json({ data: await service.requestMoreInfo(req.auth, req.params.id, req.validated.body.reason) });
+});
+
 exports.approveApplication = asyncHandler(async (req, res) => {
     res.json({ data: await service.approveApplication(req.auth, req.params.id) });
 });

@@ -22,6 +22,7 @@ const approvalRoutes = require("../modules/approvals/approvals.routes");
 const notificationSettingsRoutes = require("../modules/notification-settings/notification-settings.routes");
 const notificationRoutes = require("../modules/notifications/notifications.routes");
 const memberPaymentRoutes = require("../modules/member-payments/member-payments.routes");
+const locationRoutes = require("../modules/locations/locations.routes");
 const { getSchemaCapabilityStatus } = require("../services/schema-capabilities.service");
 
 const router = express.Router();
@@ -58,6 +59,7 @@ router.use("/approvals", approvalRoutes);
 router.use("/notification-settings", notificationSettingsRoutes);
 router.use("/notifications", notificationRoutes);
 router.use("/member-payments", memberPaymentRoutes);
+router.use("/locations", locationRoutes);
 router.use("/", financeRoutes);
 
 module.exports = router;

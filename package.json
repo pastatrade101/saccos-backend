@@ -10,6 +10,7 @@
     "check": "node --check src/server.js",
     "bootstrap:internal-ops": "node scripts/bootstrap-internal-ops.js",
     "seed:demo": "node scripts/seed-demo-data.js",
+    "seed:locations": "node scripts/seed-locations.js",
     "reset:tenants": "node scripts/reset-tenants.js",
     "reset:members": "node scripts/reset-members.js",
     "cleanup:report-exports": "node scripts/cleanup-report-export-jobs.js",

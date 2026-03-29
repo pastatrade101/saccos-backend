@@ -44,6 +44,11 @@ exports.updateMember = asyncHandler(async (req, res) => {
     res.json({ data: member });
 });
 
+exports.updateOwnProfileCompletion = asyncHandler(async (req, res) => {
+    const member = await memberService.updateOwnProfileCompletion(req.auth, req.validated.body);
+    res.json({ data: member });
+});
+
 exports.deleteMember = asyncHandler(async (req, res) => {
     const member = await memberService.deleteMember(req.auth, req.params.id);
     res.json({ data: member });

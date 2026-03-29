@@ -8,6 +8,7 @@ const controller = require("./members.controller");
 const {
     createMemberSchema,
     updateMemberSchema,
+    updateOwnMemberProfileSchema,
     createMemberLoginSchema,
     provisionMemberAccountSchema,
     resetMemberPasswordSchema,
@@ -45,6 +46,12 @@ router.get(
     ], { allowInternalOps: false }),
     validate(listMemberAccountsQuerySchema, "query"),
     controller.listMemberAccounts
+);
+router.patch(
+    "/me/profile-completion",
+    authorize([ROLES.MEMBER], { allowInternalOps: false }),
+    validate(updateOwnMemberProfileSchema),
+    controller.updateOwnProfileCompletion
 );
 router.post(
     "/",

@@ -1,10 +1,12 @@
 const crypto = require("crypto");
 
 const { adminSupabase } = require("../../config/supabase");
+const env = require("../../config/env");
 const AppError = require("../../utils/app-error");
 const { assertBranchAccess, assertTenantAccess, invalidateUserContextCache } = require("../../services/user-context.service");
 const { logAudit } = require("../../services/audit.service");
 const membersService = require("../members/members.service");
+const { resolveOptionalLocationHierarchy } = require("../locations/locations.service");
 const { getBranchName } = require("../../services/branch-name.service");
 const { notifyDirectPhones } = require("../../services/branch-alerts.service");
 
@@ -28,6 +30,33 @@ function isMissingColumnError(error, columnName) {
     return error?.code === "PGRST204"
         && typeof error?.message === "string"
         && error.message.includes(`'${columnName}'`);
+}
+
+async function buildResolvedApplicationLocationPatch(payload) {
+    const resolvedLocation = await resolveOptionalLocationHierarchy({
+        regionId: payload.region_id,
+        districtId: payload.district_id,
+        wardId: payload.ward_id,
+        villageId: payload.village_id
+    });
+
+    if (!resolvedLocation) {
+        return {};
+    }
+
+    return {
+        region_id: resolvedLocation.region_id,
+        district_id: resolvedLocation.district_id,
+        ward_id: resolvedLocation.ward_id,
+        village_id: resolvedLocation.village_id,
+        region: resolvedLocation.region_name,
+        district: resolvedLocation.district_name,
+        ward: resolvedLocation.ward_name,
+        street_or_village: payload.street_or_village || resolvedLocation.village_name,
+        address_line2: payload.address_line2 || payload.street_or_village || resolvedLocation.village_name,
+        city: payload.city || resolvedLocation.district_name,
+        state: payload.state || resolvedLocation.region_name
+    };
 }
 
 async function sendApprovalSms(application) {
@@ -281,7 +310,7 @@ async function getApplication(actor, applicationId) {
     assertTenantAccess({ auth: actor }, data.tenant_id);
     assertBranchAccess({ auth: actor }, data.branch_id);
 
-    return data;
+    return decorateApplicationDetail(data);
 }
 
 async function getMyApplication(actor) {
@@ -337,10 +366,68 @@ async function getMyApplication(actor) {
         throw new AppError(500, "BRANCH_LOOKUP_FAILED", "Unable to load the branch for your application.", branchError);
     }
 
-    return {
+    return decorateApplicationDetail({
         ...data,
         branch_name: branch?.name || null
+    });
+}
+
+async function listApplicationAttachments(application) {
+    if (!application?.id) {
+        return [];
+    }
+
+    const { data, error } = await adminSupabase
+        .from("member_application_attachments")
+        .select("id, application_id, storage_bucket, storage_path, file_name, mime_type, file_size_bytes, document_type, created_at")
+        .eq("tenant_id", application.tenant_id)
+        .eq("application_id", application.id)
+        .order("created_at", { ascending: true });
+
+    if (error) {
+        throw new AppError(500, "MEMBER_APPLICATION_ATTACHMENTS_FAILED", "Unable to load application attachments.", error);
+    }
+
+    const attachments = data || [];
+
+    return Promise.all(attachments.map(async (attachment) => {
+        let downloadUrl = null;
+
+        try {
+            const { data: signed, error: signedError } = await adminSupabase
+                .storage
+                .from(attachment.storage_bucket || env.memberApplicationsBucket)
+                .createSignedUrl(attachment.storage_path, 60 * 10);
+
+            if (!signedError) {
+                downloadUrl = signed?.signedUrl || null;
+            }
+        } catch {
+            downloadUrl = null;
+        }
+
+        return {
+            ...attachment,
+            download_url: downloadUrl
+        };
+    }));
+}
+
+async function decorateApplicationDetail(application) {
+    return {
+        ...application,
+        attachments: await listApplicationAttachments(application)
     };
+}
+
+function assertReviewableApplication(application, action = "review") {
+    if (!["submitted", "under_review"].includes(application.status)) {
+        throw new AppError(
+            409,
+            "MEMBER_APPLICATION_REVIEW_LOCKED",
+            `This application can no longer be updated for ${action}.`
+        );
+    }
 }
 
 async function listApplications(actor, query = {}) {
@@ -400,6 +487,7 @@ async function createApplication(actor, payload) {
     const tenantId = actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
     assertBranchAccess({ auth: actor }, payload.branch_id);
+    const locationPatch = await buildResolvedApplicationLocationPatch(payload);
 
     const { data, error } = await adminSupabase
         .from("member_applications")
@@ -409,7 +497,8 @@ async function createApplication(actor, payload) {
             branch_id: payload.branch_id,
             status: "draft",
             created_by: actor.user.id,
-            ...payload
+            ...payload,
+            ...locationPatch
         })
         .select("*")
         .single();
@@ -442,10 +531,13 @@ async function updateApplication(actor, applicationId, payload) {
         assertBranchAccess({ auth: actor }, payload.branch_id);
     }
 
+    const locationPatch = await buildResolvedApplicationLocationPatch(payload);
+
     const { data, error } = await adminSupabase
         .from("member_applications")
         .update({
             ...payload,
+            ...locationPatch,
             ...(before.status === "rejected"
                 ? {
                     status: "draft",
@@ -511,17 +603,70 @@ async function updateStatus(actor, applicationId, status, extra = {}) {
 }
 
 async function submitApplication(actor, applicationId) {
-    return updateStatus(actor, applicationId, "submitted");
+    return updateStatus(actor, applicationId, "submitted", {
+        request_more_info_reason: null,
+        requested_more_info_by: null,
+        requested_more_info_at: null
+    });
 }
 
 async function reviewApplication(actor, applicationId, payload) {
+    const application = await getApplication(actor, applicationId);
+    assertReviewableApplication(application);
+
     return updateStatus(actor, applicationId, "under_review", {
         reviewed_by: actor.user.id,
         reviewed_at: new Date().toISOString(),
         kyc_status: payload.kyc_status,
         kyc_reason: payload.kyc_reason,
-        notes: payload.notes
+        notes: payload.notes,
+        request_more_info_reason: null,
+        requested_more_info_by: null,
+        requested_more_info_at: null
     });
+}
+
+async function requestMoreInfo(actor, applicationId, reason) {
+    const before = await getApplication(actor, applicationId);
+    assertReviewableApplication(before, "a clarification request");
+
+    const requestedAt = new Date().toISOString();
+    const { data, error } = await adminSupabase
+        .from("member_applications")
+        .update({
+            status: "under_review",
+            reviewed_by: actor.user.id,
+            reviewed_at: requestedAt,
+            kyc_status: "pending",
+            request_more_info_reason: reason,
+            requested_more_info_by: actor.user.id,
+            requested_more_info_at: requestedAt
+        })
+        .eq("id", applicationId)
+        .select("*")
+        .single();
+
+    if (error) {
+        throw new AppError(
+            500,
+            "MEMBER_APPLICATION_REQUEST_MORE_INFO_FAILED",
+            "Unable to request additional application information.",
+            error
+        );
+    }
+
+    await logAudit({
+        tenantId: before.tenant_id,
+        actorUserId: actor.user.id,
+        table: "member_applications",
+        action: "MEMBER_APPLICATION_REQUEST_MORE_INFO",
+        entityType: "member_application",
+        entityId: applicationId,
+        beforeData: before,
+        afterData: data
+    });
+
+    return data;
 }
 
 async function approveApplication(actor, applicationId) {
@@ -548,23 +693,39 @@ async function approveApplication(actor, applicationId) {
         const created = await membersService.createMember(actor, {
             branch_id: application.branch_id,
             full_name: application.full_name,
+            gender: application.gender,
             dob: application.dob,
             phone: application.phone,
             email: application.email,
             member_no: application.member_no,
             national_id: application.national_id,
+            marital_status: application.marital_status,
+            occupation: application.occupation,
             address_line1: application.address_line1,
             address_line2: application.address_line2,
             city: application.city,
             state: application.state,
             country: application.country,
             postal_code: application.postal_code,
+            region_id: application.region_id,
+            district_id: application.district_id,
+            ward_id: application.ward_id,
+            village_id: application.village_id,
+            region: application.region,
+            district: application.district,
+            ward: application.ward,
+            street_or_village: application.street_or_village,
+            residential_address: application.residential_address,
             nida_no: application.nida_no,
             tin_no: application.tin_no,
             next_of_kin_name: application.next_of_kin_name,
             next_of_kin_phone: application.next_of_kin_phone,
             next_of_kin_relationship: application.next_of_kin_relationship,
+            next_of_kin_address: application.next_of_kin_address,
             employer: application.employer,
+            membership_type: application.membership_type,
+            initial_share_amount: application.initial_share_amount,
+            monthly_savings_commitment: application.monthly_savings_commitment,
             kyc_status: application.kyc_status,
             kyc_reason: application.kyc_reason,
             notes: application.notes,
@@ -638,6 +799,7 @@ module.exports = {
     updateApplication,
     submitApplication,
     reviewApplication,
+    requestMoreInfo,
     approveApplication,
     rejectApplication
 };

@@ -53,6 +53,12 @@ router.post(
     controller.reviewApplication
 );
 router.post(
+    "/:id/request-more-info",
+    authorize([ROLES.BRANCH_MANAGER], { allowInternalOps: false }),
+    validate(schemas.requestMoreInfoSchema),
+    controller.requestMoreInfo
+);
+router.post(
     "/:id/approve",
     authorize([ROLES.SUPER_ADMIN], { allowInternalOps: false }),
     idempotency,
