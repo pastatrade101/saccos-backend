@@ -241,6 +241,20 @@ const listMemberAccountsQuerySchema = z.object({
     tenant_id: z.string().uuid().optional(),
     branch_id: z.string().uuid().optional(),
     member_id: z.string().uuid().optional(),
+    member_ids: z.preprocess((value) => {
+        if (Array.isArray(value)) {
+            return value
+                .flatMap((entry) => String(entry).split(","))
+                .map((entry) => entry.trim())
+                .filter(Boolean);
+        }
+
+        if (typeof value === "string") {
+            return value.split(",").map((entry) => entry.trim()).filter(Boolean);
+        }
+
+        return undefined;
+    }, z.array(z.string().uuid()).max(200).optional()),
     product_type: z.enum(["savings", "shares", "fixed_deposit"]).optional(),
     status: z.enum(["active", "dormant", "closed"]).optional(),
     search: z.string().min(1).max(120).optional(),

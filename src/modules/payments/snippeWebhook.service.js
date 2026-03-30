@@ -421,11 +421,12 @@ async function processPaymentEvent(event, ip, userAgent) {
     return {
         httpStatus: 200,
         data: {
-            success: true,
+            received: true,
+            processed: true,
             event_id: event.eventId,
             event_type: event.eventType,
             order_id: updatedOrder.id,
-            status: updatedOrder.status,
+            order_status: updatedOrder.status,
             provider_ref: updatedOrder.provider_ref || null
         }
     };
@@ -454,7 +455,8 @@ async function dispatchWebhookEvent(event, ip, userAgent) {
             return {
                 httpStatus: 200,
                 data: {
-                    success: true,
+                    received: true,
+                    processed: false,
                     ignored: true,
                     event_id: event.eventId,
                     event_type: event.eventType,
@@ -509,7 +511,8 @@ async function handleWebhook({ body = {}, headers = {}, rawBody = "", ip = null,
         return {
             httpStatus: 200,
             data: {
-                success: true,
+                received: true,
+                processed: false,
                 duplicate: true,
                 event_id: existingEvent.event_id,
                 event_type: existingEvent.event_type,

@@ -709,6 +709,8 @@ async function listMemberAccounts(actor, query = {}) {
 
     if (query.member_id) {
         accountQuery = accountQuery.eq("member_id", query.member_id);
+    } else if (query.member_ids?.length) {
+        accountQuery = accountQuery.in("member_id", query.member_ids);
     }
 
     if (query.status) {
@@ -748,6 +750,8 @@ async function listMemberAccounts(actor, query = {}) {
 
         if (query.member_id) {
             accountQuery = accountQuery.eq("member_id", query.member_id);
+        } else if (query.member_ids?.length) {
+            accountQuery = accountQuery.in("member_id", query.member_ids);
         }
 
         if (query.status) {

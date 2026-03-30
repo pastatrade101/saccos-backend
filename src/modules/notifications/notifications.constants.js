@@ -2,9 +2,45 @@ const { ROLES } = require("../../constants/roles");
 
 const NOTIFICATION_PREFERENCE_CATALOG = [
     {
+        event_type: "member_application_submitted",
+        label: "New membership application",
+        description: "Notify branch managers when a membership application is submitted for branch review.",
+        roles: [ROLES.BRANCH_MANAGER],
+        default_in_app_enabled: true,
+        default_sms_enabled: true,
+        default_toast_enabled: true
+    },
+    {
+        event_type: "member_application_under_review",
+        label: "Membership under review",
+        description: "Notify applicants when the branch team records a membership review update.",
+        roles: [ROLES.MEMBER],
+        default_in_app_enabled: true,
+        default_sms_enabled: true,
+        default_toast_enabled: true
+    },
+    {
+        event_type: "member_application_more_info_requested",
+        label: "More information requested",
+        description: "Notify applicants when the branch asks for clarification or additional membership documents.",
+        roles: [ROLES.MEMBER],
+        default_in_app_enabled: true,
+        default_sms_enabled: true,
+        default_toast_enabled: true
+    },
+    {
         event_type: "member_application_approved",
         label: "Membership approved",
         description: "Notify applicants when membership is approved and membership fee payment is required.",
+        roles: [ROLES.MEMBER],
+        default_in_app_enabled: true,
+        default_sms_enabled: true,
+        default_toast_enabled: true
+    },
+    {
+        event_type: "member_application_rejected",
+        label: "Membership not approved",
+        description: "Notify applicants when a membership application is rejected by the tenant super admin.",
         roles: [ROLES.MEMBER],
         default_in_app_enabled: true,
         default_sms_enabled: true,

@@ -175,6 +175,37 @@ function buildLoanDisbursementOrderView(order) {
     };
 }
 
+function buildLoanDisbursementApprovalRequestView(request) {
+    const payload = request?.payload_json && typeof request.payload_json === "object" ? request.payload_json : {};
+
+    return {
+        id: request.id,
+        tenant_id: request.tenant_id,
+        branch_id: request.branch_id || null,
+        operation_key: request.operation_key,
+        entity_type: request.entity_type || null,
+        entity_id: request.entity_id || null,
+        status: request.status,
+        maker_user_id: request.maker_user_id,
+        requested_amount: Number(request.requested_amount || 0),
+        currency: request.currency,
+        threshold_amount: Number(request.threshold_amount || 0),
+        required_checker_count: Number(request.required_checker_count || 1),
+        approved_count: Number(request.approved_count || 0),
+        rejection_reason: request.rejection_reason || null,
+        requested_at: request.requested_at,
+        expires_at: request.expires_at || null,
+        last_decision_at: request.last_decision_at || null,
+        executed_at: request.executed_at || null,
+        created_at: request.created_at,
+        updated_at: request.updated_at,
+        disbursement_channel: payload.disbursement_channel || null,
+        recipient_msisdn: payload.recipient_msisdn || null,
+        reference: payload.reference || null,
+        description: payload.description || null
+    };
+}
+
 function stripHtml(value) {
     return String(value || "")
         .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, " ")
@@ -1024,6 +1055,71 @@ async function attachLatestMobileDisbursementOrders(rows, tenantId) {
     }));
 }
 
+async function attachLatestDisbursementApprovalRequests(rows, tenantId) {
+    const applicationIds = Array.from(new Set((rows || []).map((row) => row.id).filter(Boolean)));
+    if (!applicationIds.length) {
+        return rows || [];
+    }
+
+    const { data, error } = await adminSupabase
+        .from("approval_requests")
+        .select(`
+            id,
+            tenant_id,
+            branch_id,
+            operation_key,
+            entity_type,
+            entity_id,
+            status,
+            maker_user_id,
+            payload_json,
+            requested_amount,
+            currency,
+            threshold_amount,
+            required_checker_count,
+            approved_count,
+            rejection_reason,
+            requested_at,
+            expires_at,
+            last_decision_at,
+            executed_at,
+            created_at,
+            updated_at
+        `)
+        .eq("tenant_id", tenantId)
+        .eq("operation_key", "finance.loan_disburse")
+        .eq("entity_type", "loan_application")
+        .in("entity_id", applicationIds)
+        .in("status", ["pending", "approved"])
+        .order("created_at", { ascending: false });
+
+    if (error) {
+        throw new AppError(
+            500,
+            "LOAN_DISBURSEMENT_APPROVAL_ENRICH_FAILED",
+            "Unable to load disbursement approval state.",
+            error
+        );
+    }
+
+    const latestByApplication = new Map();
+    for (const row of data || []) {
+        if (!latestByApplication.has(row.entity_id)) {
+            latestByApplication.set(row.entity_id, buildLoanDisbursementApprovalRequestView(row));
+        }
+    }
+
+    return (rows || []).map((row) => ({
+        ...row,
+        latest_disbursement_approval_request: latestByApplication.get(row.id) || null
+    }));
+}
+
+async function attachLatestLoanDisbursementState(rows, tenantId) {
+    const withOrders = await attachLatestMobileDisbursementOrders(rows, tenantId);
+    return attachLatestDisbursementApprovalRequests(withOrders, tenantId);
+}
+
 async function getLoanDisbursementApprovalPayload(tenantId, approvalRequestId, applicationId) {
     if (!approvalRequestId) {
         return {};
@@ -1095,7 +1191,7 @@ async function getExpandedApplication(tenantId, applicationId) {
         throw new AppError(404, "LOAN_APPLICATION_NOT_FOUND", "Loan application was not found.");
     }
 
-    const [expanded] = await attachLatestMobileDisbursementOrders([
+    const [expanded] = await attachLatestLoanDisbursementState([
         attachGuarantorConsentReference(data)
     ], tenantId);
 
@@ -1817,7 +1913,7 @@ async function enrichLoanApplicationListDetails(rows, tenantId) {
         collateral_items: collateralByApplication.get(row.id) || []
     }));
 
-    return attachLatestMobileDisbursementOrders(enrichedRows, tenantId);
+    return attachLatestLoanDisbursementState(enrichedRows, tenantId);
 }
 
 async function listLoanApplications(actor, query) {
@@ -2852,6 +2948,7 @@ async function initiateMobileLoanDisbursement(actor, existing, payload = {}) {
             currency: env.snippeCurrency,
             externalId,
             accountNumber: recipientMsisdn,
+            description,
             customer: {
                 name: existing.members?.full_name || "SACCO Member",
                 email: existing.members?.email || null

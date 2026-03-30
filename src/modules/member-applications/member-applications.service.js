@@ -8,7 +8,7 @@ const { logAudit } = require("../../services/audit.service");
 const membersService = require("../members/members.service");
 const { resolveOptionalLocationHierarchy } = require("../locations/locations.service");
 const { getBranchName } = require("../../services/branch-name.service");
-const { notifyDirectPhones } = require("../../services/branch-alerts.service");
+const { notifyBranchManagersNewMemberApplication, notifyDirectPhones } = require("../../services/branch-alerts.service");
 
 function generateApplicationNumber() {
     return `APP-${new Date().getFullYear()}-${crypto.randomInt(100000, 999999)}`;
@@ -68,26 +68,139 @@ async function sendApprovalSms(application) {
     const applicantName = application.full_name || "Applicant";
     const amountLabel = formatAmountLabel(application.membership_fee_amount);
     const reference = application.application_no || String(application.id || "").slice(0, 8);
-    const message = `Dear ${applicantName}, your membership application${branchName ? ` for ${branchName}` : ""} has been approved. Please pay the membership fee of ${amountLabel} to activate your membership. Ref ${reference}.`;
+    const isPendingPayment = application.status === "approved_pending_payment";
+    const message = isPendingPayment
+        ? `Dear ${applicantName}, your membership application${branchName ? ` for ${branchName}` : ""} has been approved. Please pay the membership fee of ${amountLabel} to activate your membership. Ref ${reference}.`
+        : `Dear ${applicantName}, your membership application${branchName ? ` for ${branchName}` : ""} is fully approved and your membership is now active. Ref ${reference}.`;
+    const eventType = isPendingPayment ? "member_application_approved" : "member_membership_activated";
 
     try {
         await notifyDirectPhones({
             tenantId: application.tenant_id,
             branchId: application.branch_id || null,
             phones: [application.phone],
-            eventType: "member_application_approved",
-            eventKey: `member_application_approved:${application.id}:${application.approved_at || Date.now()}`,
+            eventType,
+            eventKey: `${eventType}:${application.id}:${application.approved_at || Date.now()}`,
             message: message.slice(0, 300),
             metadata: {
                 member_application_id: application.id,
                 application_no: application.application_no || null,
                 branch_id: application.branch_id || null,
                 membership_fee_amount: Number(application.membership_fee_amount || 0),
+                approved_member_id: application.approved_member_id || null,
                 phone: application.phone
             }
         });
     } catch (error) {
         console.warn("[member-applications] approval SMS failed", {
+            applicationId: application.id,
+            error: error?.message || error
+        });
+    }
+}
+
+async function sendBranchReviewSms(application) {
+    if (!application?.phone) {
+        return;
+    }
+
+    const branchName = await getBranchName(application.branch_id);
+    const applicantName = application.full_name || "Applicant";
+    const reference = application.application_no || String(application.id || "").slice(0, 8);
+    const kycStatus = String(application.kyc_status || "pending").replace(/_/g, " ");
+    const message = `Dear ${applicantName}, your membership application ${reference}${branchName ? ` for ${branchName}` : ""} has been reviewed by the branch team. Current KYC status: ${kycStatus}. We will notify you once a final decision is made.`;
+
+    try {
+        await notifyDirectPhones({
+            tenantId: application.tenant_id,
+            branchId: application.branch_id || null,
+            phones: [application.phone],
+            eventType: "member_application_under_review",
+            eventKey: `member_application_under_review:${application.id}:${application.reviewed_at || Date.now()}`,
+            message: message.slice(0, 300),
+            metadata: {
+                member_application_id: application.id,
+                application_no: application.application_no || null,
+                branch_id: application.branch_id || null,
+                reviewed_at: application.reviewed_at || null,
+                kyc_status: application.kyc_status || null,
+                phone: application.phone
+            }
+        });
+    } catch (error) {
+        console.warn("[member-applications] branch review SMS failed", {
+            applicationId: application.id,
+            error: error?.message || error
+        });
+    }
+}
+
+async function sendRequestMoreInfoSms(application) {
+    if (!application?.phone) {
+        return;
+    }
+
+    const branchName = await getBranchName(application.branch_id);
+    const applicantName = application.full_name || "Applicant";
+    const reference = application.application_no || String(application.id || "").slice(0, 8);
+    const reason = String(application.request_more_info_reason || "").trim() || "Please contact the branch for clarification.";
+    const message = `Dear ${applicantName}, more information is required for your membership application ${reference}${branchName ? ` at ${branchName}` : ""}. ${reason}`;
+
+    try {
+        await notifyDirectPhones({
+            tenantId: application.tenant_id,
+            branchId: application.branch_id || null,
+            phones: [application.phone],
+            eventType: "member_application_more_info_requested",
+            eventKey: `member_application_more_info_requested:${application.id}:${application.requested_more_info_at || Date.now()}`,
+            message: message.slice(0, 300),
+            metadata: {
+                member_application_id: application.id,
+                application_no: application.application_no || null,
+                branch_id: application.branch_id || null,
+                request_more_info_reason: application.request_more_info_reason || null,
+                requested_more_info_at: application.requested_more_info_at || null,
+                phone: application.phone
+            }
+        });
+    } catch (error) {
+        console.warn("[member-applications] request more info SMS failed", {
+            applicationId: application.id,
+            error: error?.message || error
+        });
+    }
+}
+
+async function sendRejectionSms(application) {
+    if (!application?.phone) {
+        return;
+    }
+
+    const branchName = await getBranchName(application.branch_id);
+    const applicantName = application.full_name || "Applicant";
+    const reference = application.application_no || String(application.id || "").slice(0, 8);
+    const reason = String(application.rejection_reason || "").trim() || "Please contact the branch for more information.";
+    const message = `Dear ${applicantName}, your membership application ${reference}${branchName ? ` for ${branchName}` : ""} was not approved. Reason: ${reason}`;
+
+    try {
+        await notifyDirectPhones({
+            tenantId: application.tenant_id,
+            branchId: application.branch_id || null,
+            phones: [application.phone],
+            eventType: "member_application_rejected",
+            eventKey: `member_application_rejected:${application.id}:${application.rejected_at || Date.now()}`,
+            message: message.slice(0, 300),
+            metadata: {
+                member_application_id: application.id,
+                application_no: application.application_no || null,
+                branch_id: application.branch_id || null,
+                rejection_reason: application.rejection_reason || null,
+                rejected_at: application.rejected_at || null,
+                phone: application.phone
+            }
+        });
+    } catch (error) {
+        console.warn("[member-applications] rejection SMS failed", {
             applicationId: application.id,
             error: error?.message || error
         });
@@ -603,18 +716,33 @@ async function updateStatus(actor, applicationId, status, extra = {}) {
 }
 
 async function submitApplication(actor, applicationId) {
-    return updateStatus(actor, applicationId, "submitted", {
+    const submitted = await updateStatus(actor, applicationId, "submitted", {
         request_more_info_reason: null,
         requested_more_info_by: null,
         requested_more_info_at: null
     });
+
+    await notifyBranchManagersNewMemberApplication({
+        actor,
+        application: {
+            ...submitted,
+            branch_name: await getBranchName(submitted.branch_id)
+        }
+    }).catch((notifyError) => {
+        console.warn("[member-applications] branch manager application notification failed", {
+            applicationId: submitted.id,
+            error: notifyError?.message || notifyError
+        });
+    });
+
+    return submitted;
 }
 
 async function reviewApplication(actor, applicationId, payload) {
     const application = await getApplication(actor, applicationId);
     assertReviewableApplication(application);
 
-    return updateStatus(actor, applicationId, "under_review", {
+    const reviewedApplication = await updateStatus(actor, applicationId, "under_review", {
         reviewed_by: actor.user.id,
         reviewed_at: new Date().toISOString(),
         kyc_status: payload.kyc_status,
@@ -624,6 +752,10 @@ async function reviewApplication(actor, applicationId, payload) {
         requested_more_info_by: null,
         requested_more_info_at: null
     });
+
+    void sendBranchReviewSms(reviewedApplication);
+
+    return reviewedApplication;
 }
 
 async function requestMoreInfo(actor, applicationId, reason) {
@@ -665,6 +797,8 @@ async function requestMoreInfo(actor, applicationId, reason) {
         beforeData: before,
         afterData: data
     });
+
+    void sendRequestMoreInfoSms(data);
 
     return data;
 }
@@ -758,9 +892,7 @@ async function approveApplication(actor, applicationId) {
         approved_member_id: approvedMember.id
     });
 
-    if (!hasPaidMembershipFee) {
-        void sendApprovalSms(approvedApplication);
-    }
+    void sendApprovalSms(approvedApplication);
 
     const { error: memberLinkError } = await adminSupabase
         .from("members")
@@ -784,11 +916,15 @@ async function rejectApplication(actor, applicationId, reason) {
         throw new AppError(403, "FORBIDDEN", "Only a tenant super admin can reject member applications.");
     }
 
-    return updateStatus(actor, applicationId, "rejected", {
+    const rejectedApplication = await updateStatus(actor, applicationId, "rejected", {
         rejected_by: actor.user.id,
         rejected_at: new Date().toISOString(),
         rejection_reason: reason
     });
+
+    void sendRejectionSms(rejectedApplication);
+
+    return rejectedApplication;
 }
 
 module.exports = {

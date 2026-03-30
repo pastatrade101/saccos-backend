@@ -250,6 +250,7 @@ async function createPayoutIntent({
     currency,
     externalId,
     accountNumber,
+    description,
     customer = {},
     metadata = {},
     idempotencyKey
@@ -258,12 +259,15 @@ async function createPayoutIntent({
 
     const url = `${env.snippeBaseUrl.replace(/\/$/, "")}/v1/payouts/send`;
     const recipientName = String(customer.name || "").trim() || "SACCO Member";
+    const payoutDescription = String(description || "").trim() || `Loan disbursement ${String(externalId || "").trim()}`;
     const payload = {
         channel: "mobile",
         recipient_phone: normalizePhoneForSnippe(accountNumber),
         recipient_name: recipientName,
         amount: Math.round(Number(amount)),
         currency: String(currency || env.snippeCurrency),
+        narration: payoutDescription,
+        description: payoutDescription,
         webhook_url: resolveSnippeWebhookUrl(),
         metadata: {
             ...metadata,

@@ -8,6 +8,7 @@ const { normalizePhone } = require("../../services/otp.service");
 const { assertRateLimit } = require("../../services/rate-limit.service");
 const { ROLES } = require("../../constants/roles");
 const { resolveOptionalLocationHierarchy } = require("../locations/locations.service");
+const { notifyBranchManagersNewMemberApplication } = require("../../services/branch-alerts.service");
 
 const DEFAULT_MIN_INITIAL_SHARE_AMOUNT_TZS = 50000;
 const DEFAULT_MIN_MONTHLY_SAVINGS_TZS = 10000;
@@ -708,6 +709,22 @@ async function createPublicSignup(payload, ipAddress, filesMap = {}) {
             entityType: "member_application",
             entityId: application.id,
             afterData: application
+        });
+
+        await notifyBranchManagersNewMemberApplication({
+            actor: {
+                tenantId,
+                user: { id: authUser.id }
+            },
+            application: {
+                ...application,
+                branch_name: branch.name || null
+            }
+        }).catch((notifyError) => {
+            console.warn("[public-signups] branch manager application notification failed", {
+                applicationId: application.id,
+                error: notifyError?.message || notifyError
+            });
         });
 
         return {

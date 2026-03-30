@@ -803,6 +803,29 @@ async function notifyLoanOfficersNewApplication({ actor, application }) {
     });
 }
 
+async function notifyBranchManagersNewMemberApplication({ actor, application }) {
+    const applicantName = String(application?.full_name || "Applicant").trim();
+    const reference = application?.application_no || shortId(application?.id);
+    const branchLabel = application?.branch_id ? ` in ${application.branch_name || "the branch"}` : "";
+    const message = `New member application ${reference} from ${applicantName}${branchLabel}. Review required.`;
+
+    return notifyBranchManagers({
+        tenantId: application?.tenant_id || actor?.tenantId,
+        branchId: application?.branch_id || null,
+        eventType: "member_application_submitted",
+        eventKey: `member_application_submitted:${application?.id}:${application?.updated_at || application?.created_at || Date.now()}`,
+        message,
+        metadata: {
+            member_application_id: application?.id,
+            application_no: application?.application_no || null,
+            branch_id: application?.branch_id || null,
+            applicant_name: applicantName,
+            applicant_phone: application?.phone || null,
+            status: application?.status || null
+        }
+    });
+}
+
 async function notifyLoanOfficersReappraisalNeeded({ actor, application, reason = "" }) {
     const message = `Loan app ${shortId(application?.id)} rejected. Reason: ${reason || "see review notes"}.`;
 
@@ -1305,6 +1328,7 @@ module.exports = {
     notifyDefaultCaseOpened,
     notifyDefaultCaseClaimReady,
     notifyGuarantorClaimSubmitted,
+    notifyBranchManagersNewMemberApplication,
     notifyLoanOfficersNewApplication,
     notifyLoanOfficersReappraisalNeeded,
     notifyLoanOfficersApprovedForDisbursement,

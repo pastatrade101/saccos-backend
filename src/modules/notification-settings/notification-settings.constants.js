@@ -1,5 +1,10 @@
 const SMS_TRIGGER_CATALOG = [
     {
+        event_type: "member_application_submitted",
+        label: "Member app submitted",
+        description: "Notify branch managers when a new membership application is submitted for review."
+    },
+    {
         event_type: "loan_application_submitted",
         label: "Loan app submitted",
         description: "Notify loan officers when a new loan application enters the appraisal queue."
@@ -20,9 +25,24 @@ const SMS_TRIGGER_CATALOG = [
         description: "Notify member when their loan application is approved and moved to disbursement readiness."
     },
     {
+        event_type: "member_application_under_review",
+        label: "Member app under review",
+        description: "Notify applicant when the branch team records a membership review update."
+    },
+    {
+        event_type: "member_application_more_info_requested",
+        label: "Member app more info requested",
+        description: "Notify applicant when the branch requests more information for a membership application."
+    },
+    {
         event_type: "member_application_approved",
         label: "Member application approved",
         description: "Notify applicant when membership is approved and membership fee payment is now required."
+    },
+    {
+        event_type: "member_application_rejected",
+        label: "Member application rejected",
+        description: "Notify applicant when their membership application is rejected."
     },
     {
         event_type: "member_loan_application_rejected",

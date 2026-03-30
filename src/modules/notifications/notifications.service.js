@@ -176,6 +176,30 @@ const EVENT_CATALOG = {
         entityType: "member_application",
         entityIdKey: "member_application_id"
     },
+    member_application_under_review: {
+        title: "Membership under review",
+        severity: "info",
+        actionLabel: "Open portal",
+        actionRoute: "/portal",
+        entityType: "member_application",
+        entityIdKey: "member_application_id"
+    },
+    member_application_more_info_requested: {
+        title: "More information required",
+        severity: "warning",
+        actionLabel: "Open portal",
+        actionRoute: "/portal",
+        entityType: "member_application",
+        entityIdKey: "member_application_id"
+    },
+    member_application_rejected: {
+        title: "Membership not approved",
+        severity: "warning",
+        actionLabel: "Open portal",
+        actionRoute: "/portal",
+        entityType: "member_application",
+        entityIdKey: "member_application_id"
+    },
     member_membership_activated: {
         title: "Membership active",
         severity: "success",
