@@ -94,6 +94,7 @@ Defined in `src/constants/roles.js`, the normal runtime relies on workspace role
 - role/tenant scoped queries and strict validation
 - audit logs for sensitive operations
 - closed-period mutation guardrail for journal entries (Phase 3)
+- system readiness review (rules + ledger): `docs/system-robustness-assessment.md` (updated April 25, 2026)
 
 ## 5) API module map
 

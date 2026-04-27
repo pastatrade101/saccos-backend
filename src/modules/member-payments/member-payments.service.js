@@ -21,6 +21,7 @@ const {
 } = require("../../services/snippe.service");
 const { createInAppNotifications } = require("../notifications/notifications.service");
 const membersService = require("../members/members.service");
+const { getMemberPortalPaymentControlsForTenant } = require("../member-portal-settings/member-portal-settings.service");
 const {
     postGatewayShareContribution,
     postGatewaySavingsDeposit,
@@ -238,6 +239,22 @@ function isMissingColumnError(error, columnName) {
     return error?.code === "PGRST204"
         && typeof error?.message === "string"
         && error.message.includes(`'${columnName}'`);
+}
+
+async function assertMemberPortalPaymentEnabled(tenantId, purpose) {
+    const controls = await getMemberPortalPaymentControlsForTenant(tenantId);
+
+    if (purpose === "share_contribution" && !controls.share_contribution_enabled) {
+        throw new AppError(403, "MEMBER_PORTAL_PAYMENT_DISABLED", "Tenant super admin has turned off self-service share contribution payments for members.");
+    }
+
+    if (purpose === "savings_deposit" && !controls.savings_deposit_enabled) {
+        throw new AppError(403, "MEMBER_PORTAL_PAYMENT_DISABLED", "Tenant super admin has turned off self-service savings deposits for members.");
+    }
+
+    if (purpose === "loan_repayment" && !controls.loan_repayment_enabled) {
+        throw new AppError(403, "MEMBER_PORTAL_PAYMENT_DISABLED", "Tenant super admin has turned off self-service loan repayments for members.");
+    }
 }
 
 async function resolveActorMember(actor, tenantId) {
@@ -1160,6 +1177,7 @@ async function initiatePortalPayment(actor, payload, options) {
     }
 
     assertTenantAccess({ auth: actor }, tenantId);
+    await assertMemberPortalPaymentEnabled(tenantId, options.purpose);
 
     const normalizedPhone = normalizePhone(payload.msisdn);
     const { account, member } = await resolvePortalPaymentAccount(
@@ -1363,6 +1381,7 @@ async function initiateLoanRepaymentPayment(actor, payload) {
     }
 
     assertTenantAccess({ auth: actor }, tenantId);
+    await assertMemberPortalPaymentEnabled(tenantId, "loan_repayment");
 
     const normalizedPhone = normalizePhone(payload.msisdn);
     const { member, loan, outstandingBalance } = await resolvePortalRepaymentLoan(actor, tenantId, payload.loan_id);

@@ -115,6 +115,12 @@ const envSchema = z.object({
     CREDIT_RISK_DEFAULT_DETECTION_INTERVAL_MS: z.coerce.number().int().positive().default(900000),
     CREDIT_RISK_DEFAULT_DETECTION_MAX_TENANTS_PER_RUN: z.coerce.number().int().positive().default(200),
     CREDIT_RISK_DEFAULT_DETECTION_MAX_LOANS_PER_TENANT: z.coerce.number().int().positive().default(500),
+    INTEREST_ACCRUAL_SCHEDULER_ENABLED: z
+        .string()
+        .optional()
+        .transform((value) => parseBooleanEnv(value, false)),
+    INTEREST_ACCRUAL_INTERVAL_MS: z.coerce.number().int().positive().default(86400000),
+    INTEREST_ACCRUAL_MAX_TENANTS_PER_RUN: z.coerce.number().int().positive().default(200),
     REPAYMENT_REMINDER_SCHEDULER_ENABLED: z
         .string()
         .optional()
@@ -246,6 +252,9 @@ module.exports = {
     creditRiskDefaultDetectionIntervalMs: env.CREDIT_RISK_DEFAULT_DETECTION_INTERVAL_MS,
     creditRiskDefaultDetectionMaxTenantsPerRun: env.CREDIT_RISK_DEFAULT_DETECTION_MAX_TENANTS_PER_RUN,
     creditRiskDefaultDetectionMaxLoansPerTenant: env.CREDIT_RISK_DEFAULT_DETECTION_MAX_LOANS_PER_TENANT,
+    interestAccrualSchedulerEnabled: env.INTEREST_ACCRUAL_SCHEDULER_ENABLED,
+    interestAccrualIntervalMs: env.INTEREST_ACCRUAL_INTERVAL_MS,
+    interestAccrualMaxTenantsPerRun: env.INTEREST_ACCRUAL_MAX_TENANTS_PER_RUN,
     repaymentReminderSchedulerEnabled: env.REPAYMENT_REMINDER_SCHEDULER_ENABLED,
     repaymentReminderIntervalMs: env.REPAYMENT_REMINDER_INTERVAL_MS,
     repaymentReminderMaxTenantsPerRun: env.REPAYMENT_REMINDER_MAX_TENANTS_PER_RUN,

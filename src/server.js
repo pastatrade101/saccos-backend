@@ -5,6 +5,7 @@ const http = require("http");
 const app = require("./app");
 const env = require("./config/env");
 const { startDefaultDetectionScheduler } = require("./modules/credit-risk/default-detection.scheduler");
+const { startInterestAccrualScheduler } = require("./modules/finance/interest-accrual.scheduler");
 const { startRepaymentReminderScheduler } = require("./modules/notifications/repayment-reminders.scheduler");
 const { startApiMetricsCollector } = require("./services/api-metrics-collector.service");
 const { assertRequiredSchemaCapabilities } = require("./services/schema-capabilities.service");
@@ -24,12 +25,14 @@ server.on("error", (error) => {
 });
 
 let stopDefaultDetectionScheduler = () => {};
+let stopInterestAccrualScheduler = () => {};
 let stopRepaymentReminderScheduler = () => {};
 let stopApiMetricsCollector = async () => {};
 
 function shutdown(signal) {
     console.log(`Received ${signal}, shutting down gracefully.`);
     stopDefaultDetectionScheduler();
+    stopInterestAccrualScheduler();
     stopRepaymentReminderScheduler();
     Promise.resolve(stopApiMetricsCollector())
         .catch((error) => {
@@ -69,6 +72,7 @@ async function startServer() {
     });
 
     stopDefaultDetectionScheduler = startDefaultDetectionScheduler();
+    stopInterestAccrualScheduler = startInterestAccrualScheduler();
     stopRepaymentReminderScheduler = startRepaymentReminderScheduler();
     stopApiMetricsCollector = startApiMetricsCollector();
 }

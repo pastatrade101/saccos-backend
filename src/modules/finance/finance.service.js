@@ -1,7 +1,9 @@
+const env = require("../../config/env");
 const { adminSupabase } = require("../../config/supabase");
 const AppError = require("../../utils/app-error");
 const { assertBranchAccess, assertTenantAccess } = require("../../services/user-context.service");
 const { logAudit } = require("../../services/audit.service");
+const { runObservedJob } = require("../../services/observability.service");
 const { assertPostingRuleConfigured } = require("../../services/posting-rule.service");
 const {
     ensureOpenTellerSession,
@@ -159,6 +161,48 @@ async function runFinancialFunction(functionName, params) {
     }
 
     return data;
+}
+
+async function executeInterestAccrual({ tenantId, asOfDate, actorUserId, auditAction, auditSource }) {
+    const resolvedDate = asOfDate || new Date().toISOString().slice(0, 10);
+    const result = await runFinancialFunction("interest_accrual", {
+        p_tenant_id: tenantId,
+        p_as_of_date: resolvedDate,
+        p_user_id: actorUserId
+    });
+
+    await logAudit({
+        tenantId,
+        actorUserId,
+        table: "journal_entries",
+        entityType: "interest_accrual",
+        action: auditAction,
+        afterData: {
+            as_of_date: resolvedDate,
+            source: auditSource || "manual",
+            processed_loans: Number(result?.processed_loans || 0)
+        }
+    });
+
+    return result;
+}
+
+async function resolveInterestAccrualActorUserId(tenantId) {
+    const { data, error } = await adminSupabase
+        .from("user_profiles")
+        .select("user_id, full_name")
+        .eq("tenant_id", tenantId)
+        .eq("role", "super_admin")
+        .eq("is_active", true)
+        .is("deleted_at", null)
+        .order("created_at", { ascending: true })
+        .limit(1);
+
+    if (error) {
+        throw new AppError(500, "INTEREST_ACCRUAL_ACTOR_LOOKUP_FAILED", "Unable to resolve scheduler actor for interest accrual.", error);
+    }
+
+    return data?.[0] || null;
 }
 
 async function deposit(actor, payload) {
@@ -890,25 +934,96 @@ async function loanRepay(actor, payload) {
 async function accrueInterest(actor, payload) {
     const tenantId = payload.tenant_id || actor.tenantId;
     assertTenantAccess({ auth: actor }, tenantId);
-
-    const result = await runFinancialFunction("interest_accrual", {
-        p_tenant_id: tenantId,
-        p_as_of_date: payload.as_of_date || new Date().toISOString().slice(0, 10),
-        p_user_id: payload.user_id || actor.user.id
-    });
-
-    await logAudit({
+    return executeInterestAccrual({
         tenantId,
-        actorUserId: actor.user.id,
-        table: "journal_entries",
-        entityType: "interest_accrual",
-        action: "INTEREST_ACCRUAL_POSTED",
-        afterData: {
-            as_of_date: payload.as_of_date || new Date().toISOString().slice(0, 10)
-        }
+        asOfDate: payload.as_of_date,
+        actorUserId: payload.user_id || actor.user.id,
+        auditAction: "INTEREST_ACCRUAL_POSTED",
+        auditSource: "manual"
+    });
+}
+
+async function runInterestAccrualForTenant({ tenantId, asOfDate = null, source = "scheduler" }) {
+    const actor = await resolveInterestAccrualActorUserId(tenantId);
+
+    if (!actor?.user_id) {
+        return {
+            tenant_id: tenantId,
+            success: false,
+            skipped: true,
+            code: "INTEREST_ACCRUAL_ACTOR_NOT_FOUND",
+            message: "No active super admin is available to post scheduled interest accrual.",
+            processed_loans: 0
+        };
+    }
+
+    const result = await executeInterestAccrual({
+        tenantId,
+        asOfDate,
+        actorUserId: actor.user_id,
+        auditAction: "INTEREST_ACCRUAL_SCHEDULED_POSTED",
+        auditSource: source
     });
 
-    return result;
+    return {
+        tenant_id: tenantId,
+        actor_user_id: actor.user_id,
+        actor_name: actor.full_name || null,
+        success: Boolean(result?.success !== false),
+        skipped: false,
+        processed_loans: Number(result?.processed_loans || 0),
+        message: result?.message || "Interest accrual completed."
+    };
+}
+
+async function runScheduledInterestAccrual() {
+    const { data: tenants, error } = await adminSupabase
+        .from("tenants")
+        .select("id")
+        .eq("status", "active")
+        .is("deleted_at", null)
+        .limit(env.interestAccrualMaxTenantsPerRun);
+
+    if (error) {
+        throw new AppError(500, "TENANTS_LOOKUP_FAILED", "Unable to load tenants for scheduled interest accrual.", error);
+    }
+
+    const summaries = [];
+    for (const tenant of tenants || []) {
+        try {
+            const summary = await runObservedJob(
+                "finance.interest_accrual",
+                { tenantId: tenant.id },
+                () => runInterestAccrualForTenant({
+                    tenantId: tenant.id,
+                    asOfDate: new Date().toISOString().slice(0, 10),
+                    source: "scheduler"
+                })
+            );
+            summaries.push(summary);
+        } catch (tenantError) {
+            console.error("[interest-accrual] tenant cycle failed", {
+                tenant_id: tenant.id,
+                code: tenantError?.code,
+                message: tenantError?.message
+            });
+            summaries.push({
+                tenant_id: tenant.id,
+                success: false,
+                skipped: false,
+                code: tenantError?.code || "INTEREST_ACCRUAL_SCHEDULER_FAILED",
+                message: tenantError?.message || "Scheduled interest accrual failed.",
+                processed_loans: 0
+            });
+        }
+    }
+
+    return {
+        tenants_scanned: summaries.length,
+        tenants_failed: summaries.filter((summary) => summary.success === false && !summary.skipped).length,
+        tenants_skipped: summaries.filter((summary) => summary.skipped).length,
+        summaries
+    };
 }
 
 async function closePeriod(actor, payload) {
@@ -1310,6 +1425,8 @@ module.exports = {
     loanDisburse,
     loanRepay,
     accrueInterest,
+    runInterestAccrualForTenant,
+    runScheduledInterestAccrual,
     closePeriod,
     getStatements,
     getLedger,
